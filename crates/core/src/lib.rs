@@ -127,6 +127,7 @@ pub use crate::authz::{
     single_raw_value,
 };
 pub use crate::cancellation::{HandlerCancellation, HandlerCancellationSource, HandlerContext};
+pub use crate::codec::view::LifecycleRequestDates;
 pub use crate::codec::{
     BodyAllowance, CodecError, DocumentReading, EncodedResponse, MetaView, OWNED_RESPONSE_HEADERS, OperationCodec,
     PageSizeCeiling, RequestBody, RequestBodyMode, ResponseBody, ResponseOverride, body_allowance, override_header_value,

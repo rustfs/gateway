@@ -60,6 +60,7 @@
 
 use core::fmt;
 use std::any::Any;
+use std::sync::Arc;
 
 use http::{HeaderMap, Method, Version};
 use rustfs_gateway_http::{HeaderView, TransportExtensions, WireRequest};
@@ -70,6 +71,7 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
 use crate::authz::{Subject, Subjects};
+use crate::codec::view::LifecycleRequestDates;
 use crate::route::PathParams;
 
 /// How the request named its bucket, as the facade's host resolver decided it.
@@ -325,6 +327,7 @@ pub struct RequestContextView {
     header_token: Option<Identity>,
     path_params: PathParams,
     subjects: Option<Subjects>,
+    lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
 }
 
 impl RequestContextView {
@@ -359,6 +362,7 @@ impl RequestContextView {
             header_token: self.header_token.clone(),
             path_params: self.path_params.clone(),
             subjects: self.subjects.clone(),
+            lifecycle_request_dates: self.lifecycle_request_dates.clone(),
         }
     }
 
@@ -419,6 +423,7 @@ impl RequestContextView {
             header_token,
             path_params: PathParams::none(),
             subjects: None,
+            lifecycle_request_dates: None,
         })
     }
 
@@ -485,7 +490,21 @@ impl RequestContextView {
             header_token: None,
             path_params: PathParams::none(),
             subjects: None,
+            lifecycle_request_dates: None,
         }
+    }
+
+    /// The source dates preserved from this RustFS-profile lifecycle request, if captured.
+    ///
+    /// The shared reference may be cloned to retain the facts when taking ownership of the DTO.
+    #[must_use]
+    pub const fn lifecycle_request_dates(&self) -> Option<&Arc<LifecycleRequestDates>> {
+        self.lifecycle_request_dates.as_ref()
+    }
+
+    pub(crate) fn with_lifecycle_request_dates(mut self, dates: Option<Arc<LifecycleRequestDates>>) -> Self {
+        self.lifecycle_request_dates = dates;
+        self
     }
 
     /// The routed operation's name.

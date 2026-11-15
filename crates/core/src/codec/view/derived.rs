@@ -65,6 +65,10 @@ impl MetaView<'_> {
     /// (rustfs/gateway#750). Every other header reads exactly as before.
     #[must_use]
     pub fn with_framed_content_length(&self, length: u64) -> Self {
+        self.derive_with_framed_length(Some(length))
+    }
+
+    pub(super) fn derive_with_framed_length(&self, framed_content_length: Option<u64>) -> Self {
         Self {
             method: self.method,
             headers: self.headers,
@@ -73,7 +77,7 @@ impl MetaView<'_> {
             key: self.key.clone(),
             names: self.names.clone(),
             copy_source_arns_unsupported: self.copy_source_arns_unsupported,
-            framed_content_length: Some(length),
+            framed_content_length,
             integrity_optional: self.integrity_optional,
             checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,
             checksum_reading: self.checksum_reading,
@@ -84,6 +88,7 @@ impl MetaView<'_> {
             body_literals: self.body_literals,
             empty_headers_absent: self.empty_headers_absent,
             document_reading: self.document_reading,
+            lifecycle_date_capture: None,
             rustfs_response_layout: self.rustfs_response_layout,
             document_body_ceiling: self.document_body_ceiling,
             authenticated_aws_location: self.authenticated_aws_location,

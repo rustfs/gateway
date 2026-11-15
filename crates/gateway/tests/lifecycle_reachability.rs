@@ -198,3 +198,104 @@ fn n_one_rule_past_the_cap_reaches_the_handler_and_is_refused() {
     let result = validate_lifecycle(&configuration);
     assert!(result.is_err(), "one rule past the documented cap of MAX_LIFECYCLE_RULES is refused");
 }
+
+const DATED_TARGET: &str = "/conf-lifecycle?lifecycle";
+const DATED_CONFIGURATION: &str = "<LifecycleConfiguration>\
+    <Rule><ID>days</ID><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule>\
+    <Rule><ID>date</ID><Status>Enabled</Status>\
+    <Expiration><Date>2026-08-09T00:00:00+08:00</Date></Expiration>\
+    <Transition><Days>1</Days><StorageClass>STANDARD_IA</StorageClass></Transition>\
+    <Transition><Date>2026-08-11T00:00:00.123456789-04:00</Date><StorageClass>GLACIER</StorageClass></Transition></Rule>\
+    <ExpiryUpdatedAt>2026-08-09T00:01:00-02:00</ExpiryUpdatedAt></LifecycleConfiguration>";
+
+struct LifecycleDateHandler;
+
+impl rustfs_gateway::Handler<dto::PutBucketLifecycleConfiguration> for LifecycleDateHandler {
+    async fn call(
+        &self,
+        request: rustfs_gateway::Req<dto::PutBucketLifecycleConfiguration>,
+    ) -> rustfs_gateway::HandlerResult<dto::PutBucketLifecycleConfiguration> {
+        let context = request.context().clone_without_caller_secret();
+        let dates = context.lifecycle_request_dates().expect("lifecycle dates");
+        assert_eq!(dates.expiry_updated_at(), Some("2026-08-09T00:01:00.000000000-02:00"));
+        assert_eq!(dates.expiration(0), None);
+        assert_eq!(dates.expiration(1), Some("2026-08-09T00:00:00.000000000+08:00"));
+        assert_eq!(dates.transition(1, 0), None);
+        assert_eq!(dates.transition(1, 1), Some("2026-08-11T00:00:00.123456789-04:00"));
+        let configuration = request.input().lifecycle_configuration.as_ref().expect("configuration");
+        let date = configuration.rules[1]
+            .expiration
+            .as_ref()
+            .expect("expiration")
+            .date
+            .expect("date");
+        let utc = rustfs_gateway_types::Timestamp::parse("2026-08-08T16:00:00Z", rustfs_gateway_types::TimestampFormat::Iso8601)
+            .expect("a valid timestamp");
+        assert_eq!(date, utc);
+        Ok(rustfs_gateway::Resp::new(dto::PutBucketLifecycleConfigurationOutput::default()))
+    }
+}
+
+#[tokio::test]
+async fn lifecycle_dates_reach_the_dynamic_and_static_handlers() {
+    use std::sync::Arc;
+
+    use rustfs_gateway::{OperationSetEnd, OperationSetNode, collect};
+
+    use crate::support;
+    use crate::tagging_reachability::content_md5;
+
+    let request = || {
+        support::signed_target_with_body_and_headers(
+            http::Method::PUT,
+            DATED_TARGET,
+            &[("content-md5", &content_md5(DATED_CONFIGURATION.as_bytes()))],
+            Bytes::from_static(DATED_CONFIGURATION.as_bytes()),
+        )
+    };
+    let document = DATED_CONFIGURATION.as_bytes();
+    let framed_body = Bytes::from(format!(
+        "{:x}\r\n{DATED_CONFIGURATION}\r\n0\r\nx-amz-checksum-crc32:US6Luw==\r\n\r\n",
+        document.len()
+    ));
+    let framed = || {
+        use rustfs_gateway::sig::{PayloadMode, TrailerSet};
+        use rustfs_gateway_sig::{DeclaredTrailers, TrailerName};
+
+        let trailers = TrailerSet::Declared(
+            DeclaredTrailers::new([TrailerName::new("x-amz-checksum-crc32").expect("trailer name")], false)
+                .expect("trailer declaration"),
+        );
+        crate::bodyless_bodies::streaming_head(
+            http::Method::PUT,
+            DATED_TARGET,
+            &[("content-encoding", "aws-chunked"), ("x-amz-trailer", "x-amz-checksum-crc32")],
+            PayloadMode::parse("STREAMING-UNSIGNED-PAYLOAD-TRAILER", trailers).expect("streaming payload mode"),
+            Some(framed_body.len() as u64),
+            Some(document.len() as u64),
+        )
+        .body(framed_body.clone())
+        .expect("framed request")
+    };
+    let builder = || {
+        support::wired_at_signed_time()
+            .read_request_documents_as_rustfs()
+            .register::<dto::PutBucketLifecycleConfiguration, _>(Arc::new(LifecycleDateHandler))
+    };
+    let dynamic = builder().build().expect("a complete dynamic assembly");
+    for request in [request(), framed()] {
+        let (status, body) = support::exchange(&dynamic, request).await;
+        assert_eq!(status, http::StatusCode::OK, "{body}");
+    }
+
+    type Operations = OperationSetNode<dto::PutBucketLifecycleConfiguration, OperationSetEnd>;
+    let monomorphic = builder()
+        .build_monomorphic::<_, Operations>(Arc::new(LifecycleDateHandler))
+        .expect("a complete static assembly");
+    for request in [request(), framed()] {
+        let response = collect(monomorphic.call_bytes(request).await)
+            .await
+            .expect("an in-memory body");
+        assert_eq!(response.status(), http::StatusCode::OK, "{:?}", response.body());
+    }
+}

@@ -354,12 +354,25 @@ fn poll_committed_work<T>(
 }
 
 pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) -> Result<Decoded<O>, CodecError> {
-    let input = O::decode(meta, body)?;
+    let (input, dates) = if O::NAME == rustfs_gateway_types::dto::PutBucketLifecycleConfiguration::NAME
+        && meta.document_reading() == crate::codec::DocumentReading::RustFs
+    {
+        // Only this synchronous codec invocation can see the capture capability. The shared view
+        // remains suitable for direct DTO decoding, including while this invocation is running.
+        let scoped = meta.with_lifecycle_date_capture();
+        let input = O::decode(&scoped, body)?;
+        (input, scoped.into_lifecycle_request_dates()?)
+    } else {
+        (O::decode(meta, body)?, None)
+    };
     if meta.copy_source_arns_unsupported() {
         let kind = O::classify_copy_source(&input).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
         refuse_unsupported_copy_arn(kind)?;
     }
-    prepare_input_under::<O>(input, meta.names()).map_err(|error| CodecError::new(error.code().clone(), error.message()))
+    let mut decoded =
+        prepare_input_under::<O>(input, meta.names()).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
+    decoded.set_lifecycle_request_dates(dates);
+    Ok(decoded)
 }
 
 fn refuse_unsupported_copy_arn(kind: Option<crate::CopySourceKind>) -> Result<(), CodecError> {

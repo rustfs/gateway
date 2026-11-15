@@ -219,8 +219,8 @@ pub use rustfs_gateway_types::persistence;
 // one, and cannot match on what `into_parts` gives back. An exported constructor whose argument
 // type is unnameable is the same defect as an unexported contract, one step further along.
 pub use rustfs_gateway_core::{
-    ActionRule, Addressed, AddressingStyle, AuthenticatedScheme, CallerSecretKey, PathParamError, PathParams, RequestContextView,
-    RequestPrincipal, Subject, SubjectName, SubjectRule, WhenAbsent,
+    ActionRule, Addressed, AddressingStyle, AuthenticatedScheme, CallerSecretKey, LifecycleRequestDates, PathParamError,
+    PathParams, RequestContextView, RequestPrincipal, Subject, SubjectName, SubjectRule, WhenAbsent,
 };
 pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,

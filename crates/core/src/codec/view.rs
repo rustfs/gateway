@@ -56,13 +56,14 @@ use crate::route::TargetKind;
 mod derived;
 mod header_name;
 mod legacy_checksums;
+mod lifecycle_dates;
 mod page_size;
+pub use self::lifecycle_dates::LifecycleRequestDates;
 pub use self::page_size::PageSizeCeiling;
 
 /// The head of an accepted request, as a decoder sees it.
 ///
-/// Borrows the [`WireRequest`]; it owns nothing but the two decoded URI labels, which cannot be
-/// borrowed from the still-encoded path.
+/// Borrows the [`WireRequest`] and owns the decoded URI labels.
 #[derive(Debug)]
 pub struct MetaView<'a> {
     method: &'a Method,
@@ -96,6 +97,7 @@ pub struct MetaView<'a> {
     empty_headers_absent: bool,
     /// How this deployment reads an XML request document.
     document_reading: DocumentReading,
+    lifecycle_date_capture: lifecycle_dates::LifecycleDateCapture,
     /// Whether response documents are written in legacy RustFS's layout.
     rustfs_response_layout: bool,
     /// The most bytes an XML request document may hold, when the deployment sets its own.
@@ -205,6 +207,7 @@ impl<'a> MetaView<'a> {
             body_literals: false,
             empty_headers_absent: false,
             document_reading: DocumentReading::Tree,
+            lifecycle_date_capture: None,
             rustfs_response_layout: false,
             document_body_ceiling: None,
             authenticated_aws_location: None,

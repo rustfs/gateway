@@ -71,22 +71,33 @@ const NOT_THE_DOCUMENT: &str = "the request body is not the XML this operation a
 /// legacy RustFS's handler for the one document that is (the object-lock configuration,
 /// `rustfs/src/storage/ecfs.rs:1678` at rustfs/rustfs@e870a6d25); and `InvalidArgument` for a
 /// value legacy RustFS reads but this gateway cannot
-/// carry exactly — a date with a UTC offset, an entity tag no gateway tag can spell, the empty
-/// wrapper of an optional list — refused rather than written differently.
+/// carry exactly, such as a date whose source offset the request cannot carry, an entity tag no
+/// gateway tag can spell, or the empty wrapper of an optional list.
 pub fn request_document(request: &MetaView<'_>, body: &[u8], document: &'static Document) -> Result<XmlNode, CodecError> {
     let limits = request.document_limits();
     match request.document_reading() {
         DocumentReading::Tree => {
             rustfs_gateway_xml::parse_with_limits(body, limits).map_err(|_| CodecError::malformed_xml(NOT_THE_DOCUMENT))
         }
-        DocumentReading::RustFs => bound::read(body, document, limits, &rustfs_scalar).map_err(|refusal| match refusal {
-            BoundRefusal::Uncarriable => {
-                CodecError::invalid_argument("the request body carries a value this gateway cannot carry exactly")
+        DocumentReading::RustFs => {
+            let capture_dates = request.captures_lifecycle_dates() && document.roots.first() == Some(&"LifecycleConfiguration");
+            let read_scalar = |kind, raw: &str| match kind {
+                Scalar::DateTime if capture_dates => date_time(raw, true),
+                _ => rustfs_scalar(kind, raw),
+            };
+            let root = bound::read(body, document, limits, &read_scalar).map_err(|refusal| match refusal {
+                BoundRefusal::Uncarriable => {
+                    CodecError::invalid_argument("the request body carries a value this gateway cannot carry exactly")
+                }
+                BoundRefusal::Missing => CodecError::new(ErrorCode::MISSING_REQUEST_BODY, "the request carries no body"),
+                BoundRefusal::Absent => CodecError::invalid_argument("the request carries no document"),
+                BoundRefusal::Document(_) | BoundRefusal::Xml(_) => CodecError::malformed_xml(NOT_THE_DOCUMENT),
+            })?;
+            if capture_dates {
+                request.capture_lifecycle_dates(&root)?;
             }
-            BoundRefusal::Missing => CodecError::new(ErrorCode::MISSING_REQUEST_BODY, "the request carries no body"),
-            BoundRefusal::Absent => CodecError::invalid_argument("the request carries no document"),
-            BoundRefusal::Document(_) | BoundRefusal::Xml(_) => CodecError::malformed_xml(NOT_THE_DOCUMENT),
-        }),
+            Ok(root)
+        }
     }
 }
 
@@ -110,7 +121,7 @@ pub fn rustfs_scalar(kind: Scalar, raw: &str) -> Result<String, ScalarRefusal> {
             "false" | "FALSE" => Ok("false".to_owned()),
             _ => Err(ScalarRefusal::Unreadable),
         },
-        Scalar::DateTime => date_time(raw),
+        Scalar::DateTime => date_time(raw, false),
         Scalar::HttpDate => http_date(raw),
         Scalar::EntityTag => entity_tag(raw),
     }
@@ -179,11 +190,10 @@ fn days_in_month(year: u32, month: u32) -> u32 {
 ///
 /// Legacy RustFS takes any one byte between the date and the time, not only `T`; a fractional
 /// second of any length; `Z` in either case; an offset only as `±hh:mm`; and a leap second on the
-/// last second of a month. Every one of those is read here exactly so. A date with a non-zero UTC
-/// offset is read too — and refused as uncarriable, because the gateway's timestamp is a UTC
-/// instant: legacy RustFS keeps the offset (a stored retention date is written with it), so no
-/// instant this gateway could hand over is byte-identical to what legacy RustFS stores.
-fn date_time(raw: &str) -> Result<String, ScalarRefusal> {
+/// last second of a month. The timestamp stores a UTC instant. A lifecycle dispatch capturing the
+/// source date can retain the offset beside that instant. Other callers refuse nonzero offsets
+/// because legacy RustFS can use them when it stores a date.
+fn date_time(raw: &str, retain_offset: bool) -> Result<String, ScalarRefusal> {
     let unreadable = ScalarRefusal::Unreadable;
     // Any one byte separates the date from the time.
     let [
@@ -259,10 +269,15 @@ fn date_time(raw: &str) -> Result<String, ScalarRefusal> {
             return Err(unreadable);
         }
     }
-    if offset_minutes != 0 {
+    if offset_minutes != 0 && !retain_offset {
         return Err(ScalarRefusal::Uncarriable);
     }
-    let spelled = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{nanos:09}Z");
+    let zone = if retain_offset && rest.len() == 6 {
+        std::str::from_utf8(rest).map_err(|_| unreadable)?
+    } else {
+        "Z"
+    };
+    let spelled = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{nanos:09}{zone}");
     Timestamp::parse(&spelled, TimestampFormat::Iso8601).map_err(|_| ScalarRefusal::Uncarriable)?;
     Ok(spelled)
 }

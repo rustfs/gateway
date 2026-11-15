@@ -436,3 +436,136 @@ fn n_a_raised_ceiling_still_bounds_and_zero_is_not_unlimited() {
         );
     }
 }
+
+fn lifecycle_date_view() -> WireRequest<()> {
+    let request = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/bucket?lifecycle")
+        .header("host", "host.invalid")
+        .header("x-amz-checksum-crc32", "AAAAAA==")
+        .body(())
+        .expect("a request");
+    WireRequest::accept(request, &Limits::default()).expect("accepted request")
+}
+
+fn lifecycle_date_document(date: &str) -> String {
+    format!(
+        "<LifecycleConfiguration><Rule><ID>test</ID><Status>Enabled</Status>\
+         <Expiration><Date>{date}</Date></Expiration></Rule></LifecycleConfiguration>"
+    )
+}
+
+#[test]
+fn lifecycle_date_capture_stays_with_one_dispatch() {
+    use rustfs_gateway_types::dto::PutBucketLifecycleConfiguration as PutLifecycle;
+
+    use crate::{OperationCodec, RequestBody, RequestContextView, SseEnforced};
+
+    let request = lifecycle_date_view();
+    let meta = MetaView::of(&request, TargetKind::Bucket)
+        .expect("a bucket view")
+        .with_document_reading(DocumentReading::RustFs);
+    let body = |document: &str| RequestBody::Buffered(bytes::Bytes::copy_from_slice(document.as_bytes()));
+    let direct = |document: &str| {
+        PutLifecycle::decode(&meta, body(document))
+            .err()
+            .map(|error| error.code().clone())
+    };
+    let decode = |meta, document: &str, context| {
+        let decoded = crate::static_dispatch::decode::<PutLifecycle>(meta, body(document))?;
+        let authorized = crate::static_dispatch::authorize(decoded, &[]).expect("no derived resources");
+        Ok::<_, crate::CodecError>(authorized.into_request(SseEnforced::empty_for_unit_test(), context))
+    };
+    let detached = || RequestContextView::detached(PutLifecycle::NAME);
+    let first = lifecycle_date_document("2026-08-09T00:00:00+08:00");
+    let second = lifecycle_date_document("2026-07-10T00:00:00-07:00");
+    assert_eq!(direct(&first), Some(ErrorCode::INVALID_ARGUMENT));
+    let first_handler = decode(&meta, &first, detached()).expect("first pipeline decode");
+    assert_eq!(direct(&first), Some(ErrorCode::INVALID_ARGUMENT));
+    let second_handler = decode(&meta, &second, detached()).expect("second pipeline decode");
+    let first_dates = first_handler.context().lifecycle_request_dates().expect("first date facts");
+    let second_dates = second_handler.context().lifecycle_request_dates().expect("second date facts");
+    assert_eq!(first_dates.expiration(0), Some("2026-08-09T00:00:00.000000000+08:00"));
+    assert_eq!(second_dates.expiration(0), Some("2026-07-10T00:00:00.000000000-07:00"));
+
+    for xml in [
+        first.replace("2026-08-09", "2026-02-30"),
+        first.replace("<Date>", "<Unknown/><Date>"),
+        first.replace("</Date>", "</Date><Unknown/>"),
+        first.replace("</Date>", "</Date><Date>2026-07-10T00:00:00Z</Date>"),
+    ] {
+        assert_eq!(
+            decode(&meta, &xml, detached()).expect_err("malformed document").code(),
+            &ErrorCode::MALFORMED_XML
+        );
+        assert_eq!(direct(&xml), Some(ErrorCode::MALFORMED_XML));
+        assert_eq!(direct(&first), Some(ErrorCode::INVALID_ARGUMENT));
+    }
+    let days = first.replace("<Date>2026-08-09T00:00:00+08:00</Date>", "<Days>30</Days>");
+    let days_handler = decode(&meta, &days, detached()).expect("days-only pipeline decode");
+    assert_eq!(
+        days_handler
+            .context()
+            .lifecycle_request_dates()
+            .and_then(|facts| facts.expiration(0)),
+        None
+    );
+    let tree = MetaView::of(&request, TargetKind::Bucket).expect("a bucket view");
+    let tree_handler =
+        decode(&tree, &first, first_handler.context().clone_without_caller_secret()).expect("tree profile still reads the date");
+    assert!(tree_handler.context().lifecycle_request_dates().is_none());
+    let tree_handler = decode(&tree, &first, detached()).expect("tree decode from a fresh context");
+    assert!(tree_handler.context().lifecycle_request_dates().is_none());
+    assert!(
+        RequestContextView::detached(PutLifecycle::NAME)
+            .lifecycle_request_dates()
+            .is_none()
+    );
+}
+
+#[test]
+fn lifecycle_date_capture_does_not_apply_to_the_object_lock_document_or_the_shared_view() {
+    use rustfs_gateway_types::dto::{PutBucketLifecycleConfiguration as PutLifecycle, PutObjectRetention};
+
+    use crate::{OperationCodec, RequestBody};
+
+    let request = lifecycle_date_view();
+    let meta = MetaView::of(&request, TargetKind::Bucket)
+        .expect("a bucket view")
+        .with_document_reading(DocumentReading::RustFs);
+    let scoped = meta.with_lifecycle_date_capture();
+    let xml = lifecycle_date_document("2026-08-09T00:00:00+08:00");
+    let body = || RequestBody::Buffered(bytes::Bytes::copy_from_slice(xml.as_bytes()));
+    std::thread::scope(|threads| {
+        let direct = threads.spawn(|| PutLifecycle::decode(&meta, body()));
+        PutLifecycle::decode(&scoped, body()).expect("the isolated view captures lifecycle dates");
+        assert_eq!(
+            direct.join().expect("parallel decoder").expect_err("direct refusal").code(),
+            &ErrorCode::INVALID_ARGUMENT
+        );
+    });
+
+    let retention = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/bucket/object?retention")
+        .header("host", "host.invalid")
+        .header("x-amz-checksum-crc32", "AAAAAA==")
+        .body(())
+        .expect("a request");
+    let retention = WireRequest::accept(retention, &Limits::default()).expect("accepted request");
+    let retention = MetaView::of(&retention, TargetKind::Object)
+        .expect("an object view")
+        .with_document_reading(DocumentReading::RustFs);
+    let body = || {
+        RequestBody::Buffered(bytes::Bytes::from_static(
+            b"<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2026-08-09T00:00:00+08:00</RetainUntilDate></Retention>",
+        ))
+    };
+    let error = crate::static_dispatch::decode::<PutObjectRetention>(&retention, body())
+        .err()
+        .expect("retention offset refused");
+    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    let error = PutObjectRetention::decode(&retention.with_lifecycle_date_capture(), body())
+        .expect_err("capture still refuses a different document");
+    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+}

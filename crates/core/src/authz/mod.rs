@@ -25,6 +25,8 @@ mod plan;
 mod query;
 mod rule;
 
+use std::sync::Arc;
+
 use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
 
 pub use self::extra::{ExtraPermission, ExtraProfile, HeaderTrigger};
@@ -36,6 +38,7 @@ pub use self::rule::{
 };
 
 use crate::Operation;
+use crate::codec::view::LifecycleRequestDates;
 
 /// One policy decision.
 ///
@@ -431,9 +434,14 @@ impl DerivedResourceSet for NoDerived {
 pub(crate) struct Decoded<O: Operation> {
     input: O::Input,
     resources: O::DerivedResources,
+    lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
 }
 
 impl<O: Operation> Decoded<O> {
+    pub(crate) fn set_lifecycle_request_dates(&mut self, dates: Option<Arc<LifecycleRequestDates>>) {
+        self.lifecycle_request_dates = dates;
+    }
+
     /// The resources parsed from this exact input.
     #[must_use]
     pub(crate) const fn resources(&self) -> &O::DerivedResources {
@@ -457,7 +465,11 @@ pub(crate) fn prepare_input_under<O: Operation>(
 ) -> Result<Decoded<O>, DerivedResourceError> {
     let resources = O::derive_resources_under(&input, names)?;
     O::seal_derived_input(&mut input);
-    Ok(Decoded { input, resources })
+    Ok(Decoded {
+        input,
+        resources,
+        lifecycle_request_dates: None,
+    })
 }
 
 /// A proof that every resource derived from one decoded request was allowed.
@@ -468,6 +480,7 @@ pub struct Authorized<O: Operation> {
     input: O::Input,
     resources: O::DerivedResources,
     read: AuthorizedRead,
+    lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
 }
 
 impl<O: Operation> Authorized<O> {
@@ -496,8 +509,8 @@ impl<O: Operation> Authorized<O> {
         crate::Req::from_authorized(self, sse, context)
     }
 
-    pub(crate) fn into_parts(self) -> (O::Input, O::DerivedResources, AuthorizedRead) {
-        (self.input, self.resources, self.read)
+    pub(crate) fn into_parts(self) -> (O::Input, O::DerivedResources, AuthorizedRead, Option<Arc<LifecycleRequestDates>>) {
+        (self.input, self.resources, self.read, self.lifecycle_request_dates)
     }
 }
 
@@ -544,6 +557,7 @@ where
         input: decoded.input,
         resources: decoded.resources,
         read: AuthorizedRead { resources },
+        lifecycle_request_dates: decoded.lifecycle_request_dates,
     })
 }
 

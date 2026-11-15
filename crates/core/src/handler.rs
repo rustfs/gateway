@@ -124,13 +124,13 @@ impl<O: Operation> Req<O> {
         sse: crate::SseEnforced,
         context: crate::RequestContextView,
     ) -> Self {
-        let (input, resources, read) = authorized.into_parts();
+        let (input, resources, read, dates) = authorized.into_parts();
         Self {
             input: Box::new(input),
             resources,
             read,
             sse,
-            context: Box::new(context),
+            context: Box::new(context.with_lifecycle_request_dates(dates)),
         }
     }
 
