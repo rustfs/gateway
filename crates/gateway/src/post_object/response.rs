@@ -114,6 +114,7 @@ impl PostObjectResponsePlan {
         host: &str,
         origin: TargetOrigin,
     ) -> Result<(), HandlerError> {
+        let legacy = self.legacy;
         match self.action {
             SuccessAction::Ok => {
                 encoded.status = StatusCode::OK;
@@ -165,6 +166,10 @@ impl PostObjectResponsePlan {
                 encoded.headers.insert(header::LOCATION, location);
                 encoded.body = ResponseBody::Empty;
             }
+        }
+        if legacy {
+            encoded.headers.remove(header::ETAG);
+            encoded.headers.remove("x-amz-version-id");
         }
         Ok(())
     }

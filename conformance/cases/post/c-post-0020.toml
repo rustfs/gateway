@@ -51,9 +51,7 @@ body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\
 kind = "response"
 status = 204
 connection_after = "open"
-
-[exchanges.expect.headers_present]
-etag = '"c14b9a8d9306ecb82e14c13daabd677c"'
+headers_absent = ["etag", "x-amz-version-id"]
 
 [exchanges.expect.body]
 exact_utf8 = ""
@@ -73,6 +71,7 @@ connection_after = "open"
 
 [exchanges.expect.headers_present]
 content-length = "24"
+etag = '"c14b9a8d9306ecb82e14c13daabd677c"'
 
 [exchanges.expect.body]
 exact_utf8 = "twenty-four-byte-payload"

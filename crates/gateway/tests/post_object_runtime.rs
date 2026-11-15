@@ -159,6 +159,8 @@ async fn success_action_status_204_returns_an_empty_204_response() {
         .await;
 
     let status = response.status();
+    assert!(response.headers().contains_key("etag"));
+    assert_eq!(response.headers().get("x-amz-version-id").unwrap(), "stored-version");
     let body = response.into_body().collect().await.expect("response body").to_bytes();
     assert_eq!((status, body), (StatusCode::NO_CONTENT, Bytes::new()));
 }
@@ -171,6 +173,8 @@ async fn success_action_status_200_returns_an_empty_200_response() {
         .await;
 
     let status = response.status();
+    assert!(response.headers().contains_key("etag"));
+    assert_eq!(response.headers().get("x-amz-version-id").unwrap(), "stored-version");
     let body = response.into_body().collect().await.expect("response body").to_bytes();
     assert_eq!((status, body), (StatusCode::OK, Bytes::new()));
 }
@@ -191,12 +195,24 @@ async fn success_action_status_201_returns_the_real_object_result() {
         .get("content-type")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let version_id = response
+        .headers()
+        .get("x-amz-version-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let etag = response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let body = response.into_body().collect().await.expect("response body").to_bytes();
     assert_eq!(
-        (status, content_type, body),
+        (status, content_type, etag, version_id, body),
         (
             StatusCode::CREATED,
             Some("application/xml".to_owned()),
+            Some("\"storage-etag\"".to_owned()),
+            Some("stored-version".to_owned()),
             Bytes::from_static(
                 b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<PostResponse xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Location>http://host.invalid/example-bucket/uploads/report%20%26%201.txt</Location><Bucket>example-bucket</Bucket><Key>uploads/report &amp; 1.txt</Key><ETag>&quot;storage-etag&quot;</ETag></PostResponse>"
             )
@@ -215,6 +231,8 @@ async fn success_action_redirect_returns_a_validated_303_location() {
         .await;
 
     let status = response.status();
+    assert!(response.headers().contains_key("etag"));
+    assert_eq!(response.headers().get("x-amz-version-id").unwrap(), "stored-version");
     let location = response
         .headers()
         .get("location")
@@ -420,6 +438,8 @@ async fn legacy_created_response_keeps_its_relative_location_and_bare_etag() {
         )))
         .await;
     assert_eq!(response.status(), StatusCode::CREATED);
+    assert!(!response.headers().contains_key("etag"));
+    assert!(!response.headers().contains_key("x-amz-version-id"));
     let body = response.into_body().collect().await.expect("response body").to_bytes();
     assert_eq!(
         std::str::from_utf8(&body).expect("XML"),
@@ -433,22 +453,33 @@ async fn legacy_created_response_keeps_its_relative_location_and_bare_etag() {
 
 #[tokio::test]
 async fn legacy_redirect_wins_over_a_supported_status() {
-    let (status, location, body, observed) = success_controls(
-        true,
-        true,
-        &[
+    let backend = Arc::new(Backend::default());
+    let response = service_with_form_profile(Arc::clone(&backend), true, true)
+        .call_bytes(request(form_with_fields(&[
             ("success_action_status", "201"),
             ("success_action_redirect", "https://client.example/finished?upload=1#receipt"),
-        ],
-    )
-    .await;
-    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+        ])))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(!response.headers().contains_key("etag"));
+    assert!(!response.headers().contains_key("x-amz-version-id"));
     assert_eq!(
-        location.as_deref(),
+        response.headers().get("location").and_then(|value| value.to_str().ok()),
         Some("https://client.example/finished?upload=1&bucket=example-bucket&key=uploads%2Freport.txt&etag=storage-etag#receipt")
     );
-    assert_eq!(body, "");
-    assert_eq!(observed, Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec())));
+    assert!(
+        response
+            .into_body()
+            .collect()
+            .await
+            .expect("response body")
+            .to_bytes()
+            .is_empty()
+    );
+    assert_eq!(
+        backend.observed.lock().expect("observation lock").clone(),
+        Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec()))
+    );
 }
 
 #[tokio::test]

@@ -95,7 +95,7 @@ impl Handler<PostObject> for Backend {
         }
         Ok(Resp::new(PostObjectOutput {
             e_tag: Some(ETag::new("storage-etag").expect("the fixture entity tag is valid")),
-            version_id: None,
+            version_id: Some("stored-version".to_owned()),
         }))
     }
 }
@@ -218,6 +218,39 @@ async fn a_browser_form_stores_its_key_content_type_metadata_and_bytes() {
             clean_end: true,
         }
     );
+}
+
+#[tokio::test]
+async fn empty_success_responses_omit_storage_headers() {
+    for (status, expected) in [("200", StatusCode::OK), ("204", StatusCode::NO_CONTENT)] {
+        let body = form(&[
+            field("key", "uploads/${filename}"),
+            field("success_action_status", status),
+            part("Content-Disposition: form-data; name=\"file\"; filename=\"report.txt\"", "content"),
+        ]);
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://host.invalid/example-bucket")
+            .header("host", "host.invalid")
+            .header("content-type", content_type())
+            .body(Bytes::from(body))
+            .expect("valid request");
+        let response = service_authorizing(Arc::new(Backend::default()), true)
+            .call_bytes(request)
+            .await;
+        assert_eq!(response.status(), expected);
+        assert!(!response.headers().contains_key("etag"), "status={status}");
+        assert!(!response.headers().contains_key("x-amz-version-id"), "status={status}");
+        assert!(
+            response
+                .into_body()
+                .collect()
+                .await
+                .expect("response body")
+                .to_bytes()
+                .is_empty()
+        );
+    }
 }
 
 /// R8: a `;` inside a quoted filename is part of the name.
