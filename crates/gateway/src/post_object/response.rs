@@ -24,6 +24,8 @@ use rustfs_gateway_sig::{PostPolicyError, build_success_action_redirect};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 use rustfs_gateway_xml::{S3_XMLNS, XmlWriter};
 
+use rustfs_gateway_core::PostObjectSuccessCheck;
+
 use super::{legacy, policy_refusal};
 use crate::ext::TargetOrigin;
 use crate::render::S3Error;
@@ -34,8 +36,9 @@ enum SuccessAction {
     Ok,
     Created,
     NoContent,
-    Malformed,
+    InvalidStatus,
     InvalidRedirect,
+    UnrenderableRedirect,
     Redirect(String),
 }
 
@@ -64,10 +67,10 @@ impl PostObjectResponsePlan {
                 Some("200") => SuccessAction::Ok,
                 Some("201") => SuccessAction::Created,
                 Some("204") | None => SuccessAction::NoContent,
-                Some(_) => SuccessAction::Malformed,
+                Some(_) => SuccessAction::InvalidStatus,
             };
             match (status_action, redirect) {
-                (SuccessAction::Malformed, _) => SuccessAction::Malformed,
+                (SuccessAction::InvalidStatus, _) => SuccessAction::InvalidStatus,
                 (_, Some(raw)) => legacy_redirect_action(raw),
                 (action, None) => action,
             }
@@ -89,8 +92,16 @@ impl PostObjectResponsePlan {
         })
     }
 
+    pub(crate) fn success_check(&self) -> PostObjectSuccessCheck {
+        match self.action {
+            SuccessAction::InvalidStatus => PostObjectSuccessCheck::InvalidStatus,
+            SuccessAction::InvalidRedirect => PostObjectSuccessCheck::InvalidRedirect,
+            _ => PostObjectSuccessCheck::Valid,
+        }
+    }
+
     pub(super) fn before_storage(&self) -> Result<(), PostPolicyError> {
-        if matches!(self.action, SuccessAction::Malformed) {
+        if self.success_check() != PostObjectSuccessCheck::Valid {
             return Err(PostPolicyError::Malformed);
         }
         Ok(())
@@ -130,13 +141,13 @@ impl PostObjectResponsePlan {
                 encoded.status = StatusCode::NO_CONTENT;
                 encoded.body = ResponseBody::Empty;
             }
-            SuccessAction::Malformed => {
+            SuccessAction::InvalidStatus | SuccessAction::InvalidRedirect => {
                 return Err(HandlerError::new(
                     ErrorCode::MALFORMED_POST_REQUEST,
                     "the POST success controls were not accepted",
                 ));
             }
-            SuccessAction::InvalidRedirect => {
+            SuccessAction::UnrenderableRedirect => {
                 // Legacy RustFS reports blank/control redirects only after a successful storage call.
                 return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "Invalid redirect URL"));
             }
@@ -161,14 +172,14 @@ impl PostObjectResponsePlan {
 
 fn legacy_redirect_action(raw: &str) -> SuccessAction {
     if raw.trim().is_empty() {
-        return SuccessAction::InvalidRedirect;
+        return SuccessAction::UnrenderableRedirect;
     }
     let Ok(parsed) = url::Url::parse(raw) else {
-        return SuccessAction::Malformed;
+        return SuccessAction::InvalidRedirect;
     };
     // Malformed URLs win before storage; control bytes in a parseable URL are refused after it.
     if raw.bytes().any(|byte| byte.is_ascii_control()) {
-        SuccessAction::InvalidRedirect
+        SuccessAction::UnrenderableRedirect
     } else {
         SuccessAction::Redirect(parsed.into())
     }

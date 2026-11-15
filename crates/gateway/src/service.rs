@@ -1016,6 +1016,10 @@ impl S3Service {
                 (Some(post.key().clone()), Some(post.response_plan()), Some(post.permission_fields()))
             }
         };
+        let defer_post_success_check = M::defers_post_object_success_check(&op);
+        let post_success_check = post_response
+            .as_ref()
+            .and_then(|plan| defer_post_success_check.then(|| plan.success_check()));
         let config = config.meta_auth();
         outcome.identity = verdict.identity().cloned();
 
@@ -1366,7 +1370,7 @@ impl S3Service {
                     }
                     handed
                 }
-                AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
+                AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission, defer_post_success_check)?,
             };
             #[cfg(feature = "external-payload")]
             let body = crate::external_payload::bind_input(body, body_wire.transport_extensions())
@@ -1513,6 +1517,7 @@ impl S3Service {
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
             let sse = config.sse().cloned().map_err(map)?;
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
+                .map(|context| context.with_post_object_success_check(post_success_check))
                 .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()))
                 .map(|context| match input_bearer {
                     Some(receipt) => context.with_bearer_receipt(receipt),

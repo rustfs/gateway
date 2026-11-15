@@ -310,6 +310,7 @@ fn external_context_copy_preserves_request_facts_without_copying_the_caller_secr
         },
         scope: None,
         secret: Some(CallerSecretKey(SecretBytes::new(b"private-caller-key"))),
+        verified_form_session_token: None,
     });
     let copy = context.clone_without_caller_secret();
     assert_eq!(copy.operation(), context.operation());
@@ -419,4 +420,59 @@ fn n_only_a_header_token_verdict_yields_a_header_token_principal() {
     .expect("a verified request has a context");
     assert!(context.principal().is_none());
     assert!(!format!("{context:?}").contains("handed-to-nobody"));
+}
+
+#[test]
+fn only_aws_post_form_session_verdicts_project_the_verified_token() {
+    use rustfs_gateway_sig::{AuthScheme, CtBytes, Signature};
+
+    const TOKEN: &str = "fixture-issued-form-token";
+    let wire = wire(
+        "/example-bucket?X-Amz-Security-Token=query-token",
+        &[("x-amz-security-token", b"header-token")],
+    );
+    for (operation, family, location, temporary, expected) in [
+        ("PostObject", SigFamily::V4, SigLocation::FormField, true, true),
+        ("PostObject", SigFamily::V2, SigLocation::FormField, true, true),
+        ("PostObject", SigFamily::V4, SigLocation::Header, true, false),
+        ("PostObject", SigFamily::V4, SigLocation::Query, true, false),
+        ("PostObject", SigFamily::V4a, SigLocation::FormField, true, false),
+        ("GetObject", SigFamily::V4, SigLocation::FormField, true, false),
+        ("PostObject", SigFamily::V4, SigLocation::FormField, false, false),
+    ] {
+        let signature = match family {
+            SigFamily::V2 => Signature::HmacSha1(CtBytes::from_array([7; 20])),
+            SigFamily::V4a => Signature::EcdsaP256(CtBytes::from_array([7; 64])),
+            _ => Signature::HmacSha256(CtBytes::from_array([7; 32])),
+        };
+        let proof = signature.ct_verify(&signature).expect("fixture match");
+        let sig_identity = if temporary {
+            SigIdentity::Session {
+                token: SessionToken::new(TOKEN).expect("fixture token"),
+            }
+        } else {
+            SigIdentity::LongTerm
+        };
+        let verdict = Verdict::authenticated(
+            Identity::new("AKIDEXAMPLE").expect("fixture identity"),
+            AuthScheme::new(family, location, sig_identity, SigService::S3),
+            proof,
+        );
+        let context = RequestContextView::from_pipeline(operation, &wire, path_style(), &verdict, None).expect("context");
+        let token = context.principal().expect("verified principal").verified_form_session_token();
+        if expected {
+            assert!(token.is_some_and(|token| token.ct_verify(TOKEN.as_bytes()).is_ok()));
+        } else {
+            assert!(token.is_none(), "{operation} {family:?} {location:?}");
+        }
+        assert!(!format!("{context:?}").contains(TOKEN));
+        assert!(
+            context
+                .clone_without_caller_secret()
+                .principal()
+                .expect("copied principal")
+                .verified_form_session_token()
+                .is_none()
+        );
+    }
 }

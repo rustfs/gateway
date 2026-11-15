@@ -87,6 +87,7 @@ mod names;
 mod not_modified_headers;
 mod operation_selection;
 pub(crate) mod plaintext_customer_keys;
+mod post_object_handler;
 mod rustfs_profile;
 mod secret_scope;
 pub(crate) mod sigv4_header_guard;
@@ -583,7 +584,11 @@ impl ServiceBuilder {
     /// a refused registration or route, an empty registry, a missing authorizer, a missing
     /// authenticator, an [`OpLayer`] on an operation nobody registered, or an operation the router
     /// knows and this crate has no codec for. Nothing here degrades to a warning.
-    pub fn build(mut self) -> Result<S3Service, AssemblyError> {
+    pub fn build(self) -> Result<S3Service, AssemblyError> {
+        self.build_with_dispatch_mode(false)
+    }
+
+    fn build_with_dispatch_mode(mut self, monomorphic: bool) -> Result<S3Service, AssemblyError> {
         let authorizer = self.validate_assembly()?;
         let legacy_switches = self.legacy_switches();
         let header_token_verifier = self.install_header_token()?;
@@ -601,6 +606,7 @@ impl ServiceBuilder {
         }
 
         let routing = assemble_routing(self.router, self.pending, self.op_layers)?;
+        post_object_handler::validate_staged_post(&routing, self.view_policy.post_forms.is_legacy_rustfs(), monomorphic)?;
 
         if self.dangerous_allow_all_authorizer {
             logging::allow_all_authorizer_assembled();
@@ -709,7 +715,7 @@ impl ServiceBuilder {
     /// # Errors
     ///
     /// [`AssemblyError`] when ordinary assembly fails, the type-level operation set differs from
-    /// registration, or an operation layer was installed.
+    /// registration, an operation layer was installed, or PostObject uses staged authorization.
     pub fn build_monomorphic<H, Operations>(self, backend: Arc<H>) -> Result<MonomorphicService<H, Operations>, AssemblyError>
     where
         H: Send + Sync + 'static,
@@ -734,7 +740,7 @@ impl ServiceBuilder {
             });
         }
 
-        let service = self.build()?;
+        let service = self.build_with_dispatch_mode(true)?;
         Ok(MonomorphicService {
             service,
             backend,

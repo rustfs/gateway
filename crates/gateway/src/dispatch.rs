@@ -61,6 +61,7 @@
 
 #[cfg(feature = "external-payload")]
 mod external_payload;
+pub(crate) mod post_object_handler;
 
 use std::collections::BTreeMap;
 use std::pin::Pin;
@@ -146,6 +147,7 @@ pub(crate) struct OperationDispatch {
     floor: &'static OperationFloor,
     auth: Option<AuthRequirement>,
     extra_permissions: &'static [rustfs_gateway_core::ExtraPermission],
+    defer_post_object_success_check: bool,
 }
 
 impl OperationDispatch {
@@ -159,10 +161,8 @@ impl OperationDispatch {
         Self::layered::<O, B>(backend, Vec::new())
     }
 
-    /// Erases one `(O, B)` pair and the layers registered around it. The only generic function in
-    /// this crate's request path.
-    ///
-    /// `layers` is in registration order, outermost first.
+    /// Erases one `(O, B)` pair and its layers in registration order, outermost first.
+    /// The only generic function in this crate's request path.
     pub(crate) fn layered<O, B>(backend: Arc<B>, layers: Vec<Arc<dyn OpLayer<O>>>) -> Self
     where
         O: OperationCodec,
@@ -270,6 +270,7 @@ impl OperationDispatch {
             floor: O::floor(),
             auth: O::spec().auth,
             extra_permissions: O::spec().extra_permission_set(),
+            defer_post_object_success_check: false,
         }
     }
 

@@ -140,9 +140,16 @@ impl RuleRef {
                       and its verifier together",
     };
 
+    /// A PostObject authorization adapter was installed in an unsupported assembly.
+    pub const POST_OBJECT_AUTHORIZATION: Self = Self {
+        id: "asm-post-object-authorization",
+        explanation: "PostObject authorization before success-control validation requires the legacy form profile and its \
+                      dynamic handler adapter without a PostObject operation layer",
+    };
+
     /// Every rule this crate can cite, for a reverse lookup and for the assertion that the set is
     /// closed.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::REGISTRATION,
         Self::ROUTE,
         Self::EMPTY_REGISTRY,
@@ -153,6 +160,7 @@ impl RuleRef {
         Self::OP_LAYER_TYPE,
         Self::MONOMORPHIC_SET,
         Self::HEADER_TOKEN_UNVERIFIED,
+        Self::POST_OBJECT_AUTHORIZATION,
     ];
 }
 
@@ -221,6 +229,13 @@ pub enum AssemblyError {
         /// Which assembly rule this is.
         rule: RuleRef,
     },
+    /// The staged PostObject adapter cannot be used with this assembly.
+    PostObjectAuthorization {
+        /// The incompatible profile or dispatch setting.
+        reason: &'static str,
+        /// Which assembly rule this is.
+        rule: RuleRef,
+    },
     /// The static operation set or its layer posture cannot represent this assembly.
     MonomorphicSet {
         /// The exact mismatch or unsupported dynamic layer posture.
@@ -243,7 +258,7 @@ impl AssemblyError {
             | Self::MissingCodec { rule, .. }
             | Self::UnattachedOpLayer { rule, .. }
             | Self::OpLayerTypeMismatch { rule, .. } => *rule,
-            Self::MonomorphicSet { rule, .. } => *rule,
+            Self::MonomorphicSet { rule, .. } | Self::PostObjectAuthorization { rule, .. } => *rule,
         }
     }
 }
@@ -260,6 +275,7 @@ impl fmt::Display for AssemblyError {
                 write!(f, "[{rule}] the operation {operation}: {}", rule.explanation())
             }
             Self::MonomorphicSet { reason, .. } => write!(f, "[{rule}] {reason}: {}", rule.explanation()),
+            Self::PostObjectAuthorization { reason, .. } => write!(f, "[{rule}] {reason}"),
             _ => write!(f, "[{rule}] {}", rule.explanation()),
         }
     }
@@ -317,6 +333,7 @@ mod tests {
             RuleRef::OP_LAYER_TYPE,
             RuleRef::MONOMORPHIC_SET,
             RuleRef::HEADER_TOKEN_UNVERIFIED,
+            RuleRef::POST_OBJECT_AUTHORIZATION,
         ];
         for rule in rules {
             assert!(rule.explanation().len() > 40, "{rule}");

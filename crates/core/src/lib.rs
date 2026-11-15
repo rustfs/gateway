@@ -161,7 +161,8 @@ pub use crate::registry::{
     erase_authorized_handler,
 };
 pub use crate::request_context::{
-    Addressed, AddressingStyle, AuthenticatedScheme, BearerContext, CallerSecretKey, RequestContextView, RequestPrincipal,
+    Addressed, AddressingStyle, AuthenticatedScheme, BearerContext, CallerSecretKey, PostObjectSuccessCheck, RequestContextView,
+    RequestPrincipal,
 };
 pub use crate::route::{
     ArnForm, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, Explanation, FormClaim, FormClaimRejection, HostClass,

@@ -374,10 +374,14 @@ where
         )
     }
 
-    pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
-        // After authorization and before a file byte is read or the handler runs: the last point
-        // at which legacy RustFS would have refused nothing and gone on to store.
-        self.response.before_storage().map_err(policy_refusal)?;
+    pub(crate) fn handoff(
+        self,
+        _proof: &MetadataAdmission<'_>,
+        defer_success_check: bool,
+    ) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
+        if !defer_success_check {
+            self.response.before_storage().map_err(policy_refusal)?;
+        }
         // A file whose exact length the declared body fixes is judged by the policy before the
         // handler runs, as legacy RustFS judges it on the length it derived; only the legacy
         // grammar fixes one, so the answer is legacy RustFS's (rustfs/gateway#1167).

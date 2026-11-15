@@ -65,8 +65,8 @@ use std::sync::Arc;
 use http::{HeaderMap, Method, Version};
 use rustfs_gateway_http::{HeaderView, TransportExtensions, WireRequest};
 use rustfs_gateway_sig::{
-    BearerReceipt, Identity, QueryBearerClaim, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict,
-    VerifiedScope,
+    BearerReceipt, Identity, QueryBearerClaim, SecretBytes, SessionToken, SigFamily, SigIdentity, SigLocation, SigService,
+    Verdict, VerifiedScope,
 };
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
@@ -183,7 +183,10 @@ impl fmt::Debug for CallerSecretKey {
 /// ```compile_fail,E0451
 /// use rustfs_gateway_core::RequestPrincipal;
 /// fn forge() -> RequestPrincipal {
-///     RequestPrincipal { identity: todo!(), scheme: todo!(), scope: None, secret: None }
+///     RequestPrincipal {
+///         identity: todo!(), scheme: todo!(), scope: None, secret: None,
+///         verified_form_session_token: None,
+///     }
 /// }
 /// ```
 pub struct RequestPrincipal {
@@ -191,6 +194,7 @@ pub struct RequestPrincipal {
     scheme: AuthenticatedScheme,
     scope: Option<VerifiedScope>,
     secret: Option<CallerSecretKey>,
+    verified_form_session_token: Option<SessionToken>,
 }
 
 impl RequestPrincipal {
@@ -217,6 +221,15 @@ impl RequestPrincipal {
     #[must_use]
     pub const fn verified_scope(&self) -> Option<&VerifiedScope> {
         self.scope.as_ref()
+    }
+
+    /// The session token verified by the SigV4 or SigV2 authenticator for a PostObject form.
+    ///
+    /// This is credential material. It is absent for long-term credentials and other auth
+    /// locations, and is dropped from copies made with [`RequestContextView::clone_without_caller_secret`].
+    #[must_use]
+    pub const fn verified_form_session_token(&self) -> Option<&SessionToken> {
+        self.verified_form_session_token.as_ref()
     }
 
     /// The caller's secret key, when the authenticator that looked it up was told to hand it over.
@@ -285,6 +298,17 @@ impl fmt::Debug for BearerContext {
     }
 }
 
+/// The parsed pre-storage success-control verdict for one PostObject form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PostObjectSuccessCheck {
+    /// No success control requires a pre-storage refusal.
+    Valid,
+    /// The form named an unsupported success status.
+    InvalidStatus,
+    /// The form named a redirect that did not parse as an absolute URL.
+    InvalidRedirect,
+}
+
 /// What the pipeline verified and routed about one request, as its handler may read it.
 ///
 /// Read-only. The header lines are reachable only as a borrowed [`HeaderView`], so a value cannot
@@ -328,10 +352,12 @@ pub struct RequestContextView {
     path_params: PathParams,
     subjects: Option<Subjects>,
     lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
+    post_object_success_check: Option<PostObjectSuccessCheck>,
 }
 
 impl RequestContextView {
-    /// Copies verified request facts while excluding the caller secret obtained from credential lookup.
+    /// Copies verified request facts, excluding both the caller secret obtained from credential
+    /// lookup and the verified PostObject session token.
     ///
     /// Transport extensions retain their original shared identity. This is suitable for a trusted
     /// secondary data consumer that needs the already-authorized request without another credential lookup.
@@ -354,6 +380,7 @@ impl RequestContextView {
                 scheme: principal.scheme,
                 scope: principal.scope.clone(),
                 secret: None,
+                verified_form_session_token: None,
             }),
             bearer: self.bearer.as_ref().map(|bearer| BearerContext {
                 identity: bearer.identity.clone(),
@@ -363,6 +390,7 @@ impl RequestContextView {
             path_params: self.path_params.clone(),
             subjects: self.subjects.clone(),
             lifecycle_request_dates: self.lifecycle_request_dates.clone(),
+            post_object_success_check: self.post_object_success_check,
         }
     }
 
@@ -396,6 +424,12 @@ impl RequestContextView {
                 },
                 scope: scope.clone(),
                 secret: caller_secret.map(CallerSecretKey),
+                verified_form_session_token: match (operation, scheme.family, scheme.location, &scheme.identity) {
+                    ("PostObject", SigFamily::V4 | SigFamily::V2, SigLocation::FormField, SigIdentity::Session { token }) => {
+                        Some(token.clone_secret())
+                    }
+                    _ => None,
+                },
             }),
             Verdict::Anonymous(_) | Verdict::Bearer { .. } | Verdict::HeaderToken { .. } => None,
             _ => return None,
@@ -424,6 +458,7 @@ impl RequestContextView {
             path_params: PathParams::none(),
             subjects: None,
             lifecycle_request_dates: None,
+            post_object_success_check: None,
         })
     }
 
@@ -491,7 +526,21 @@ impl RequestContextView {
             path_params: PathParams::none(),
             subjects: None,
             lifecycle_request_dates: None,
+            post_object_success_check: None,
         }
+    }
+
+    /// Installs the form success-control verdict when the facade defers its enforcement.
+    #[must_use]
+    pub fn with_post_object_success_check(mut self, check: Option<PostObjectSuccessCheck>) -> Self {
+        self.post_object_success_check = check;
+        self
+    }
+
+    /// The POST form's deferred success-control verdict, when one was installed by the facade.
+    #[must_use]
+    pub const fn post_object_success_check(&self) -> Option<PostObjectSuccessCheck> {
+        self.post_object_success_check
     }
 
     /// The source dates preserved from this RustFS-profile lifecycle request, if captured.

@@ -45,6 +45,11 @@ pub(crate) trait OperationMode {
     fn extra_permissions(entry: &Self::Entry) -> &'static [rustfs_gateway_core::ExtraPermission];
 
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode;
+
+    fn defers_post_object_success_check(_entry: &Self::Entry) -> bool {
+        false
+    }
+
     #[cfg(feature = "external-payload")]
     fn supports_external_payload(_entry: &Self::Entry) -> bool {
         false
@@ -112,6 +117,10 @@ impl OperationMode for DynamicMode<'_> {
 
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode {
         entry.request_body_mode()
+    }
+
+    fn defers_post_object_success_check(entry: &Self::Entry) -> bool {
+        entry.defers_post_object_success_check()
     }
 
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(

@@ -166,6 +166,7 @@ pub use crate::conn::{
     MeasuredSelfHeldHttp1Driver, ResponseFallbackReason, ResponseTransportMetrics, SelfHeldHttp1Driver, SelfHeldRequestBody,
 };
 pub use crate::cors_legacy::{DEFAULT_RUSTFS_CONSOLE_PREFIX, LegacyRustfsCors};
+pub use crate::dispatch::post_object_handler::PostObjectHandler;
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, BaseDomain, BodyQuota, BodyQuotaExceeded, BucketOwnerError, BucketOwnerSource, CORS_PREFLIGHT,
@@ -220,7 +221,7 @@ pub use rustfs_gateway_types::persistence;
 // type is unnameable is the same defect as an unexported contract, one step further along.
 pub use rustfs_gateway_core::{
     ActionRule, Addressed, AddressingStyle, AuthenticatedScheme, CallerSecretKey, LifecycleRequestDates, PathParamError,
-    PathParams, RequestContextView, RequestPrincipal, Subject, SubjectName, SubjectRule, WhenAbsent,
+    PathParams, PostObjectSuccessCheck, RequestContextView, RequestPrincipal, Subject, SubjectName, SubjectRule, WhenAbsent,
 };
 pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
@@ -506,7 +507,7 @@ pub use rustfs_gateway_http::{EffectiveHost, Limits, TransportExtensions, WireRe
 pub use rustfs_gateway_sig::{
     BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier, HeaderTokenClaim, HeaderTokenRefused,
     HeaderTokenVerifier, Identity, IdentityOrigin, InvalidHeaderTokenClaim, OperationFloor, PresignedExpiryRule, RegionSet,
-    RequestNow, SecurityFloor, SigService, SkewWindow, Verdict,
+    RequestNow, SecurityFloor, SessionToken, SigService, SkewWindow, Verdict,
 };
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 /// Tower's service trait, exposed so facade-only consumers can wrap [`S3Service`].

@@ -763,3 +763,6 @@ async fn legacy_prohibited_control_redirects_keep_the_wire_refusal() {
         }
     }
 }
+
+#[path = "post_object_runtime/after_authorization.rs"]
+mod after_authorization;
