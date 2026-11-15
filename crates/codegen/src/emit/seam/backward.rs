@@ -134,7 +134,9 @@ pub(super) fn backward_struct_with(
                 let (core, optional) = ty.unwrap_option();
                 // The SSE-C customer key is a plain string in the s3s input and a secret type on the
                 // gateway side; it is rewrapped, never read.
-                let conv = if crate::emit::dto::registry::is_secret_string_field(field) && super::expr::is_string(core) {
+                let conv = if let Some(carrier) = ctx.carriers.get(owner, &field.name) {
+                    super::expr::carrier_conversion(carrier, core, &name, false)
+                } else if crate::emit::dto::registry::is_secret_string_field(field) && super::expr::is_string(core) {
                     Ok("crate::SseCustomerKey::new(x)".to_owned())
                 } else if owner.ends_with("Input") && crate::emit::dto::is_required_copy_source_header(field) {
                     match core {

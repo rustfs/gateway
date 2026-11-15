@@ -185,13 +185,14 @@ fn struct_at(
     let mut fan_out = false;
     for field in fields {
         let name = bare_name(field);
+        let gw_type = super::expr::fixture_type(ctx.carriers.get(owner, &field.name), &field.ty);
         match target(ctx, owner, field, s3s) {
             Err(error) => errors.push(error),
             Ok(Target::GatewayOnly(_) | Target::CarriedByHeaders) => {}
             Ok(Target::ChecksumFanOut) => fan_out = true,
             Ok(Target::Member(member, ty) | Target::Supplied(member, ty)) => {
                 let (core, optional) = ty.unwrap_option();
-                match value(ctx, shapes, &field.ty, core, member, shape_path, depth) {
+                match value(ctx, shapes, gw_type, core, member, shape_path, depth) {
                     Err(error) => {
                         errors.push(format!("{owner}.{name}: {error}"));
                         // Claimed, so the member is reported once, for the pair, not again as unfilled.
@@ -481,7 +482,8 @@ fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<Vec<Refusal>
                         });
                     }
                 }
-                if let Some((bad, why)) = invalid(&field.ty, core) {
+                let ty = super::expr::fixture_type(ctx.carriers.get(owner, &field.name), &field.ty);
+                if let Some((bad, why)) = invalid(ty, core) {
                     out.push(Refusal {
                         member: member.to_owned(),
                         field: name.clone(),

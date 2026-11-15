@@ -272,6 +272,16 @@ impl Registry {
         }
     }
 
+    pub(super) fn shape_field_type(owner: &str, field: &Field, carriers: &crate::emit::carriers::Carriers) -> String {
+        let Some(carrier) = carriers.get(owner, &field.name) else { return Self::field_type(owner, field) };
+        let inner = crate::emit::carriers::rust_type(carrier);
+        if Self::is_bare(owner, field) {
+            inner.to_owned()
+        } else {
+            format!("Option<{inner}>")
+        }
+    }
+
     /// Whether `owner`'s member `field` is stored bare: a required member, or a container whose
     /// presence is not a fact of its own ([`super::presence::carries_presence`]). Every other
     /// member is an `Option`. Tag Key/Value carry legacy absence even when the wire requires them.

@@ -74,6 +74,25 @@ const NOT_THE_DOCUMENT: &str = "the request body is not the XML this operation a
 /// carry exactly, such as a date whose source offset the request cannot carry, an entity tag no
 /// gateway tag can spell, or the empty wrapper of an optional list.
 pub fn request_document(request: &MetaView<'_>, body: &[u8], document: &'static Document) -> Result<XmlNode, CodecError> {
+    read_document(request, body, document, false)
+}
+
+/// DeleteObjects has a single entity-tag slot, the entry's ETag. Codegen verifies that slot
+/// before selecting this reader.
+pub(crate) fn delete_objects_document(
+    request: &MetaView<'_>,
+    body: &[u8],
+    document: &'static Document,
+) -> Result<XmlNode, CodecError> {
+    read_document(request, body, document, true)
+}
+
+fn read_document(
+    request: &MetaView<'_>,
+    body: &[u8],
+    document: &'static Document,
+    delete_objects: bool,
+) -> Result<XmlNode, CodecError> {
     let limits = request.document_limits();
     match request.document_reading() {
         DocumentReading::Tree => {
@@ -83,6 +102,7 @@ pub fn request_document(request: &MetaView<'_>, body: &[u8], document: &'static 
             let capture_dates = request.captures_lifecycle_dates() && document.roots.first() == Some(&"LifecycleConfiguration");
             let read_scalar = |kind, raw: &str| match kind {
                 Scalar::DateTime if capture_dates => date_time(raw, true),
+                Scalar::EntityTag if delete_objects && raw == super::delete_objects::STRONG_EMPTY => Ok(raw.to_owned()),
                 _ => rustfs_scalar(kind, raw),
             };
             let root = bound::read(body, document, limits, &read_scalar).map_err(|refusal| match refusal {

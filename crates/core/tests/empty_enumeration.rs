@@ -443,3 +443,124 @@ fn n_the_empty_value_is_not_equal_to_the_placeholder() {
     );
     assert_eq!(empty.to_string(), placeholder.to_string(), "Display renders both as nothing");
 }
+
+#[test]
+fn rustfs_delete_objects_reads_the_three_entry_rejections_and_their_siblings() {
+    let overlong = format!("{}x", "é".repeat(512));
+    let entries = [
+        ("<Key></Key>".to_owned(), "", Some(dto::DeleteObjectKeyRejection::Empty)),
+        (
+            format!("<Key>{overlong}</Key>"),
+            overlong.as_str(),
+            Some(dto::DeleteObjectKeyRejection::TooLong),
+        ),
+        (r#"<Key>conditioned</Key><ETag>""</ETag>"#.to_owned(), "conditioned", None),
+    ];
+    for (entry, key, rejection) in entries {
+        let xml = format!("<Delete><Object>{entry}</Object><Object><Key>sibling</Key></Object></Delete>");
+        let decode = |reading| decode_as::<dto::DeleteObjects>(reading, "/photos?delete", TargetKind::Bucket, &xml);
+        let native = decode(DocumentReading::RustFs).unwrap_or_else(|error| panic!("RustFS must carry {entry}: {error:?}"));
+        let [first, sibling] = native.delete.objects.as_slice() else { panic!("expected two entries") };
+        assert_eq!(first.key.as_str(), key);
+        assert_eq!(first.key.rejection(), rejection);
+        assert_eq!(first.key.object_key().map(|key| key.as_str()), rejection.is_none().then_some(key));
+        assert_eq!(
+            first.e_tag.as_ref().map(dto::DeleteObjectETag::is_strong_empty),
+            rejection.is_none().then_some(true)
+        );
+        assert_eq!(sibling.key.object_key().map(|key| key.as_str()), Some("sibling"));
+        let standard = decode(DocumentReading::Tree).expect_err("Tree must refuse the batch");
+        assert_eq!(standard.code().as_str(), "InvalidArgument", "{entry}: {standard:?}");
+    }
+}
+
+#[test]
+fn rustfs_delete_objects_still_refuses_missing_keys_and_bad_later_members() {
+    for (xml, code) in [
+        ("<Delete><Object><VersionId>v</VersionId></Object></Delete>", "MalformedXML"),
+        (
+            r#"<Delete><Object><Key/></Object><Object><Key>later</Key><ETag>é</ETag></Object></Delete>"#,
+            "MalformedXML",
+        ),
+        ("<Delete><Object><Key/><Key>duplicate</Key></Object></Delete>", "MalformedXML"),
+        ("<Delete><Object><Key>../malformed</Key></Object></Delete>", "InvalidArgument"),
+        ("<Delete><Object><Key>a&#0;b</Key></Object></Delete>", "MalformedXML"),
+        ("<Delete><Object><Key>a&#1;b</Key></Object></Delete>", "MalformedXML"),
+        (
+            r#"<Delete><Object><Key>later</Key><ETag>W/""</ETag></Object></Delete>"#,
+            "InvalidArgument",
+        ),
+    ] {
+        let error = decode_as::<dto::DeleteObjects>(DocumentReading::RustFs, "/photos?delete", TargetKind::Bucket, xml)
+            .expect_err("the document must fail before resource derivation");
+        assert_eq!(error.code().as_str(), code, "{xml}: {error:?}");
+    }
+}
+
+#[test]
+fn the_delete_body_uses_the_deployment_key_validator() {
+    use rustfs_gateway_types::{NamePolicy, NameRejection, NameValidator, SlashPolicy, Stricter};
+    use std::sync::Arc;
+
+    struct RejectPrivate;
+    impl NameValidator for RejectPrivate {
+        fn check_bucket(&self, _: &str) -> Stricter {
+            Stricter::NoOpinion
+        }
+        fn check_key(&self, name: &str) -> Stricter {
+            if name == "private" {
+                Stricter::Reject(NameRejection::TooLong)
+            } else {
+                Stricter::NoOpinion
+            }
+        }
+    }
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("http://host.invalid/photos?delete")
+        .header("host", "host.invalid")
+        .header(INTEGRITY.0, INTEGRITY.1)
+        .body(())
+        .expect("request");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("wire request");
+    let names = NamePolicy::new(SlashPolicy::AwsPreserve, Arc::new(RejectPrivate));
+    let view = MetaView::of_with(&wire, TargetKind::Bucket, &names)
+        .expect("view")
+        .with_document_reading(DocumentReading::RustFs);
+    let xml = b"<Delete><Object><Key/><VersionId>v</VersionId></Object><Object><Key>private</Key></Object></Delete>";
+    let error = dto::DeleteObjects::decode(&view, RequestBody::Buffered(Bytes::from_static(xml)))
+        .expect_err("the custom validator's rejection cannot be carried as an overlong key");
+    assert_eq!(error.code().as_str(), "InvalidArgument");
+}
+
+#[test]
+fn delete_objects_error_keys_preserve_empty_text_escaping_and_duplicate_entries() {
+    let head = Request::builder()
+        .method("POST")
+        .uri("http://host.invalid/photos?delete")
+        .header("host", "host.invalid")
+        .body(())
+        .expect("request");
+    let request = WireRequest::accept(head, &Limits::default()).expect("wire request");
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let raw = format!("{}&", "é".repeat(512));
+    let errors = ["", &raw, ""].map(|key| dto::Error {
+        key: Some(dto::DeleteKeyEcho::new(key).expect("XML text")),
+        version_id: Some("version".into()),
+        ..Default::default()
+    });
+    let output = dto::DeleteObjectsOutput {
+        errors: errors.into(),
+        ..Default::default()
+    };
+    let response = dto::DeleteObjects::encode(output, &view, 200).expect("encodes");
+    let empty = "<Error><Key></Key><VersionId>version</VersionId></Error>";
+    let long = format!("<Error><Key>{}&amp;</Key><VersionId>version</VersionId></Error>", "é".repeat(512));
+    let rustfs_gateway_core::codec::ResponseBody::Complete(bytes) = response.body else {
+        panic!("DeleteObjects returns an XML body");
+    };
+    let body = std::str::from_utf8(&bytes).expect("UTF-8 document");
+    assert!(body.contains(&format!("{empty}{long}{empty}")), "{body}");
+    assert!(dto::DeleteKeyEcho::new("a\0b").is_err());
+}

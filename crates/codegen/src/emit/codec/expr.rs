@@ -24,10 +24,27 @@
 //! seventy-three files is a rule that can be fixed in seventy-two of them.
 
 use rustfs_gateway_model::ir::{ETagRender, TimestampFormat, Type};
+use rustfs_gateway_model::overlay::FieldCarrier;
 
 use super::boolean::BooleanSpelling;
 use super::bounds::Bound;
 use crate::emit::dto::naming;
+
+pub(super) fn read_carrier(
+    carrier: FieldCarrier,
+    member: &str,
+    args: super::name_policy::ReaderArgs<'_>,
+) -> Result<String, String> {
+    let reading = args.reading;
+    match carrier {
+        FieldCarrier::DeleteObjectKey => {
+            let names = args.names.ok_or("DeleteObjects key reader has no deployment naming policy")?;
+            Ok(format!("value::delete_object_key(raw, \"{member}\", {names}, {reading})?"))
+        }
+        FieldCarrier::DeleteObjectETag => Ok(format!("value::delete_object_etag(raw, \"{member}\", {reading})?")),
+        FieldCarrier::DeleteKeyEcho => Err("DeleteKeyEcho is an output-only carrier".to_owned()),
+    }
+}
 
 /// Why one field cannot be given a codec.
 ///

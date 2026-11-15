@@ -82,10 +82,15 @@ pub fn legacy_facts() -> Result<&'static S3sFacts, String> {
 ///
 /// A covered operation missing from the IR or from the s3s facts, or any member the pairing
 /// table and the override table leave undecided — all listed at once.
-pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+pub(crate) fn emit(
+    operations: &[OperationIr],
+    generated_dir: &Path,
+    carriers: &crate::emit::carriers::Carriers,
+) -> Result<Vec<(PathBuf, String)>, String> {
     let facts = S3sFacts::parse(FACTS)?;
     let ctx = Ctx {
         facts: &facts,
+        carriers,
         reached: Default::default(),
         supplied: Default::default(),
     };

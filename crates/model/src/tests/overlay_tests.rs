@@ -542,3 +542,31 @@ fn loads_a_well_formed_authority_in_declaration_order() {
     assert!(!overlay.error_status[0].server_fault);
     assert!(overlay.error_status[1].server_fault);
 }
+
+#[test]
+fn n_carrier_declarations_require_a_known_nested_field_carrier() {
+    for (fixture, body, expected) in [
+        (
+            "carrier-spelling",
+            r#"[[shape.ObjectIdentifier.field]]
+name = "Key"
+carrier = "delete_object_kay"
+"#,
+            "unknown carrier `delete_object_kay`",
+        ),
+        (
+            "carrier-op",
+            r#"[[op.DeleteObjects.field]]
+side = "input"
+name = "Delete"
+carrier = "delete_object_key"
+"#,
+            "carriers require a nested shape member",
+        ),
+    ] {
+        let sandbox = Sandbox::new(fixture);
+        sandbox.write("ops/object.toml", body);
+        let error = Overlay::load(sandbox.path()).expect_err("misplaced or unknown carrier");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}

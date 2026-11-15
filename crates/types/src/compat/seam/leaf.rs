@@ -29,7 +29,8 @@ use rustfs_gateway_stream::ByteStream;
 use s3s::dto as oracle;
 
 use crate::compat::ConversionError;
-use crate::{BucketName, ChecksumAlgorithm, ChecksumSpec, ETag, ObjectKey, RangeSpec, Timestamp, UploadIdClaim};
+use crate::dto::{DeleteKeyEcho, DeleteObjectETag, DeleteObjectKey};
+use crate::{BucketName, ChecksumAlgorithm, ChecksumSpec, ETag, ObjectKey, RangeSpec, Timestamp, UploadIdClaim, WirePlaceholder};
 
 const fn refusal(field: &'static str, reason: &'static str) -> ConversionError {
     ConversionError { field, reason }
@@ -304,4 +305,21 @@ pub fn streaming_blob(stream: ByteStream) -> oracle::StreamingBlob {
 #[must_use]
 pub fn byte_stream(blob: oracle::StreamingBlob) -> ByteStream {
     super::put_object::byte_stream(blob)
+}
+
+pub(crate) fn delete_object_key_to_s3s(field: &'static str, key: &DeleteObjectKey) -> Result<String, ConversionError> {
+    if key.is_wire_placeholder() {
+        return Err(refusal(field, "an unset delete entry key"));
+    }
+    Ok(key.as_str().to_owned())
+}
+
+pub(crate) fn delete_object_etag_to_s3s(condition: &DeleteObjectETag) -> oracle::ETag {
+    condition
+        .etag()
+        .map_or_else(|| oracle::ETag::Strong(String::new()), etag_to_s3s)
+}
+
+pub(crate) fn delete_key_echo_from_s3s(field: &'static str, value: String) -> Result<DeleteKeyEcho, ConversionError> {
+    DeleteKeyEcho::new(value).map_err(|_| refusal(field, "text outside the XML character range"))
 }

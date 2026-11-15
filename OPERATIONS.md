@@ -1233,8 +1233,8 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `Delete` (Structure) — `Objects: List<Structure(ObjectIdentifier)>(flattened)`, `Quiet: Boolean`
 - `DeletedObject` (Structure) — `Key: ObjectKey`, `VersionId: String`, `DeleteMarker: Boolean`, `DeleteMarkerVersionId: String`
-- `Error` (Structure) — `Key: ObjectKey`, `VersionId: String`, `Code: String`, `Message: String`
-- `ObjectIdentifier` (Structure) — `Key: ObjectKey`, `VersionId: String`, `ETag: ETag(XmlQuoted)`, `LastModifiedTime: Timestamp(HttpDate)`, `Size: Long`
+- `Error` (Structure) — `Key: String`, `VersionId: String`, `Code: String`, `Message: String`
+- `ObjectIdentifier` (Structure) — `Key: String`, `VersionId: String`, `ETag: String`, `LastModifiedTime: Timestamp(HttpDate)`, `Size: Long`
 
 ### DeletePublicAccessBlock
 

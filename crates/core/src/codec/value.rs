@@ -335,6 +335,7 @@ pub(crate) const ENCODING_TYPE: &str = "encoding-type";
 /// The one value AWS defines for it.
 pub(crate) const ENCODING_TYPE_URL: &str = "url";
 
+pub(crate) use super::delete_objects::{delete_object_etag, delete_object_key, render_delete_key_echo};
 pub use crate::codec::body_literal::{BODY_LITERALS, body_literal};
 pub use crate::codec::rustfs_listing::{RustFsListing, rustfs_listing_echo};
 pub(crate) use crate::codec::rustfs_listing::{any_requires_url_encoding, requires_url_encoding};

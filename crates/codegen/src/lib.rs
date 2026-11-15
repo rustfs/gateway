@@ -230,6 +230,8 @@ pub struct Artifacts {
     pub contract_rules: BTreeMap<String, ContractRule>,
     /// The error code to `ErrorCode` constant index, from the error-status authority.
     pub error_codes: emit::error_status::Constants,
+    #[cfg(test)]
+    pub(crate) carriers: emit::carriers::Carriers,
 }
 
 /// Loads the model and the overlays, lowers, and renders every artefact in memory.
@@ -281,6 +283,7 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
         }
     }
     let lowered = lowered;
+    let carriers = emit::carriers::Carriers::collect(&lowered.operations, &overlay).map_err(Error::Policy)?;
 
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut resolved_source_rules = BTreeMap::new();
@@ -378,12 +381,13 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
         emit::error_status::render_json(&overlay.error_status),
     ));
     let error_codes = emit::error_status::Constants::new(&overlay.error_status);
-    let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?;
+    let (dto_files, dto) = emit::dto::emit(&lowered.operations, &out.generated_dir, &carriers).map_err(Error::Policy)?;
     files.extend(dto_files);
     files.extend(
-        emit::codec::emit(&lowered.operations, &overlay.codec_rules, &error_codes, &out.generated_dir).map_err(Error::Policy)?,
+        emit::codec::emit(&lowered.operations, &overlay.codec_rules, &error_codes, &out.generated_dir, &carriers)
+            .map_err(Error::Policy)?,
     );
-    files.extend(emit::seam::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?);
+    files.extend(emit::seam::emit(&lowered.operations, &out.generated_dir, &carriers).map_err(Error::Policy)?);
     for required in out.required_external_files() {
         if !files.iter().any(|(path, _)| *path == required) {
             return Err(Error::Policy(format!(
@@ -411,6 +415,8 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
         source_rules: resolved_source_rules,
         contract_rules: overlay.contract_rules,
         error_codes,
+        #[cfg(test)]
+        carriers,
     })
 }
 

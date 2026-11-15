@@ -98,7 +98,11 @@ pub struct DtoReport {
 /// Fails when the IR cannot be turned into a single coherent type vocabulary — two operations
 /// disagreeing about one nested shape, or two enumeration values colliding on one constant name.
 /// Both need an overlay decision rather than a generator guess.
-pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<(Vec<(PathBuf, String)>, DtoReport), String> {
+pub(crate) fn emit(
+    operations: &[OperationIr],
+    generated_dir: &Path,
+    carriers: &super::carriers::Carriers,
+) -> Result<(Vec<(PathBuf, String)>, DtoReport), String> {
     let mut ordered: Vec<&OperationIr> = operations.iter().collect();
     ordered.sort_by(|a, b| a.operation.cmp(&b.operation));
 
@@ -117,7 +121,7 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<(Vec<(Pa
     for (name, body) in shared::enums(&registry, &mut report) {
         files.push((ops_dir.join("enums").join(name), body));
     }
-    for (name, body) in shared::shapes(&registry, &mut report) {
+    for (name, body) in shared::shapes(&registry, &mut report, carriers) {
         files.push((ops_dir.join("shapes").join(name), body));
     }
     files.push((ops_dir.join("mod.rs"), render::ops_mod(&ordered)));

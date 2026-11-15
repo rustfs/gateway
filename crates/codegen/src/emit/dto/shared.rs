@@ -34,7 +34,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::ShapeKind;
 
 use super::registry::{EnumDef, Registry, ShapeDef};
-use super::{DtoReport, LICENSE, MAX_WIDTH, debug_impl, derives, field_decl, naming, registry};
+use super::{DtoReport, LICENSE, MAX_WIDTH, debug_impl, derives, field_decl_typed, naming, registry};
 
 /// Renders `ops/enums/mod.rs` plus one file per string enumeration.
 pub fn enums(registry: &Registry, report: &mut DtoReport) -> Vec<(String, String)> {
@@ -168,7 +168,11 @@ fn string_enum(def: &EnumDef) -> String {
 }
 
 /// Renders `ops/shapes/mod.rs` plus one file per nested shape.
-pub fn shapes(registry: &Registry, report: &mut DtoReport) -> Vec<(String, String)> {
+pub(crate) fn shapes(
+    registry: &Registry,
+    report: &mut DtoReport,
+    carriers: &crate::emit::carriers::Carriers,
+) -> Vec<(String, String)> {
     let mut files = Vec::new();
     let mut facade = String::from(LICENSE);
     facade.push_str(
@@ -187,7 +191,7 @@ pub fn shapes(registry: &Registry, report: &mut DtoReport) -> Vec<(String, Strin
         let body = match def.kind {
             ShapeKind::Structure => {
                 report.structs += 1;
-                structure(def, registry, report)
+                structure(def, registry, report, carriers)
             }
             ShapeKind::Union => {
                 report.structural_enums += 1;
@@ -215,7 +219,7 @@ fn shape_header(name: &str, what: &str) -> String {
     )
 }
 
-fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> String {
+fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport, carriers: &crate::emit::carriers::Carriers) -> String {
     let name = &def.name;
     let sources = def.sources.iter().cloned().collect::<Vec<_>>().join(", ");
     let clonable = def.fields.iter().all(|f| registry.is_clonable(&f.ty));
@@ -243,7 +247,7 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
     } else {
         let _ = writeln!(out, "pub struct {name} {{");
         for field in &def.fields {
-            out.push_str(&field_decl(name, field));
+            out.push_str(&field_decl_typed(field, &Registry::shape_field_type(name, field, carriers)));
         }
         out.push_str("}\n\n");
     }

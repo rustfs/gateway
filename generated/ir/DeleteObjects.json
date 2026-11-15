@@ -250,7 +250,7 @@
                                        "wire_name": "Key",
                                        "required": false,
                                        "binding": { "kind": "BodyXml" },
-                                       "type": { "kind": "ObjectKey" },
+                                       "type": { "kind": "String" },
                                        "hot": false,
                                        "quirk_refs": []
                                      },
@@ -301,7 +301,7 @@
                                                   "wire_name": "Key",
                                                   "required": true,
                                                   "binding": { "kind": "BodyXml" },
-                                                  "type": { "kind": "ObjectKey" },
+                                                  "type": { "kind": "String" },
                                                   "hot": true,
                                                   "quirk_refs": []
                                                 },
@@ -319,7 +319,7 @@
                                                   "wire_name": "ETag",
                                                   "required": false,
                                                   "binding": { "kind": "BodyXml" },
-                                                  "type": { "kind": "ETag", "render": "XmlQuoted" },
+                                                  "type": { "kind": "String" },
                                                   "hot": false,
                                                   "quirk_refs": []
                                                 },

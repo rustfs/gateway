@@ -30,7 +30,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct Error {
     /// Wire `Key`, bound as BodyXml. Optional.
-    pub key: Option<crate::ObjectKey>,
+    pub key: Option<crate::dto::DeleteKeyEcho>,
     /// Wire `VersionId`, bound as BodyXml. Optional.
     pub version_id: Option<String>,
     /// Wire `Code`, bound as BodyXml. Optional.

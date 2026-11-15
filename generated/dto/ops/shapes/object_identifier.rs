@@ -30,11 +30,11 @@
 #[derive(Debug, Clone, Default)]
 pub struct ObjectIdentifier {
     /// Wire `Key`, bound as BodyXml. Required.
-    pub key: crate::ObjectKey,
+    pub key: crate::dto::DeleteObjectKey,
     /// Wire `VersionId`, bound as BodyXml. Optional.
     pub version_id: Option<String>,
     /// Wire `ETag`, bound as BodyXml. Optional.
-    pub e_tag: Option<crate::ETag>,
+    pub e_tag: Option<crate::dto::DeleteObjectETag>,
     /// Wire `LastModifiedTime`, bound as BodyXml. Optional.
     pub last_modified_time: Option<crate::Timestamp>,
     /// Wire `Size`, bound as BodyXml. Optional.

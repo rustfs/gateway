@@ -44,11 +44,11 @@ impl OperationCodec for dto::DeleteObjects {
         // Delete — the XML request body, rooted at `Delete`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
+        let root = crate::codec::delete_objects_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["Delete"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("Delete"));
         }
-        input.delete = read_delete(&root, request.names())?;
+        input.delete = read_delete(&root, request.names(), request.document_reading())?;
         // MFA — header `x-amz-mfa`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-mfa") {
             let raw = raw.as_ref();
@@ -112,10 +112,14 @@ impl OperationCodec for dto::DeleteObjects {
 
 /// Reads one `Delete` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_delete(node: &rustfs_gateway_xml::XmlNode, names: &rustfs_gateway_types::NamePolicy) -> Result<dto::Delete, CodecError> {
+fn read_delete(
+    node: &rustfs_gateway_xml::XmlNode,
+    names: &rustfs_gateway_types::NamePolicy,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::Delete, CodecError> {
     let mut shape = dto::Delete { ..Default::default() };
     for item in node.children_named("Object") {
-        shape.objects.push(read_object_identifier(item, names)?);
+        shape.objects.push(read_object_identifier(item, names, reading)?);
     }
     if shape.objects.is_empty() {
         return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("Objects"));
@@ -149,7 +153,7 @@ fn write_deleted_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
 fn write_error(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Error) -> Result<(), CodecError> {
     writer.order_children(rustfs_order::ERROR);
     if let Some(v) = value.key.as_ref() {
-        writer.element("Key", v.as_str());
+        writer.element("Key", value::render_delete_key_echo(v));
     }
     if let Some(v) = value.version_id.as_ref() {
         writer.element("VersionId", v.as_str());
@@ -168,10 +172,11 @@ fn write_error(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Error) -
 fn read_object_identifier(
     node: &rustfs_gateway_xml::XmlNode,
     names: &rustfs_gateway_types::NamePolicy,
+    reading: crate::codec::DocumentReading,
 ) -> Result<dto::ObjectIdentifier, CodecError> {
     let mut shape = dto::ObjectIdentifier { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
-        shape.key = value::object_key(raw, "Key", names)?;
+        shape.key = value::delete_object_key(raw, "Key", names, reading)?;
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
@@ -179,7 +184,7 @@ fn read_object_identifier(
         shape.version_id = Some(raw.to_owned());
     }
     if let Some(raw) = node.child_text("ETag") {
-        shape.e_tag = Some(value::etag_xml(raw, "ETag")?);
+        shape.e_tag = Some(value::delete_object_etag(raw, "ETag", reading)?);
     }
     if let Some(raw) = node.child_text("LastModifiedTime") {
         shape.last_modified_time = Some(value::timestamp(raw, TimestampFormat::HttpDate, "LastModifiedTime")?);

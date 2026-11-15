@@ -67,12 +67,13 @@ fn roots(operations: &[OperationIr]) -> BTreeSet<String> {
 }
 
 /// Every rendered `document` module, by operation.
-fn modules(operations: &[OperationIr]) -> Vec<(String, String)> {
-    let roots = roots(operations);
-    operations
+fn modules(artifacts: &crate::Artifacts) -> Vec<(String, String)> {
+    let roots = roots(&artifacts.operations);
+    artifacts
+        .operations
         .iter()
         .filter_map(|ir| {
-            let rendered = module(ir, &roots).unwrap_or_else(|error| panic!("{}: {error}", ir.operation));
+            let rendered = module(ir, &roots, &artifacts.carriers).unwrap_or_else(|error| panic!("{}: {error}", ir.operation));
             rendered.map(|text| (ir.operation.clone(), text))
         })
         .collect()
@@ -157,7 +158,7 @@ fn operation<'a>(operations: &'a [OperationIr], name: &str) -> &'a OperationIr {
 #[test]
 fn every_operation_with_a_request_document_renders_one_and_no_other_does() {
     let artifacts = artifacts();
-    let rendered: BTreeSet<String> = modules(&artifacts.operations).into_iter().map(|(name, _)| name).collect();
+    let rendered: BTreeSet<String> = modules(&artifacts).into_iter().map(|(name, _)| name).collect();
     let expected: BTreeSet<String> = DOCUMENT_OPERATIONS.iter().map(|name| (*name).to_owned()).collect();
     assert_eq!(rendered, expected);
 }
@@ -168,7 +169,7 @@ fn every_operation_with_a_request_document_renders_one_and_no_other_does() {
 fn n_only_a_payload_root_skips_an_unknown_element() {
     let artifacts = artifacts();
     let roots = roots(&artifacts.operations);
-    let modules = modules(&artifacts.operations);
+    let modules = modules(&artifacts);
     let mut refusing = 0;
     for (operation, text) in &modules {
         for (name, block) in blocks(text) {
@@ -195,7 +196,7 @@ fn n_only_a_payload_root_skips_an_unknown_element() {
 #[test]
 fn n_the_event_hold_legacy_rustfs_does_not_know_is_read_so_the_seam_refuses_it() {
     let artifacts = artifacts();
-    let modules = modules(&artifacts.operations);
+    let modules = modules(&artifacts);
     for (shape, member) in [
         ("DefaultRetention", "DefaultEventHold"),
         ("ObjectLockRetention", "EventHold"),
@@ -216,7 +217,7 @@ fn n_the_event_hold_legacy_rustfs_does_not_know_is_read_so_the_seam_refuses_it()
 #[test]
 fn n_a_member_legacy_rustfs_reads_as_optional_is_one_the_model_requires() {
     let artifacts = artifacts();
-    let modules = modules(&artifacts.operations);
+    let modules = modules(&artifacts);
     for (shape, member) in OPTIONAL {
         let field = model_field(&artifacts.operations, shape, member);
         assert!(field.required, "the model no longer requires {shape}.{member}: the fact is stale");
@@ -236,7 +237,7 @@ fn n_a_member_legacy_rustfs_reads_as_optional_is_one_the_model_requires() {
 #[test]
 fn n_the_grantee_type_attribute_is_rendered_required() {
     let artifacts = artifacts();
-    let modules = modules(&artifacts.operations);
+    let modules = modules(&artifacts);
     for (shape, member) in REQUIRED_ATTRIBUTES {
         let field = model_field(&artifacts.operations, shape, member);
         assert!(!field.required, "the model requires {shape}.{member} itself: the fact is stale");
@@ -260,7 +261,7 @@ fn n_the_grantee_type_attribute_is_rendered_required() {
 #[test]
 fn n_a_member_only_legacy_rustfs_reads_is_absent_from_the_model_and_not_kept() {
     let artifacts = artifacts();
-    let modules = modules(&artifacts.operations);
+    let modules = modules(&artifacts);
     for extra in LEGACY_ONLY {
         let shape = model_shape(&artifacts.operations, extra.shape);
         assert!(
@@ -299,7 +300,7 @@ fn n_a_member_only_legacy_rustfs_reads_is_absent_from_the_model_and_not_kept() {
 #[test]
 fn n_an_empty_body_is_what_the_table_names_for_exactly_its_operations() {
     let artifacts = artifacts();
-    let modules = modules(&artifacts.operations);
+    let modules = modules(&artifacts);
     for (operation, empty) in EMPTY_BODIES {
         assert!(DOCUMENT_OPERATIONS.contains(operation), "{operation} reads no document");
         assert!(["Refused", "Absent"].contains(empty), "{operation}: {empty}");
@@ -333,7 +334,7 @@ fn n_a_member_the_reading_has_no_form_for_fails_generation() {
         key: Box::new(Type::String),
         value: Box::new(Type::String),
     };
-    let error = module(&ir, &roots).expect_err("a map member");
+    let error = module(&ir, &roots, &Default::default()).expect_err("a map member");
     assert!(error.contains("has a type legacy RustFS's reading has no form for"), "{error}");
 }
 
@@ -346,7 +347,7 @@ fn n_an_incomplete_shape_fails_generation() {
 
     let mut missing = operation(&artifacts.operations, "PutBucketTagging").clone();
     missing.shapes.remove("Tag");
-    let error = module(&missing, &roots).expect_err("a missing structure");
+    let error = module(&missing, &roots, &Default::default()).expect_err("a missing structure");
     assert!(error.contains("is not in the IR"), "{error}");
 
     let mut undeclared = operation(&artifacts.operations, "PutBucketAcl").clone();
@@ -357,7 +358,7 @@ fn n_an_incomplete_shape_fails_generation() {
         .xml
         .attributes
         .retain(|attribute| !attribute.name.starts_with("xmlns:"));
-    let error = module(&undeclared, &roots).expect_err("an undeclared prefix");
+    let error = module(&undeclared, &roots, &Default::default()).expect_err("an undeclared prefix");
     assert!(error.contains("declares no `xmlns:"), "{error}");
 
     let mut rootless = operation(&artifacts.operations, "PutBucketTagging").clone();
@@ -367,6 +368,58 @@ fn n_an_incomplete_shape_fails_generation() {
         }
     }
     rootless.xml.request_root = None;
-    let error = module(&rootless, &roots).expect_err("operation-level members without a root");
+    let error = module(&rootless, &roots, &Default::default()).expect_err("operation-level members without a root");
     assert!(error.contains("operation-level members and no request root"), "{error}");
+}
+
+#[test]
+fn n_a_delete_entry_carrier_cannot_be_misaddressed_retyped_or_duplicated() {
+    use crate::emit::carriers::Carriers;
+    let artifacts = artifacts();
+    let path = super::codegen_tests::root().join("model/overlays");
+    for (fault, expected) in [
+        ("member", "only applies to ObjectIdentifier.Key"),
+        ("type", "expected a DeleteObjects XML text member"),
+        ("duplicate", "duplicate field override"),
+        ("drop", "requires all three carrier declarations"),
+    ] {
+        let mut overlay = rustfs_gateway_model::Overlay::load(&path).expect("pinned overlay");
+        let fields = &mut overlay.shapes.get_mut("ObjectIdentifier").expect("declared shape").fields;
+        let index = fields.iter().position(|field| field.name == "Key").expect("declared key");
+        match fault {
+            "member" => fields[index].name = "Size".to_owned(),
+            "type" => fields[index].ty = Some("ObjectKey".to_owned()),
+            "duplicate" => fields.push(fields[index].clone()),
+            "drop" => {
+                fields.remove(index);
+            }
+            _ => unreachable!(),
+        }
+        let error = Carriers::collect(&artifacts.operations, &overlay).expect_err(fault);
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn n_an_extra_delete_objects_etag_cannot_use_the_strong_empty_reader() {
+    let artifacts = artifacts();
+    let mut delete = artifacts
+        .operations
+        .iter()
+        .find(|ir| ir.operation == "DeleteObjects")
+        .expect("operation")
+        .clone();
+    let shape = delete.shapes.get_mut("ObjectIdentifier").expect("identifier shape");
+    let tag = shape.fields.iter_mut().find(|field| field.name == "ETag").expect("condition");
+    let mut extra = tag.clone();
+    extra.name = "Other".to_owned();
+    extra.wire_name = Some("Other".to_owned());
+    extra.ty = Type::ETag(rustfs_gateway_model::ir::ETagRender::XmlQuoted);
+    shape.fields.push(extra);
+    let roots = payload_roots(&[&delete]);
+    let refusal = module(&delete, &roots, &artifacts.carriers).expect_err("two tag descriptors");
+    assert!(
+        refusal.contains("expected exactly one EntityTag descriptor for ObjectIdentifier.ETag"),
+        "{refusal}"
+    );
 }

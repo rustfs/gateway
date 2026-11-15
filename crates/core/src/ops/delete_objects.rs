@@ -51,11 +51,12 @@ struct DeleteObjectResource {
 }
 
 impl DeleteObjectResource {
-    fn as_ref(&self) -> crate::ResourceRef<'_> {
-        match self.object.version_id.as_deref() {
-            Some(version_id) => crate::ResourceRef::object_version(self.action, None, &self.object.key, version_id),
-            None => crate::ResourceRef::object(self.action, None, &self.object.key),
-        }
+    fn as_ref(&self) -> Option<crate::ResourceRef<'_>> {
+        let key = self.object.key.object_key()?;
+        Some(match self.object.version_id.as_deref() {
+            Some(version_id) => crate::ResourceRef::object_version(self.action, None, key, version_id),
+            None => crate::ResourceRef::object(self.action, None, key),
+        })
     }
 }
 
@@ -63,20 +64,26 @@ impl DeleteObjectResource {
 pub struct DeleteObjectResources(Vec<DeleteObjectResource>);
 
 impl DeleteObjectResources {
-    /// Reveals the exact authorized delete list, never the mutable raw DTO list.
+    /// Reveals the authorized identities when every entry has a materialized key.
+    ///
+    /// Returns `None` for a mixed batch or a proof that does not cover the batch.
+    /// Use [`Self::resolve_objects`] to process per-entry conditions and rejections.
     #[must_use]
     pub fn resolve<'a>(
         &'a self,
         proof: &'a crate::AuthorizedRead,
     ) -> Option<impl ExactSizeIterator<Item = (&'a ObjectKey, Option<&'a str>)> + 'a> {
-        self.resolve_objects(proof)
-            .map(|objects| objects.map(|object| (&object.key, object.version_id.as_deref())))
+        let objects = self.resolve_objects(proof)?;
+        let keys = objects
+            .map(|object| Some((object.key.object_key()?, object.version_id.as_deref())))
+            .collect::<Option<Vec<_>>>()?;
+        Some(keys.into_iter())
     }
 
     /// Borrows the frozen key, version ID, ETag, last-modified time and size of every entry.
     ///
-    /// The iterator yields immutable references in request order, including duplicate entries.
-    /// Returns `None` if the proof does not cover every resource in the batch.
+    /// The iterator yields immutable references in request order, including duplicate and rejected
+    /// entries. Returns `None` if the proof does not cover every materialized key in the batch.
     #[must_use]
     pub fn resolve_objects<'a>(
         &'a self,
@@ -84,15 +91,16 @@ impl DeleteObjectResources {
     ) -> Option<impl ExactSizeIterator<Item = &'a ObjectIdentifier> + 'a> {
         self.0
             .iter()
-            .all(|resource| proof.permits(resource.as_ref()))
+            .filter_map(DeleteObjectResource::as_ref)
+            .all(|resource| proof.permits(resource))
             .then(|| self.0.iter().map(|resource| &resource.object))
     }
 }
 
 impl crate::DerivedResourceSet for DeleteObjectResources {
     fn visit(&self, visitor: &mut dyn FnMut(crate::ResourceRef<'_>)) {
-        for resource in &self.0 {
-            visitor(resource.as_ref());
+        for resource in self.0.iter().filter_map(DeleteObjectResource::as_ref) {
+            visitor(resource);
         }
     }
 }
@@ -161,7 +169,8 @@ mod tests {
     use super::*;
     use crate::Decision;
     use crate::authz::{authorize_input, prepare_input};
-    use rustfs_gateway_types::{ETag, Timestamp};
+    use rustfs_gateway_types::dto::{DeleteObjectETag, DeleteObjectKey, DeleteObjectKeyRejection};
+    use rustfs_gateway_types::{ETag, NamePolicy, Timestamp, WirePlaceholder};
 
     fn authorize_objects(objects: Vec<ObjectIdentifier>) -> crate::authz::Authorized<DeleteObjects> {
         let mut input = DeleteObjectsInput::default();
@@ -171,15 +180,17 @@ mod tests {
 
     fn conditioned_object(key: &str) -> ObjectIdentifier {
         ObjectIdentifier {
-            key: ObjectKey::new(key).expect("valid key"),
+            key: ObjectKey::new(key).expect("valid key").into(),
             version_id: Some("version".into()),
-            e_tag: Some(ETag::new_weak("conditional").expect("valid tag")),
+            e_tag: Some(ETag::new_weak("conditional").expect("valid tag").into()),
             last_modified_time: Some(Timestamp::from_secs_nanos(1_700_000_000, 123).expect("valid timestamp")),
             size: Some(-1),
         }
     }
 
-    fn fields(object: &ObjectIdentifier) -> (&ObjectKey, Option<&str>, Option<&ETag>, Option<&Timestamp>, Option<i64>) {
+    fn fields(
+        object: &ObjectIdentifier,
+    ) -> (&DeleteObjectKey, Option<&str>, Option<&DeleteObjectETag>, Option<&Timestamp>, Option<i64>) {
         (
             &object.key,
             object.version_id.as_deref(),
@@ -193,9 +204,9 @@ mod tests {
     fn resolves_frozen_objects_in_input_order_with_duplicates() {
         let versioned = conditioned_object("z");
         let null_version = ObjectIdentifier {
-            key: ObjectKey::new("a").expect("valid key"),
+            key: ObjectKey::new("a").expect("valid key").into(),
             version_id: Some("null".into()),
-            e_tag: Some(ETag::ANY),
+            e_tag: Some(ETag::ANY.into()),
             size: Some(0),
             ..Default::default()
         };
@@ -215,11 +226,11 @@ mod tests {
     #[test]
     fn partial_proof_cannot_resolve_any_frozen_objects() {
         let first = ObjectIdentifier {
-            key: ObjectKey::new("first").expect("valid key"),
+            key: ObjectKey::new("first").expect("valid key").into(),
             ..Default::default()
         };
         let second = ObjectIdentifier {
-            key: ObjectKey::new("second").expect("valid key"),
+            key: ObjectKey::new("second").expect("valid key").into(),
             version_id: Some("required".into()),
             ..Default::default()
         };
@@ -241,7 +252,7 @@ mod tests {
             crate::RequestContextView::detached("DeleteObjects"),
         );
         let injected = ObjectIdentifier {
-            key: ObjectKey::new("injected").expect("valid key"),
+            key: ObjectKey::new("injected").expect("valid key").into(),
             ..Default::default()
         };
         let replacement = ObjectIdentifier {
@@ -279,7 +290,11 @@ mod tests {
             let mut input = DeleteObjectsInput::default();
             for index in 0..count {
                 input.delete.objects.push(ObjectIdentifier {
-                    key: ObjectKey::new(format!("k{index}")).expect("valid key"),
+                    key: if index == count - 1 {
+                        rejected_key("")
+                    } else {
+                        ObjectKey::new(format!("k{index}")).expect("valid key").into()
+                    },
                     ..Default::default()
                 });
             }
@@ -293,5 +308,89 @@ mod tests {
         assert_eq!(refused.message(), "a multi-object delete names at most 1000 keys");
         let derived = DeleteObjects::derive_resources(&body(1000)).map(|derived| derived.0.len());
         assert_eq!((derived.ok(), MAX_KEYS_PER_DELETE), (Some(1000), 1000));
+    }
+
+    fn rejected_key(key: &str) -> DeleteObjectKey {
+        DeleteObjectKey::materialize_rustfs_decoded(key, &NamePolicy::default()).expect("carried rejection")
+    }
+
+    #[test]
+    fn mixed_entries_keep_rejected_keys_and_authorize_real_conditioned_keys() {
+        let empty = ObjectIdentifier {
+            key: rejected_key(""),
+            ..Default::default()
+        };
+        let long = ObjectIdentifier {
+            key: rejected_key(&"é".repeat(513)),
+            ..Default::default()
+        };
+        let conditioned = ObjectIdentifier {
+            e_tag: Some(DeleteObjectETag::STRONG_EMPTY),
+            ..conditioned_object("kept")
+        };
+        let mut input = DeleteObjectsInput::default();
+        input.delete.objects = vec![empty.clone(), conditioned.clone(), long.clone(), empty.clone()];
+
+        let prepared = prepare_input::<DeleteObjects>(input.clone()).expect("prepared");
+        let mut requested = Vec::new();
+        let denied = authorize_input(prepared, |resource| {
+            requested.push((
+                resource.action(),
+                resource.key().expect("materialized").as_str().to_owned(),
+                resource.version_id().map(ToOwned::to_owned),
+            ));
+            Decision::Deny
+        });
+        assert!(denied.is_err());
+        assert_eq!(requested, [("s3:DeleteObjectVersion", "kept".to_owned(), Some("version".to_owned()))]);
+
+        let mut request = authorize_input(prepare_input::<DeleteObjects>(input).expect("prepared"), |_| Decision::Allow)
+            .expect("authorized")
+            .into_request(
+                crate::SseEnforced::empty_for_unit_test(),
+                crate::RequestContextView::detached("DeleteObjects"),
+            );
+        assert!(request.input().delete.objects.is_empty());
+        let wrong = authorize_objects(vec![ObjectIdentifier {
+            version_id: Some("other".into()),
+            ..conditioned.clone()
+        }]);
+        assert!(request.resources().resolve_objects(wrong.read_proof()).is_none());
+        request.input_mut().delete.objects.push(conditioned_object("replacement"));
+        assert!(request.resources().resolve(request.read_proof()).is_none());
+        let resolved = request
+            .resources()
+            .resolve_objects(request.read_proof())
+            .expect("proof covers the real resource");
+        assert_eq!(
+            resolved.map(fields).collect::<Vec<_>>(),
+            [&empty, &conditioned, &long, &empty].map(fields)
+        );
+        assert_eq!(empty.key.rejection(), Some(DeleteObjectKeyRejection::Empty));
+        assert_eq!(long.key.rejection(), Some(DeleteObjectKeyRejection::TooLong));
+        assert!(!empty.key.is_wire_placeholder());
+        assert!(DeleteObjectKey::default().is_wire_placeholder());
+    }
+
+    #[test]
+    fn all_rejected_entries_have_no_object_resources_and_remain_frozen() {
+        let empty = ObjectIdentifier {
+            key: rejected_key(""),
+            ..Default::default()
+        };
+        let mut input = DeleteObjectsInput::default();
+        input.delete.objects = vec![empty.clone(), empty.clone()];
+        let mut visited = 0;
+        let authorized = authorize_input(prepare_input::<DeleteObjects>(input).expect("prepared"), |_| {
+            visited += 1;
+            Decision::Deny
+        })
+        .expect("no object resource decision is needed");
+        assert_eq!(visited, 0);
+        let entries = authorized
+            .resources()
+            .resolve_objects(authorized.read_proof())
+            .expect("no object resources");
+        assert_eq!(entries.map(fields).collect::<Vec<_>>(), [fields(&empty), fields(&empty)]);
     }
 }

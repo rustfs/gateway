@@ -471,7 +471,8 @@ fn copy_source_decoding_follows_bindings_and_required_checks() {
     let artifacts = super::codegen_tests::artifacts();
     let observed = ["CopyObject", "UploadPartCopy"].map(|name| {
         let ir = artifacts.operations.iter().find(|ir| ir.operation == name).expect("Copy IR");
-        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("Copy codec");
+        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
+            .expect("Copy codec");
         let parser = "decode_value(&copy_source, request.names())?";
         let parsing = body.find(parser);
         let last_binding = body
@@ -497,7 +498,8 @@ fn copy_request_decoders_match_rustfmt() {
     let artifacts = super::codegen_tests::artifacts();
     for name in ["CopyObject", "UploadPartCopy"] {
         let ir = artifacts.operations.iter().find(|ir| ir.operation == name).expect("Copy IR");
-        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("Copy codec");
+        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
+            .expect("Copy codec");
         let source = format!("impl Decoder {{\n    fn decode() {{\n{body}    }}\n}}\n");
         let output = rustfmt(&source).expect("the repository toolchain includes rustfmt");
         assert!(output.status.success(), "rustfmt rejected {name}");
@@ -517,7 +519,8 @@ fn copy_metadata_is_initialized_at_its_unconditional_binding() {
         .iter()
         .find(|ir| ir.operation == "CopyObject")
         .expect("Copy IR");
-    let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("Copy codec");
+    let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
+        .expect("Copy codec");
     assert_eq!(
         (
             body.matches("let metadata = value::metadata_map").count(),

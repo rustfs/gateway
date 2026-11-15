@@ -454,6 +454,7 @@ fn unknown_xml_element_policy_reaches_the_generated_reader() {
             &artifacts.codec_rules,
             &artifacts.error_codes,
             Path::new("generated"),
+            &artifacts.carriers,
         )
         .expect("the codec renders in memory")
     };
@@ -746,4 +747,39 @@ fn n_semantic_diff_classifies_a_precedence_move_as_a_route_change() {
     let diff = semantic::compare_sets(&old, &new);
     assert_eq!(diff.changes.len(), 1, "{:?}", diff.changes);
     assert_eq!(diff.changes[0].dimension, semantic::Dimension::RouteSelector);
+}
+
+#[test]
+fn delete_objects_entry_carriers_are_selected_in_generated_code() {
+    let emitted = artifacts();
+    let codec = body(&emitted, "generated/codec/ops/delete_objects.rs");
+    for call in [
+        "delete_objects_document(",
+        "delete_object_key(",
+        "delete_object_etag(",
+        "render_delete_key_echo(",
+    ] {
+        assert!(codec.contains(call), "DeleteObjects codec requires {call}");
+    }
+    assert!(codec.contains("read_delete(&root, request.names(), request.document_reading())"));
+    assert!(codec.contains("read_object_identifier(item, names, reading)"));
+    let identifier = body(&emitted, "generated/dto/ops/shapes/object_identifier.rs");
+    assert!(identifier.contains("pub key: crate::dto::DeleteObjectKey,"));
+    assert!(identifier.contains("pub e_tag: Option<crate::dto::DeleteObjectETag>,"));
+    assert!(identifier.contains("reject_placeholder(\"ObjectIdentifier\", \"Key\", &self.key)"));
+    assert!(body(&emitted, "generated/dto/ops/shapes/error.rs").contains("pub key: Option<crate::dto::DeleteKeyEcho>,"));
+    assert!(body(&emitted, "generated/dto/ops/shapes/deleted_object.rs").contains("pub key: Option<crate::ObjectKey>,"));
+    let seam = body(&emitted, "generated/dto/seam/shapes/object_identifier.rs");
+    for call in [
+        "delete_object_key_to_s3s(",
+        "delete_object_etag_to_s3s(",
+        "object_key(\"key\", x)?.into()",
+        "etag_from_s3s(\"e_tag\", x)?.into()",
+    ] {
+        assert!(seam.contains(call), "DeleteObjects seam requires {call}");
+    }
+    let error_seam = body(&emitted, "generated/dto/seam/shapes/error.rs");
+    assert!(error_seam.contains("delete_key_echo_from_s3s("));
+    let control = body(&emitted, "generated/codec/ops/complete_multipart_upload.rs");
+    assert!(!control.contains("delete_object_etag("));
 }

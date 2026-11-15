@@ -46,8 +46,11 @@ pub(super) fn facts(text: &str) -> S3sFacts {
 }
 
 pub(super) fn ctx(facts: &S3sFacts) -> Ctx<'_> {
+    use crate::emit::carriers::Carriers;
+    static EMPTY: Carriers = Carriers::EMPTY;
     Ctx {
         facts,
+        carriers: &EMPTY,
         reached: Default::default(),
         supplied: Default::default(),
     }

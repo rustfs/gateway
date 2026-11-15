@@ -350,7 +350,10 @@ pub(crate) fn delete_objects(output: oracle::DeleteObjectsOutput) -> Converted<d
                  version_id,
              }| {
                 Ok(dto::Error {
-                    key: object_key("errors.key", key)?,
+                    key: key.map(dto::DeleteKeyEcho::new).transpose().map_err(|_| Unconvertible {
+                        member: "errors.key",
+                        reason: "text outside the XML character range",
+                    })?,
                     version_id,
                     code,
                     message,

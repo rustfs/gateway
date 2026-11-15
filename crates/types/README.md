@@ -30,3 +30,14 @@ Callers migrating from `String` wrap present values in `Some` and explicitly rej
 when they require a complete pair. Do not use `unwrap_or_default` to invent a value for an
 absent member. `TaggingBridgeError::MissingRequiredMember` remains available for source
 compatibility, but missing Tag fields no longer cause it.
+
+
+## DeleteObjects entry carriers
+
+**BREAKING in types 0.42.** Convert existing `ObjectKey` and `ETag` values with
+`.into()` when populating `ObjectIdentifier.key` and `ObjectIdentifier.e_tag`.
+Use `DeleteKeyEcho::new` when constructing `Error.key` from XML text.
+
+Handlers should iterate the frozen entries from `resolve_objects`. Use
+`object_key()` for authorization and storage. A rejected entry has no object key.
+Use `rejection()` and `is_strong_empty()` to handle entry validation.

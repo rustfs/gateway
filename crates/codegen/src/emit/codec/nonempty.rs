@@ -34,6 +34,7 @@ use rustfs_gateway_model::CodecValue;
 use rustfs_gateway_model::ir::{Field, OperationIr, Type};
 
 use super::CodecRules;
+use crate::emit::carriers::Carriers;
 
 /// The generated reader argument that carries the deployment's document reading.
 pub(super) const READING: &str = "reading";
@@ -61,15 +62,21 @@ fn rejects_empty(field: &Field, rules: &CodecRules) -> Result<bool, String> {
 
 /// Whether the reader of shape `name` needs the deployment's document reading: true exactly when
 /// a member with an active nonempty-text rule or Tag presence is reachable from it.
-pub(super) fn shape_needs_reading(ir: &OperationIr, name: &str, rules: &CodecRules) -> bool {
-    type_needs_reading(ir, &Type::Structure(name.to_owned()), rules, &mut BTreeSet::new())
+pub(super) fn shape_needs_reading(ir: &OperationIr, name: &str, rules: &CodecRules, carriers: &Carriers) -> bool {
+    type_needs_reading(ir, &Type::Structure(name.to_owned()), rules, carriers, &mut BTreeSet::new())
 }
 
-fn type_needs_reading(ir: &OperationIr, ty: &Type, rules: &CodecRules, visiting: &mut BTreeSet<String>) -> bool {
+fn type_needs_reading(
+    ir: &OperationIr,
+    ty: &Type,
+    rules: &CodecRules,
+    carriers: &Carriers,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
     match ty {
-        Type::List { member, .. } => type_needs_reading(ir, member, rules, visiting),
+        Type::List { member, .. } => type_needs_reading(ir, member, rules, carriers, visiting),
         Type::Map { key, value } => {
-            type_needs_reading(ir, key, rules, visiting) || type_needs_reading(ir, value, rules, visiting)
+            type_needs_reading(ir, key, rules, carriers, visiting) || type_needs_reading(ir, value, rules, carriers, visiting)
         }
         Type::Structure(name) | Type::Union(name) => {
             if !visiting.insert(name.clone()) {
@@ -81,7 +88,8 @@ fn type_needs_reading(ir: &OperationIr, ty: &Type, rules: &CodecRules, visiting:
                     // refuses to render it, so the error names the member rather than a caller.
                     crate::emit::dto::presence::carries_tag_presence(name, field)
                         || rejects_empty(field, rules).unwrap_or(true)
-                        || type_needs_reading(ir, &field.ty, rules, visiting)
+                        || carriers.get(name, &field.name).is_some()
+                        || type_needs_reading(ir, &field.ty, rules, carriers, visiting)
                 })
             });
             visiting.remove(name);

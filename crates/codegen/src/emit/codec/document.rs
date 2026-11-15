@@ -45,7 +45,10 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Shape, ShapeKind, TimestampFormat, Type};
 
+use rustfs_gateway_model::overlay::FieldCarrier;
+
 use super::{carried_as_attribute, list_elements};
+use crate::emit::carriers::Carriers;
 
 /// Members the model requires and legacy RustFS reads as optional. Tag members carry absence;
 /// the generated decoder still refuses an absent PartNumber, whose DTO has no absent spelling.
@@ -143,6 +146,9 @@ enum Entry<'a> {
 struct Plan<'a> {
     entries: Vec<Entry<'a>>,
     index: BTreeMap<String, usize>,
+    carriers: &'a Carriers,
+    entity_tags: usize,
+    saw_delete_etag: bool,
 }
 
 impl<'a> Plan<'a> {
@@ -217,7 +223,15 @@ fn member<'a>(ir: &'a OperationIr, plan: &mut Plan<'a>, owner: &str, field: &Fie
                 None => (names.entry, "Arity::Repeated".to_owned(), value),
             }
         }
-        other => (wire, "Arity::One".to_owned(), value(ir, plan, other, &field.name)?),
+        other => {
+            let ty = if plan.carriers.get(owner, &field.name) == Some(FieldCarrier::DeleteObjectETag) {
+                plan.saw_delete_etag = true;
+                &Type::ETag(rustfs_gateway_model::ir::ETagRender::XmlQuoted)
+            } else {
+                other
+            };
+            (wire, "Arity::One".to_owned(), value(ir, plan, ty, &field.name)?)
+        }
     };
     if element.is_empty() {
         return Err(format!("document {op}: member `{}` has no element name", field.name));
@@ -230,7 +244,13 @@ fn member<'a>(ir: &'a OperationIr, plan: &mut Plan<'a>, owner: &str, field: &Fie
 fn value<'a>(ir: &'a OperationIr, plan: &mut Plan<'a>, ty: &Type, member: &str) -> Result<String, String> {
     match ty {
         Type::Structure(name) | Type::Union(name) => Ok(format!("Value::Shape({})", plan.shape(ir, name)?)),
-        other => Ok(format!("Value::Text(Scalar::{})", scalar(other, &ir.operation, member)?)),
+        other => {
+            let kind = scalar(other, &ir.operation, member)?;
+            if matches!(other, Type::ETag(_)) {
+                plan.entity_tags += 1;
+            }
+            Ok(format!("Value::Text(Scalar::{kind})"))
+        }
     }
 }
 
@@ -267,7 +287,7 @@ fn attribute(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, Stri
 ///
 /// A member whose type or shape the reading has no form for; failing is the point, as for every
 /// other codec emitter.
-pub fn module(ir: &OperationIr, payload_roots: &BTreeSet<String>) -> Result<Option<String>, String> {
+pub(crate) fn module(ir: &OperationIr, payload_roots: &BTreeSet<String>, carriers: &Carriers) -> Result<Option<String>, String> {
     let payload = ir
         .input
         .iter()
@@ -276,6 +296,9 @@ pub fn module(ir: &OperationIr, payload_roots: &BTreeSet<String>) -> Result<Opti
     let mut plan = Plan {
         entries: Vec::new(),
         index: BTreeMap::new(),
+        carriers,
+        entity_tags: 0,
+        saw_delete_etag: false,
     };
     let root_name = match payload {
         Some(field) => {
@@ -369,6 +392,10 @@ pub fn module(ir: &OperationIr, payload_roots: &BTreeSet<String>) -> Result<Opti
         next += 1;
     }
 
+    if carriers.reads_delete_objects(ir) && (plan.entity_tags != 1 || !plan.saw_delete_etag) {
+        return Err("document DeleteObjects: expected exactly one EntityTag descriptor for ObjectIdentifier.ETag".to_owned());
+    }
+
     let empty = EMPTY_BODIES
         .iter()
         .find(|(operation, _)| *operation == ir.operation)
@@ -407,4 +434,13 @@ pub fn module(ir: &OperationIr, payload_roots: &BTreeSet<String>) -> Result<Opti
     out.push_str(&body);
     out.push_str("    ] };\n}\n");
     Ok(Some(out))
+}
+
+pub(super) fn open(ir: &OperationIr, carriers: &Carriers) -> String {
+    let reader = if carriers.reads_delete_objects(ir) {
+        "delete_objects_document"
+    } else {
+        "request_document"
+    };
+    format!("let root = crate::codec::{reader}(request, raw_body.as_ref(), &document::DOCUMENT)?;")
 }

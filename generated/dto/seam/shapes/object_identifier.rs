@@ -28,8 +28,8 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn object_identifier_to_s3s(value: crate::ops::shapes::ObjectIdentifier) -> Result<s3s::dto::ObjectIdentifier, ConversionError> {
     Ok(s3s::dto::ObjectIdentifier {
-        e_tag: value.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_to_s3s(&x)) }).transpose()?,
-        key: { let x = value.key; x.as_str().to_owned() },
+        e_tag: value.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::delete_object_etag_to_s3s(&x)) }).transpose()?,
+        key: { let x = value.key; leaf::delete_object_key_to_s3s("key", &x)? },
         last_modified_time: value.last_modified_time.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("last_modified_time", x)?) }).transpose()?,
         size: value.size,
         version_id: value.version_id,
@@ -51,9 +51,9 @@ pub fn object_identifier_from_s3s(value: s3s::dto::ObjectIdentifier) -> Result<c
         version_id,
     } = value;
     Ok(crate::ops::shapes::ObjectIdentifier {
-        key: { let x = key; leaf::object_key("key", x)? },
+        key: { let x = key; leaf::object_key("key", x)?.into() },
         version_id,
-        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?.into()) }).transpose()?,
         last_modified_time: last_modified_time.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified_time", &x)?) }).transpose()?,
         size,
     })

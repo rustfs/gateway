@@ -124,7 +124,7 @@ pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 7] = [
     RequestDivergence {
         id: "rd-doc-0007",
         operation: "DeleteObjects, PutBucketWebsite",
-        request: "a key in the document that the gateway's name policy refuses: empty, or holding a control character",
+        request: "a DeleteObjects key with a control character, or an empty website error document key",
         aws: "an object key is UTF-8 text of 1 to 1024 bytes",
         aws_evidence: API_DELETE_OBJECTS,
         s3s: "the legacy stack reads any text as the key and RustFS answers per key",

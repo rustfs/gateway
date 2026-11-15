@@ -344,3 +344,18 @@ fn a_grantee_type_legacy_rustfs_reads_is_handed_over_as_it_hands_it_over() {
         }
     }
 }
+
+#[test]
+fn the_rustfs_delete_entry_carriers_cross_the_legacy_dto_seam_without_losing_text() {
+    for entry in [
+        "<Key></Key>".to_owned(),
+        format!("<Key>{}x</Key>", "é".repeat(512)),
+        r#"<Key>k</Key><ETag>""</ETag>"#.to_owned(),
+        r#"<Key>k</Key><ETag>W/"weak"</ETag>"#.to_owned(),
+    ] {
+        let xml = format!("<Delete><Object>{entry}</Object></Delete>");
+        let oracle = legacy(Op::DeleteObjects, xml.as_bytes());
+        assert!(oracle.is_ok(), "{entry}: {oracle:?}");
+        assert_eq!(gateway(Op::DeleteObjects, DocumentReading::RustFs, xml.as_bytes()), oracle, "{entry}");
+    }
+}

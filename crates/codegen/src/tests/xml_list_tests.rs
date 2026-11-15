@@ -216,6 +216,7 @@ fn the_reader_of_a_wrapped_list_descends_through_the_same_two_names() {
         &shape,
         &Default::default(),
         rustfs_gateway_model::UnknownElementPolicyValue::Skip,
+        &artifacts().carriers,
     )
     .expect("the shape reads");
     assert!(

@@ -502,3 +502,19 @@ hot = ["Key"]
 [shape.ObjectIdentifier]
 required = ["Key"]
 hot = ["Key"]
+
+# These members carry the client's XML text through a per-entry outcome.
+[[shape.ObjectIdentifier.field]]
+name = "Key"
+type = "String"
+carrier = "delete_object_key"
+
+[[shape.ObjectIdentifier.field]]
+name = "ETag"
+type = "String"
+carrier = "delete_object_etag"
+
+[[shape.Error.field]]
+name = "Key"
+type = "String"
+carrier = "delete_key_echo"

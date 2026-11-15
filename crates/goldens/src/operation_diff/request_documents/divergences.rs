@@ -143,14 +143,12 @@ fn an_empty_body_the_model_requires_is_refused_by_the_gateway_and_handed_over_ab
     }
 }
 
-/// A key carried in the body that the gateway's name policy refuses — empty, or holding a control
-/// character — in a `DeleteObjects` object or a website error document. The legacy stack reads any
+/// A body key containing a control character in `DeleteObjects`, or an empty website error key. The legacy stack reads any
 /// text; the RustFS profile's key policy is rustfs/gateway#1107's, and the body keys follow it.
 ///
 /// Ruling: `rd-doc-0007`
 #[test]
 fn a_body_key_the_name_policy_refuses_is_refused_by_the_gateway_and_read_by_the_legacy_stack() {
-    refused_where_legacy_accepts(Op::DeleteObjects, "<Delete><Object><Key></Key></Object></Delete>", "InvalidArgument");
     refused_where_legacy_accepts(
         Op::DeleteObjects,
         "<Delete><Object><Key>a\r\nb</Key></Object></Delete>",

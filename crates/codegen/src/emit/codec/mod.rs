@@ -57,6 +57,7 @@ use std::path::{Path, PathBuf};
 use rustfs_gateway_model::ir::{AttributeSource, Binding, OperationIr, Shape, Type};
 use rustfs_gateway_model::{CodecRule, CodecValue, UnknownElementPolicyValue};
 
+use super::carriers::Carriers;
 use super::dto::{LICENSE, naming};
 use super::error_status::Constants;
 
@@ -77,11 +78,12 @@ pub type CodecRules = BTreeMap<String, CodecRule>;
 /// A string naming the operation and member whose binding the codec surface has no form for.
 /// Failing is the point: an emitter that skipped the member would produce a codec that compiles,
 /// runs, and silently drops a wire value.
-pub fn emit(
+pub(crate) fn emit(
     operations: &[OperationIr],
     rules: &CodecRules,
     codes: &Constants,
     generated_dir: &Path,
+    carriers: &Carriers,
 ) -> Result<Vec<(PathBuf, String)>, String> {
     let mut ordered: Vec<&OperationIr> = operations.iter().collect();
     ordered.sort_by(|a, b| a.operation.cmp(&b.operation));
@@ -92,7 +94,7 @@ pub fn emit(
     for ir in &ordered {
         files.push((
             ops_dir.join(format!("{}.rs", naming::module_name(&ir.operation))),
-            operation(ir, rules, codes, &payload_roots)?,
+            operation(ir, rules, codes, &payload_roots, carriers)?,
         ));
     }
     files.push((ops_dir.join("mod.rs"), ops_mod(&ordered)));
@@ -105,6 +107,7 @@ fn operation(
     rules: &CodecRules,
     codes: &Constants,
     payload_roots: &BTreeSet<String>,
+    carriers: &Carriers,
 ) -> Result<String, String> {
     let op = &ir.operation;
     let marker = naming::type_name(op);
@@ -128,7 +131,7 @@ fn operation(
     // The bodies are rendered first: which imports a file needs is a fact about the code that was
     // generated, and `-D warnings` refuses an import the generated file does not use.
     let overrides = response_overrides(ir);
-    let decoded = format!("{}{}", override_guard(&overrides), decode::body(ir, rules, codes)?);
+    let decoded = format!("{}{}", override_guard(&overrides), decode::body(ir, rules, codes, carriers)?);
     let encoded = encode::body(ir, rules)?;
     let uses = |needle: &str| decoded.contains(needle) || encoded.contains(needle);
 
@@ -194,15 +197,22 @@ fn operation(
     for (name, shape) in &ir.shapes {
         if reachable_from(ir, name, Side::Input) {
             out.push('\n');
-            out.push_str(&decode::shape_reader(ir, name, shape, rules, unknown_element_policy(ir, rules)?)?);
+            out.push_str(&decode::shape_reader(
+                ir,
+                name,
+                shape,
+                rules,
+                unknown_element_policy(ir, rules)?,
+                carriers,
+            )?);
         }
         if reachable_from(ir, name, Side::Output) {
             out.push('\n');
-            out.push_str(&encode::shape_writer(ir, name, shape)?);
+            out.push_str(&encode::shape_writer(ir, name, shape, carriers)?);
             written.push((name.as_str(), shape));
         }
     }
-    if let Some(module) = document::module(ir, payload_roots)? {
+    if let Some(module) = document::module(ir, payload_roots, carriers)? {
         out.push_str(&module);
     }
     if let Some(module) = encode::order::rustfs_order_module(ir, &written)? {
@@ -238,7 +248,7 @@ fn rust_string_slice(values: &[String]) -> String {
 
 #[cfg(test)]
 pub(crate) fn operation_for_test(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
-    operation(ir, rules, codes, &document::payload_roots(&[ir]))
+    operation(ir, rules, codes, &document::payload_roots(&[ir]), &Carriers::EMPTY)
 }
 
 fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<UnknownElementPolicyValue, String> {
@@ -360,7 +370,7 @@ pub fn list_elements(flattened: bool, member_name: Option<&str>, wire: &str) -> 
 
 /// Which half of an operation a shape is reachable from.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Side {
+pub(super) enum Side {
     Input,
     Output,
 }
@@ -370,7 +380,7 @@ enum Side {
 /// A shape reachable only from the request gets a reader and no writer, and the other way round.
 /// Emitting both unconditionally would put dead code in every generated file, and `-D warnings`
 /// would then be the thing that noticed.
-fn reachable_from(ir: &OperationIr, shape: &str, side: Side) -> bool {
+pub(super) fn reachable_from(ir: &OperationIr, shape: &str, side: Side) -> bool {
     let roots = match side {
         Side::Input => &ir.input,
         Side::Output => &ir.output,

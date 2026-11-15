@@ -46,7 +46,9 @@ use crate::toml_lite::{self, Toml};
 use error_status::ERROR_STATUS_FILE;
 use optional::{alt_success_statuses, opt_bool, opt_int, opt_str, opt_u16, opt_u32, opt_u64};
 
+mod carrier;
 mod codec;
+
 mod codec_inputs;
 mod contract_values;
 mod cors_contract_inputs;
@@ -63,6 +65,7 @@ mod route_only;
 mod select_restore_contract_inputs;
 mod select_restore_contract_values;
 
+pub use self::carrier::FieldCarrier;
 pub use codec::{
     AclChannelPolicyValue, AclOwnerPolicyValue, AllUnknownChildrenValue, BooleanSpellingValue, BucketStatePreconditionValue,
     CodecRule, CodecValue, ConditionConflictValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue,
@@ -290,6 +293,8 @@ pub struct FieldOverlay {
     pub binding: Option<String>,
     /// Override the type.
     pub ty: Option<String>,
+    /// Selects a dedicated DTO and codec representation for an XML text member.
+    pub carrier: Option<FieldCarrier>,
     /// Override the hot/cold split.
     pub hot: Option<bool>,
     /// Override the requirement.
@@ -797,6 +802,7 @@ fn field_overlays(table: &Toml, what: &str, sided: bool) -> Result<Vec<FieldOver
             wire_name: opt_str(entry, "wire_name", &context)?,
             binding: opt_str(entry, "binding", &context)?,
             ty: opt_str(entry, "type", &context)?,
+            carrier: FieldCarrier::parse(opt_str(entry, "carrier", &context)?.as_deref(), sided, &context)?,
             hot: opt_bool(entry, "hot", &context)?,
             required: opt_bool(entry, "required", &context)?,
             missing_error: opt_str(entry, "missing_error", &context)?,

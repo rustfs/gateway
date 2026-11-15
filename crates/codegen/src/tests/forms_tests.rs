@@ -38,7 +38,7 @@ fn decoder(name: &str) -> String {
         .iter()
         .find(|ir| ir.operation == name)
         .unwrap_or_else(|| panic!("{name} is generated"));
-    crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("decodes")
+    crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers).expect("decodes")
 }
 
 #[test]

@@ -27,7 +27,8 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use rustfs_gateway_model::ir::Type;
+use rustfs_gateway_model::ir::{ETagRender, Type};
+use rustfs_gateway_model::overlay::FieldCarrier;
 
 use super::facts::{S3sFacts, S3sType};
 use crate::emit::dto::naming;
@@ -45,6 +46,7 @@ pub struct Reached {
 pub struct Ctx<'a> {
     /// The s3s release's facts.
     pub facts: &'a S3sFacts,
+    pub(crate) carriers: &'a crate::emit::carriers::Carriers,
     /// Shapes reached so far.
     pub reached: RefCell<Reached>,
     /// Parameters the conversion being rendered takes besides its input (`Rule::Supplied`).
@@ -79,6 +81,28 @@ fn leaf(s3s: &S3sType) -> Option<&str> {
 
 fn closure(body: &str) -> String {
     format!("|e| -> Result<_, ConversionError> {{ Ok({body}) }}")
+}
+
+/// The equivalent validated legacy pairing for a test fixture.
+pub(super) fn fixture_type(carrier: Option<FieldCarrier>, ty: &Type) -> &Type {
+    match carrier {
+        Some(FieldCarrier::DeleteObjectKey) => &Type::ObjectKey,
+        Some(FieldCarrier::DeleteObjectETag) => &Type::ETag(ETagRender::XmlQuoted),
+        Some(FieldCarrier::DeleteKeyEcho) | None => ty,
+    }
+}
+
+pub(super) fn carrier_conversion(carrier: FieldCarrier, s3s: &S3sType, member: &str, forward: bool) -> Result<String, String> {
+    let expression = match (carrier, leaf(s3s), forward) {
+        (FieldCarrier::DeleteObjectKey, Some("String"), true) => format!("leaf::delete_object_key_to_s3s(\"{member}\", &x)?"),
+        (FieldCarrier::DeleteObjectKey, Some("String"), false) => format!("leaf::object_key(\"{member}\", x)?.into()"),
+        (FieldCarrier::DeleteObjectETag, Some("ETag"), true) => "leaf::delete_object_etag_to_s3s(&x)".to_owned(),
+        (FieldCarrier::DeleteObjectETag, Some("ETag"), false) => format!("leaf::etag_from_s3s(\"{member}\", x)?.into()"),
+        (FieldCarrier::DeleteKeyEcho, Some("String"), true) => "x.as_str().to_owned()".to_owned(),
+        (FieldCarrier::DeleteKeyEcho, Some("String"), false) => format!("leaf::delete_key_echo_from_s3s(\"{member}\", x)?"),
+        _ => return Err(format!("the carrier {carrier:?} cannot be paired with {s3s:?}")),
+    };
+    Ok(expression)
 }
 
 impl Ctx<'_> {

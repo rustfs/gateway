@@ -49,7 +49,7 @@ pub fn error_from_s3s(value: s3s::dto::Error) -> Result<crate::ops::shapes::Erro
         version_id,
     } = value;
     Ok(crate::ops::shapes::Error {
-        key: key.map(|x| -> Result<_, ConversionError> { Ok(leaf::object_key("key", x)?) }).transpose()?,
+        key: key.map(|x| -> Result<_, ConversionError> { Ok(leaf::delete_key_echo_from_s3s("key", x)?) }).transpose()?,
         version_id,
         code,
         message,

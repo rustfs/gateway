@@ -19,6 +19,7 @@
 //! NOT responsible for: writing files (that is [`crate::write()`]) or deciding content.
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: the checked-in artefacts.
 
+pub(super) mod carriers;
 pub mod codec;
 pub mod dto;
 pub mod error_status;

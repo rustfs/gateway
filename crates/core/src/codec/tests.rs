@@ -473,7 +473,7 @@ fn writes_every_delete_objects_key_into_the_result() {
             ..Default::default()
         }],
         errors: vec![dto::Error {
-            key: Some(ObjectKey::new("kept").expect("key")),
+            key: Some(dto::DeleteKeyEcho::new("kept").expect("key")),
             code: Some("AccessDenied".to_owned()),
             message: Some("Access Denied".to_owned()),
             ..Default::default()

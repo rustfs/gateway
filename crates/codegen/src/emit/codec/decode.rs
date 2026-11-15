@@ -70,6 +70,7 @@ use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Sha
 
 use super::name_policy::ReaderArgs;
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, media, tolerance};
+use crate::emit::carriers::Carriers;
 use crate::emit::dto::{naming, registry::Registry};
 use crate::emit::error_status::Constants;
 
@@ -83,12 +84,6 @@ const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
 const MISSING_LIST_ENTRIES: &str = "the body carries no entry for a member that requires one";
 /// A wrapped required list whose wrapper is not on the wire at all.
 const MISSING_MEMBER: &str = "the body omits a member the schema requires";
-
-/// Opening the request document, the way the request's deployment reads one: as a tree, or as
-/// legacy RustFS reads it against the operation's generated shape (`super::document`,
-/// rustfs/gateway#1078). Either way a refused document is `MalformedXML` before any member is
-/// read.
-const OPEN_DOCUMENT: &str = "let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;";
 
 /// Buffering the request body, and the one place a `Content-MD5` over it is settled.
 ///
@@ -104,7 +99,7 @@ const BUFFER_BODY: &str = concat!(
 );
 
 /// Renders the body of one operation's `decode`.
-pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
+pub(crate) fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants, carriers: &Carriers) -> Result<String, String> {
     let mut out = String::new();
     let controlled_body = crate::emit::dto::controlled_required_body(&ir.input);
     let explicit_input = ir.input.iter().any(crate::emit::dto::requires_explicit_input_construction);
@@ -161,7 +156,7 @@ pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<S
         } else {
             format!("input.{name}")
         };
-        out.push_str(&one_field(ir, field, &target, first_body_member == Some(index), rules, codes)?);
+        out.push_str(&one_field(ir, field, &target, first_body_member == Some(index), rules, codes, carriers)?);
     }
     if !ir.input.iter().any(uses_body) {
         out.push_str("        let _ = body;\n");
@@ -205,6 +200,7 @@ fn one_field(
     open_document: bool,
     rules: &CodecRules,
     codes: &Constants,
+    carriers: &Carriers,
 ) -> Result<String, String> {
     let op = &ir.operation;
     let owner = format!("{}Input", naming::type_name(op));
@@ -367,7 +363,7 @@ fn one_field(
                     ("            ", "        }\n")
                 };
                 out.push_str(&root_namespace_guard(&ir.operation, indent));
-                let _ = writeln!(out, "{indent}{OPEN_DOCUMENT}");
+                let _ = writeln!(out, "{indent}{}", super::document::open(ir, carriers));
                 let mut accepted = vec![root];
                 accepted.extend(aliases);
                 let names = accepted.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
@@ -391,7 +387,7 @@ fn one_field(
                 }
                 let _ = writeln!(out, "{indent}}}");
                 let indent_len = indent.len();
-                let read = super::name_policy::shape_reader_call(ir, rules, shape, &reader, "&root", ReaderArgs::TOP)?;
+                let read = super::name_policy::shape_reader_call(ir, rules, shape, &reader, "&root", ReaderArgs::top(carriers))?;
                 out.push_str(&assign(indent_len, target, &wrap(&owner, field, &read)));
                 out.push_str(close);
             }
@@ -421,9 +417,9 @@ fn one_field(
         },
         Binding::BodyXml => {
             if open_document {
-                out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
+                out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?, carriers)?);
             }
-            out.push_str(&xml_member(ir, (&owner, field), target, rules, "root", ReaderArgs::TOP, 8)?);
+            out.push_str(&xml_member(ir, (&owner, field), target, rules, "root", ReaderArgs::top(carriers), 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -495,7 +491,11 @@ fn wrap(owner: &str, field: &Field, inner: &str) -> String {
 /// [`xml_member`]. No `.about(..)` rides the wrong-root refusal here: at operation level there is
 /// no single member the root belongs to, and naming an arbitrary one of them would put a member
 /// into an error that is about the document.
-fn open_request_document(ir: &OperationIr, unknown_elements: UnknownElementPolicyValue) -> Result<String, String> {
+fn open_request_document(
+    ir: &OperationIr,
+    unknown_elements: UnknownElementPolicyValue,
+    carriers: &Carriers,
+) -> Result<String, String> {
     let root = ir
         .xml
         .request_root
@@ -513,7 +513,7 @@ fn open_request_document(ir: &OperationIr, unknown_elements: UnknownElementPolic
     let _ = writeln!(out, "        // The XML request body, rooted at `{root}`.");
     out.push_str(BUFFER_BODY);
     out.push_str(&root_namespace_guard(&ir.operation, "        "));
-    let _ = writeln!(out, "        {OPEN_DOCUMENT}");
+    let _ = writeln!(out, "        {}", super::document::open(ir, carriers));
     let _ = writeln!(out, "        if ![{names}].contains(&root.name.as_str()) {{");
     out.push_str("            return Err(CodecError::malformed_xml(\"the request body has the wrong root element\"));\n");
     out.push_str("        }\n");
@@ -651,15 +651,19 @@ fn xml_member(
             out.push_str(&required_member_refusal(field, member, indent, None));
         }
         other => {
-            let conversion = expr::from_wire(
-                other,
-                member,
-                operation,
-                true,
-                bounds::of(field, rules, operation)?,
-                super::boolean::of(ir, field, rules)?,
-                name_policy.unwrap_or("names"),
-            )?;
+            let conversion = if let Some(carrier) = args.carriers.get(owner, member) {
+                expr::read_carrier(carrier, member, args)?
+            } else {
+                expr::from_wire(
+                    other,
+                    member,
+                    operation,
+                    true,
+                    bounds::of(field, rules, operation)?,
+                    super::boolean::of(ir, field, rules)?,
+                    name_policy.unwrap_or("names"),
+                )?
+            };
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
             out.push_str(&super::nonempty::guard(field, rules, args.reading, inner)?);
             out.push_str(&assign(inner, target, &wrap(owner, field, &conversion)));
@@ -737,15 +741,16 @@ fn attribute_accessor(operation: &str, shape_name: &str, shape: &Shape, qualifie
 /// Takes the operation's resolved quirks because a bounded integer is bounded wherever it is read:
 /// `PartNumber` in a query and `PartNumber` in a completion body are the same wire contract, and a
 /// reader that consulted only the operation's own fields would enforce it in one of the two.
-pub fn shape_reader(
+pub(crate) fn shape_reader(
     ir: &OperationIr,
     name: &str,
     shape: &Shape,
     rules: &CodecRules,
     unknown_elements: UnknownElementPolicyValue,
+    carriers: &Carriers,
 ) -> Result<String, String> {
     if shape.kind == ShapeKind::Union {
-        return union_reader(ir, name, shape, rules);
+        return union_reader(ir, name, shape, rules, carriers);
     }
     let type_name = naming::type_name(name);
     let mut out = String::new();
@@ -765,8 +770,9 @@ pub fn shape_reader(
     } else {
         format!("let mut shape = dto::{type_name} {{ ..Default::default() }};")
     };
-    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, rules, name, node, &type_name, MAX_WIDTH);
-    let args = ReaderArgs::nested(needs_names);
+    let (signature, needs_names) =
+        super::name_policy::shape_reader_signature(ir, rules, name, node, &type_name, MAX_WIDTH, carriers);
+    let args = ReaderArgs::nested(needs_names, carriers);
     out.push_str(&signature);
     let _ = writeln!(out, "    {construct}");
 
@@ -800,10 +806,11 @@ pub fn shape_reader(
 /// A union is not a structure with optional fields: exactly one modeled child selects its enum
 /// variant. Refusing zero, two or unknown children here prevents a required union from reaching
 /// the handler as a fabricated default or an ambiguous projection.
-fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules) -> Result<String, String> {
+fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules, carriers: &Carriers) -> Result<String, String> {
     let type_name = naming::type_name(name);
-    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, rules, name, "node", &type_name, MAX_WIDTH);
-    let args = ReaderArgs::nested(needs_names);
+    let (signature, needs_names) =
+        super::name_policy::shape_reader_signature(ir, rules, name, "node", &type_name, MAX_WIDTH, carriers);
+    let args = ReaderArgs::nested(needs_names, carriers);
     let mut out = String::new();
     let _ = writeln!(
         out,

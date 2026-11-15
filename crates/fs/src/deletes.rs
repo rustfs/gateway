@@ -24,7 +24,7 @@
 //! state, which is `super::versioning`'s.
 //! Upstream: `FsBackend::delete_object_version`. Downstream: the CRUD registry.
 
-use rustfs_gateway::dto::{DeleteObjectOutput, DeleteObjects, DeleteObjectsOutput, DeletedObject, Error};
+use rustfs_gateway::dto::{DeleteKeyEcho, DeleteObjectOutput, DeleteObjects, DeleteObjectsOutput, DeletedObject, Error};
 use rustfs_gateway::{ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp};
 
 use super::FsBackend;
@@ -77,9 +77,9 @@ impl Handler<DeleteObjects> for FsBackend {
         // the DTO cannot add a key nobody authorized.
         let entries = request
             .resources()
-            .resolve(request.read_proof())
+            .resolve_objects(request.read_proof())
             .ok_or_else(|| HandlerError::internal_error("the delete authorization proof did not match"))?
-            .map(|(key, version_id)| (key.clone(), version_id.map(ToOwned::to_owned)))
+            .cloned()
             .collect::<Vec<_>>();
         let input = request.into_input();
         let bucket = input.bucket.as_str();
@@ -90,23 +90,31 @@ impl Handler<DeleteObjects> for FsBackend {
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
         let refusal = self.rustfs_parity.batch_delete_refusal;
-        for (key, version_id) in entries {
-            if refusal.is_some_and(|refuses| refuses(key.as_str())) {
+        for entry in entries {
+            let version_id = entry.version_id;
+            let echo =
+                || DeleteKeyEcho::new(entry.key.as_str()).map_err(|_| HandlerError::internal_error("invalid XML key echo"));
+            let conditioned = entry.e_tag.as_ref().is_some_and(|tag| tag.is_strong_empty());
+            let permitted = entry
+                .key
+                .object_key()
+                .filter(|key| !conditioned && !refusal.is_some_and(|refuses| refuses(key.as_str())));
+            let Some(key) = permitted else {
                 errors.push(Error {
-                    key: Some(key),
+                    key: Some(echo()?),
                     version_id,
                     code: Some(ErrorCode::INVALID_ARGUMENT.as_str().to_owned()),
                     message: Some("Invalid argument".to_owned()),
                 });
                 continue;
-            }
+            };
             match self.delete_object_version(bucket, key.as_str(), version_id.as_deref()).await {
                 // Quiet mode reports only the keys that failed; a success is the absence of an
                 // error entry.
                 Ok(_) if quiet => {}
-                Ok(outcome) => deleted.push(deleted_entry(key, version_id, outcome)),
+                Ok(outcome) => deleted.push(deleted_entry(key.clone(), version_id, outcome)),
                 Err(error) => errors.push(Error {
-                    key: Some(key),
+                    key: Some(echo()?),
                     version_id,
                     code: Some(error.code().as_str().to_owned()),
                     message: Some(error.message().to_owned()),

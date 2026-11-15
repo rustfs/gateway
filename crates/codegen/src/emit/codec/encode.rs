@@ -576,7 +576,12 @@ fn empty_policy(policy: &[(String, EmptyValue)], member: &str, required: bool) -
 }
 
 /// Renders the writer for one nested response shape.
-pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, String> {
+pub(crate) fn shape_writer(
+    ir: &OperationIr,
+    name: &str,
+    shape: &Shape,
+    carriers: &crate::emit::carriers::Carriers,
+) -> Result<String, String> {
     if shape.kind == ShapeKind::Union {
         return union_writer(ir, name, shape);
     }
@@ -624,7 +629,13 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
                 out.push_str(&shape_child(ir, &plan, (name, field), &source, &wire)?);
             }
             other => {
-                let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
+                let rendered = match carriers.get(name, &field.name) {
+                    Some(rustfs_gateway_model::overlay::FieldCarrier::DeleteKeyEcho) => {
+                        "value::render_delete_key_echo(v)".to_owned()
+                    }
+                    Some(carrier) => return Err(format!("request carrier {carrier:?} cannot be written as a response field")),
+                    None => wire_expr(other, &field.name, &ir.operation, encoded)?,
+                };
                 let call = layout::element_call(other, policy);
                 let narrowed = url::member_binding("        ", &format!("{name}.{}", field.name), encoded);
                 let unheld = layout::absent_when_unheld(name, &field.name);

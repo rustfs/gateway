@@ -121,8 +121,8 @@ fn synthetic_request_union_ir() -> OperationIr {
 fn a_required_union_payload_delegates_to_its_union_reader_without_fabricating_a_default() {
     let ir = synthetic_request_union_ir();
     let artifacts = artifacts();
-    let body =
-        decode::body(&ir, &artifacts.codec_rules, &artifacts.error_codes).expect("a required request union has an XML form");
+    let body = decode::body(&ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
+        .expect("a required request union has an XML form");
 
     assert!(body.contains("read_object_encryption(&root"), "{body}");
     assert!(
@@ -142,6 +142,7 @@ fn a_request_union_reader_requires_exactly_one_known_variant() {
         shape,
         &artifacts.codec_rules,
         rustfs_gateway_model::UnknownElementPolicyValue::Reject,
+        &artifacts.carriers,
     )
     .expect("the request union reader is generated");
 
@@ -208,7 +209,8 @@ fn a_union_body_member_keeps_its_wrapper_and_delegates_to_the_union_writer() {
 fn a_union_writer_maps_each_variant_and_refuses_an_unknown_future_variant() {
     let ir = synthetic_filter_ir();
     let shape = ir.shapes.get("SyntheticFilter").expect("the synthetic union exists");
-    let writer = encode::shape_writer(&ir, "SyntheticFilter", shape).expect("the response union writer is generated");
+    let writer =
+        encode::shape_writer(&ir, "SyntheticFilter", shape, &Default::default()).expect("the response union writer is generated");
 
     assert!(
         writer.contains("dto::SyntheticFilter::Prefix(v) => writer.element(\"Prefix\", v.as_str()),"),
@@ -236,7 +238,8 @@ fn analytics_filter_emits_every_modeled_variant_without_a_default_payload() {
         .shapes
         .get("AnalyticsFilter")
         .expect("the pinned Analytics operation carries its filter union");
-    let writer = encode::shape_writer(&ir, "AnalyticsFilter", shape).expect("the real response union writer is generated");
+    let writer = encode::shape_writer(&ir, "AnalyticsFilter", shape, &Default::default())
+        .expect("the real response union writer is generated");
 
     assert!(writer.contains("dto::AnalyticsFilter::Prefix(v)"), "{writer}");
     assert!(writer.contains("dto::AnalyticsFilter::Tag(v)"), "{writer}");
@@ -253,7 +256,8 @@ fn metrics_filter_emits_every_modeled_variant_without_a_default_payload() {
         .shapes
         .get("MetricsFilter")
         .expect("the pinned Metrics operation carries its filter union");
-    let writer = encode::shape_writer(&ir, "MetricsFilter", shape).expect("the real response union writer is generated");
+    let writer = encode::shape_writer(&ir, "MetricsFilter", shape, &Default::default())
+        .expect("the real response union writer is generated");
 
     assert!(writer.contains("dto::MetricsFilter::Prefix(v)"), "{writer}");
     assert!(writer.contains("dto::MetricsFilter::Tag(v)"), "{writer}");

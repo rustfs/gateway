@@ -123,7 +123,7 @@ fn n_two_bounded_quirks_disagreeing_on_one_member_fail_the_run() {
 fn n_the_integrity_guard_is_generated_only_where_the_ir_asks_for_it() {
     let artifacts = super::codegen_tests::artifacts();
     for ir in &artifacts.operations {
-        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes)
+        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
             .expect("every included operation has a decoder");
         assert_eq!(
             generated.contains("value::require_integrity(request)?"),
@@ -156,7 +156,7 @@ fn every_buffered_body_is_settled_against_the_digest_declared_over_it() {
     let artifacts = super::codegen_tests::artifacts();
     let mut buffered = 0usize;
     for ir in &artifacts.operations {
-        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes)
+        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
             .expect("every included operation has a decoder");
         let reads: Vec<usize> = generated.match_indices(READ).map(|(index, _)| index).collect();
         assert_eq!(
@@ -190,7 +190,7 @@ fn only_a_body_literal_decoder_reads_the_literal_and_only_after_the_digest() {
     let artifacts = super::codegen_tests::artifacts();
     let mut literal_decoders = Vec::new();
     for ir in &artifacts.operations {
-        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes)
+        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
             .expect("every included operation has a decoder");
         let calls: Vec<usize> = generated
             .match_indices("value::body_literal(request, ")
@@ -219,7 +219,8 @@ fn the_two_bounded_members_reach_the_generated_decoders() {
             .iter()
             .find(|ir| ir.operation == name)
             .unwrap_or_else(|| panic!("{name} is generated"));
-        crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("decodes")
+        crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
+            .expect("decodes")
     };
     assert!(decoder("UploadPart").contains("value::integer_in_range(raw, \"PartNumber\", 1, 10000)?"));
     assert!(decoder("ListObjectsV2").contains("value::integer_in_range(raw, \"MaxKeys\", 0, 1000)?"));

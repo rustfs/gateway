@@ -3363,7 +3363,10 @@ impl Stub {
                     ("NoSuchVersion", "The specified version does not exist.")
                 };
                 errors.push(dto::Error {
-                    key: Some(key.clone()),
+                    key: Some(
+                        dto::DeleteKeyEcho::new(key.as_str())
+                            .map_err(|_| HandlerError::internal_error("invalid XML key echo"))?,
+                    ),
                     version_id: Some(version.to_owned()),
                     code: Some(code.to_owned()),
                     message: Some(message.to_owned()),

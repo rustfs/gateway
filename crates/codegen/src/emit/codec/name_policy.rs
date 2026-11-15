@@ -23,28 +23,32 @@
 use std::collections::BTreeSet;
 
 use rustfs_gateway_model::ir::{OperationIr, Type};
+use rustfs_gateway_model::overlay::FieldCarrier;
 
 use super::{CodecRules, expr, nonempty};
+use crate::emit::carriers::Carriers;
 use crate::emit::dto::naming;
 
-fn shape_needs_name_policy(ir: &OperationIr, name: &str) -> bool {
-    type_needs_name_policy(ir, &Type::Structure(name.to_owned()), &mut BTreeSet::new())
+fn shape_needs_name_policy(ir: &OperationIr, name: &str, carriers: &Carriers) -> bool {
+    type_needs_name_policy(ir, &Type::Structure(name.to_owned()), carriers, &mut BTreeSet::new())
 }
 
-fn type_needs_name_policy(ir: &OperationIr, ty: &Type, visiting: &mut BTreeSet<String>) -> bool {
+fn type_needs_name_policy(ir: &OperationIr, ty: &Type, carriers: &Carriers, visiting: &mut BTreeSet<String>) -> bool {
     match ty {
         Type::ObjectKey => true,
-        Type::List { member, .. } => type_needs_name_policy(ir, member, visiting),
-        Type::Map { key, value } => type_needs_name_policy(ir, key, visiting) || type_needs_name_policy(ir, value, visiting),
+        Type::List { member, .. } => type_needs_name_policy(ir, member, carriers, visiting),
+        Type::Map { key, value } => {
+            type_needs_name_policy(ir, key, carriers, visiting) || type_needs_name_policy(ir, value, carriers, visiting)
+        }
         Type::Structure(name) | Type::Union(name) => {
             if !visiting.insert(name.clone()) {
                 return false;
             }
             let result = ir.shapes.get(name).is_some_and(|shape| {
-                shape
-                    .fields
-                    .iter()
-                    .any(|field| type_needs_name_policy(ir, &field.ty, visiting))
+                shape.fields.iter().any(|field| {
+                    carriers.get(name, &field.name) == Some(FieldCarrier::DeleteObjectKey)
+                        || type_needs_name_policy(ir, &field.ty, carriers, visiting)
+                })
             });
             visiting.remove(name);
             result
@@ -60,20 +64,25 @@ pub(super) struct ReaderArgs<'a> {
     pub(super) names: Option<&'a str>,
     /// The deployment's document reading (`nonempty`).
     pub(super) reading: &'a str,
+    pub(super) carriers: &'a Carriers,
 }
 
-impl ReaderArgs<'static> {
+impl<'a> ReaderArgs<'a> {
     /// An operation's top-level decoder: both come from the request view.
-    pub(super) const TOP: Self = Self {
-        names: Some("request.names()"),
-        reading: nonempty::REQUEST_READING,
-    };
+    pub(super) fn top(carriers: &'a Carriers) -> Self {
+        Self {
+            names: Some("request.names()"),
+            reading: nonempty::REQUEST_READING,
+            carriers,
+        }
+    }
 
     /// Inside a nested reader: its own parameters.
-    pub(super) fn nested(needs_names: bool) -> Self {
+    pub(super) fn nested(needs_names: bool, carriers: &'a Carriers) -> Self {
         Self {
             names: needs_names.then_some("names"),
             reading: nonempty::READING,
+            carriers,
         }
     }
 }
@@ -87,14 +96,14 @@ pub(super) fn shape_reader_call(
     args: ReaderArgs<'_>,
 ) -> Result<String, String> {
     let mut arguments = node.to_owned();
-    if shape_needs_name_policy(ir, shape) {
+    if shape_needs_name_policy(ir, shape, args.carriers) {
         let names = args.names.ok_or_else(|| {
             expr::unsupported(&ir.operation, shape, "an object-key body reader has no deployment naming policy")
         })?;
         arguments.push_str(", ");
         arguments.push_str(names);
     }
-    if nonempty::shape_needs_reading(ir, shape, rules) {
+    if nonempty::shape_needs_reading(ir, shape, rules, args.carriers) {
         arguments.push_str(", ");
         arguments.push_str(args.reading);
     }
@@ -112,9 +121,10 @@ pub(super) fn shape_reader_signature(
     node: &str,
     type_name: &str,
     max_width: usize,
+    carriers: &Carriers,
 ) -> (String, bool) {
-    let needs_names = shape_needs_name_policy(ir, name);
-    let needs_reading = nonempty::shape_needs_reading(ir, name, rules);
+    let needs_names = shape_needs_name_policy(ir, name, carriers);
+    let needs_reading = nonempty::shape_needs_reading(ir, name, rules, carriers);
     let module = naming::module_name(name);
     let mut parameters = vec![format!("{node}: &rustfs_gateway_xml::XmlNode")];
     if needs_names {

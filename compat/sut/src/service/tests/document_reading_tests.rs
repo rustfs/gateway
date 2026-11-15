@@ -64,6 +64,9 @@ const DELETE_REPEATED_KEY: &str = "<Delete><Object><Key>kept</Key><Key>other</Ke
 const DELETE_REPEATED_KEY_MD5: &str = "VK6S5Dr4ea/XRh1thNShgw==";
 const DELETE_UNREADABLE_QUIET: &str = "<Delete><Quiet>yes</Quiet><Object><Key>kept</Key></Object></Delete>";
 const DELETE_UNREADABLE_QUIET_MD5: &str = "uJm8XdkytuQrVb2yvxVwow==";
+const DELETE_FORBIDDEN_KEY_CHARACTER: &str =
+    "<Delete><Object><Key>kept</Key></Object><Object><Key>a&#1;b</Key></Object></Delete>";
+const DELETE_FORBIDDEN_KEY_CHARACTER_MD5: &str = "4OXMzjF7k/DBLPvE3XR9jQ==";
 const DELETE_UNKNOWN_AT_ROOT: &str = "<Delete><FutureKnob>on</FutureKnob><Object><Key>kept</Key></Object></Delete>";
 const DELETE_UNKNOWN_AT_ROOT_MD5: &str = "w59+ZXWucyfPgtdSr3BNkQ==";
 
@@ -76,7 +79,7 @@ const EMPTY_MD5: &str = "1B2M2Y8AsgTpgAmY7PhCfg==";
 const VERSIONING_ENABLED: &str = "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
 const VERSIONING_ENABLED_MD5: &str = "8qj8HSeDu3APPMQZVG06WQ==";
 
-async fn send(service: &S3Service, method: http::Method, target: &str, document: &'static str, md5: &str) -> WireResponse {
+async fn send(service: &S3Service, method: http::Method, target: &str, document: &str, md5: &str) -> WireResponse {
     exchange(
         service,
         signed(
@@ -84,7 +87,7 @@ async fn send(service: &S3Service, method: http::Method, target: &str, document:
             MAIN_SECRET,
             method,
             target,
-            Bytes::from_static(document.as_bytes()),
+            Bytes::copy_from_slice(document.as_bytes()),
             &[("content-md5", md5)],
         ),
     )
@@ -260,6 +263,7 @@ async fn n_a_batch_delete_legacy_rustfs_refuses_is_malformed_and_deletes_nothing
         (DELETE_UNKNOWN_IN_OBJECT, DELETE_UNKNOWN_IN_OBJECT_MD5),
         (DELETE_REPEATED_KEY, DELETE_REPEATED_KEY_MD5),
         (DELETE_UNREADABLE_QUIET, DELETE_UNREADABLE_QUIET_MD5),
+        (DELETE_FORBIDDEN_KEY_CHARACTER, DELETE_FORBIDDEN_KEY_CHARACTER_MD5),
     ] {
         refused_as_malformed(&send(&service, http::Method::POST, "/documents?delete", document, md5).await, document);
         let read = get(&service, "/documents/kept").await;
@@ -445,4 +449,70 @@ async fn n_an_empty_lifecycle_write_is_the_handlers_invalid_argument_and_replace
     assert!(body.contains("<Message>Invalid argument.</Message>"), "{body}");
     let read = get(&service, "/documents?lifecycle").await;
     assert!(body_of(&read).contains("<ID>kept</ID>"), "{}", body_of(&read));
+}
+
+#[tokio::test]
+async fn refused_delete_entries_keep_protected_objects_and_allow_valid_siblings() {
+    let root = TestRoot::new();
+    let service = bucket(&root).await;
+    for key in ["protected", "first", "quiet"] {
+        let target = format!("/documents/{key}");
+        let stored = exchange(&service, as_main(http::Method::PUT, &target, Bytes::from_static(b"original"))).await;
+        accepted(&stored, key);
+        assert_eq!(body_of(&get(&service, &target).await), "original", "{key}");
+    }
+
+    let long = "é".repeat(512);
+    let long_xml = format!("{long}&amp;");
+    let entries = format!(
+        r#"<Object><Key></Key></Object><Object><Key>{long_xml}</Key></Object><Object><Key>protected</Key><ETag>""</ETag></Object><Object><Key/></Object>"#
+    );
+    for (sibling, quiet, md5) in [
+        ("first", false, "gFciNxg26ASnN2uCJtekBg=="),
+        ("quiet", true, "bnW7jldewbez3DS6Ie7UhQ=="),
+    ] {
+        let document = format!("<Delete><Quiet>{quiet}</Quiet>{entries}<Object><Key>{sibling}</Key></Object></Delete>");
+        let response = send(&service, http::Method::POST, "/documents?delete", &document, md5).await;
+        accepted(&response, &document);
+        let kept = get(&service, "/documents/protected").await;
+        assert_eq!(kept.status(), 200);
+        assert_eq!(body_of(&kept), "original");
+        let removed = get(&service, &format!("/documents/{sibling}")).await;
+        assert_eq!(removed.status(), 404);
+        assert!(body_of(&removed).contains("<Code>NoSuchKey</Code>"));
+        let body = body_of(&response);
+        assert_eq!(body.matches("<Error>").count(), 4, "{body}");
+        assert_eq!(body.matches("<Key></Key>").count(), 2, "{body}");
+        assert!(
+            body.contains(&format!("<Error><Code>InvalidArgument</Code><Key>{long_xml}</Key>")),
+            "{body}"
+        );
+        assert!(body.contains("<Error><Code>InvalidArgument</Code><Key>protected</Key>"), "{body}");
+        assert_eq!(body.contains(&format!("<Deleted><Key>{sibling}</Key>")), !quiet, "{body}");
+    }
+}
+
+#[tokio::test]
+async fn all_rejected_delete_keys_still_require_request_integrity_and_authentication() {
+    const DOCUMENT: &str = "<Delete><Object><Key/></Object></Delete>";
+    let root = TestRoot::new();
+    let service = bucket(&root).await;
+    let md5 = "cwZIEkS/o7fhb/Mr+igcnA==";
+    let wrong_digest = send(&service, http::Method::POST, "/documents?delete", DOCUMENT, EMPTY_MD5).await;
+    assert_eq!(wrong_digest.status(), 400);
+    assert!(body_of(&wrong_digest).contains("<Code>BadDigest</Code>"));
+
+    let request = http::Request::builder()
+        .method(http::Method::POST)
+        .uri("/documents?delete")
+        .header("host", "s3.example.com")
+        .header("content-md5", md5)
+        .body(Bytes::from_static(DOCUMENT.as_bytes()))
+        .expect("request");
+    let anonymous = exchange(&service, request).await;
+    assert_eq!(anonymous.status(), 403, "{}", body_of(&anonymous));
+
+    let signed = send(&service, http::Method::POST, "/documents?delete", DOCUMENT, md5).await;
+    accepted(&signed, DOCUMENT);
+    assert!(body_of(&signed).contains("<Error><Code>InvalidArgument</Code><Key></Key>"));
 }

@@ -62,6 +62,7 @@ pub use self::checksummer::Checksummer;
 pub use self::error_code::ErrorCode;
 pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
+pub(crate) use self::naming::MAX_KEY_BYTES;
 pub use self::naming::{
     AwsNameValidator, KeyFloor, NamePolicy, NameRejection, NameValidator, PathSplit, SlashPolicy, Stricter, aws_bucket_rules,
     decode_once, floor_check_bucket, floor_check_key,

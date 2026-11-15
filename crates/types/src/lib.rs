@@ -51,6 +51,7 @@
 
 mod copy_source;
 pub mod cors_tagging;
+mod delete_objects;
 pub mod ext;
 pub mod persistence;
 pub mod placeholder;
@@ -101,6 +102,7 @@ mod generated_dto;
 
 /// Flat aliases for every operation DTO.
 pub mod dto {
+    pub use crate::delete_objects::{DeleteKeyEcho, DeleteObjectETag, DeleteObjectKey, DeleteObjectKeyRejection};
     pub use crate::generated_dto::*;
     pub use crate::post_object::{PostObject, PostObjectFields, PostObjectInput, PostObjectOutput};
 }

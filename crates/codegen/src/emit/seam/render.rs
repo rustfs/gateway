@@ -293,7 +293,9 @@ pub(super) fn forward_struct_as(
                 let (core, optional) = ty.unwrap_option();
                 // The SSE-C customer key is a secret type on the gateway side and a plain string in
                 // the s3s input; that is the s3s contract, not this one's.
-                let conv = if crate::emit::dto::registry::is_secret_string_field(field) && super::expr::is_string(core) {
+                let conv = if let Some(carrier) = ctx.carriers.get(owner, &field.name) {
+                    super::expr::carrier_conversion(carrier, core, &name, true)
+                } else if crate::emit::dto::registry::is_secret_string_field(field) && super::expr::is_string(core) {
                     Ok("x.expose_secret().to_owned()".to_owned())
                 } else {
                     ctx.forward(&field.ty, core, "x", &name)
