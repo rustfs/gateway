@@ -565,7 +565,8 @@ impl SigV4Signer {
             signed,
             request.host,
             request.payload.canonical_payload_token(),
-        );
+        )
+        .for_service(self.scope.service());
         let spec = match exclusion {
             QueryExclusion::PresignedSignature => spec.presigned(),
             _ => spec,

@@ -306,7 +306,7 @@ impl CredentialScope {
     /// [`AuthError::AuthorizationHeaderMalformed`] unless there are exactly five `/`-separated
     /// fields, the access key id is well formed, the date is a `YYYYMMDD` stamp, the region is a
     /// non-empty ASCII-graphic name within [`CredentialScope::MAX_REGION_LEN`], the service is one
-    /// of the five S3-family services, and the terminator is literally
+    /// of the supported service names, and the terminator is literally
     /// [`SCOPE_TERMINATOR`].
     ///
     /// An unknown service is a rejection and never a pass-through. A scope that names a service

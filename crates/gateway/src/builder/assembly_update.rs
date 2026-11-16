@@ -49,6 +49,17 @@ impl AssemblyUpdate {
         Self::default()
     }
 
+    /// Starts an update for the same independent service as the live instance.
+    ///
+    /// Only matching, explicitly registered service dialects are accepted, under the same rules
+    /// as [`ServiceBuilder::for_service`]. The live instance refuses a different service scope.
+    #[must_use]
+    pub fn for_service(service: rustfs_gateway_sig::SigService) -> Self {
+        Self {
+            builder: ServiceBuilder::for_service(service),
+        }
+    }
+
     /// Replaces the request-body and deadline settings for the new assembly.
     #[must_use]
     pub fn config(mut self, config: ServiceConfig) -> Self {
