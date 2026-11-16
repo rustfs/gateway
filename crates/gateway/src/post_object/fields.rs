@@ -99,7 +99,7 @@ pub(super) enum DateGrammar {
 pub(super) struct LockAndCustomerKey {
     object_lock_legal_hold_status: Option<ObjectLockLegalHoldStatus>,
     object_lock_mode: Option<ObjectLockMode>,
-    object_lock_retain_until_date: Option<Timestamp>,
+    object_lock_retain_until: Option<(Timestamp, Option<i32>)>,
     sse_customer_algorithm: Option<String>,
     sse_customer_key: Option<SseCustomerKey>,
     sse_customer_key_md5: Option<String>,
@@ -116,35 +116,38 @@ impl LockAndCustomerKey {
     /// The refusal of an unreadable retain-until date.
     pub(super) fn read(fields: &[(&str, &str)], grammar: DateGrammar) -> Result<Self, S3Error> {
         let field = |name: &str| fields.iter().find_map(|(field, value)| (*field == name).then_some(*value));
-        let instant = |value: &str| match grammar {
-            DateGrammar::Iso8601Header => Timestamp::parse(value, TimestampFormat::Iso8601).ok(),
-            DateGrammar::LegacyRustfs => super::legacy_date::read(value),
+        let retention = |value: &str| match grammar {
+            DateGrammar::Iso8601Header => Timestamp::parse(value, TimestampFormat::Iso8601)
+                .ok()
+                .map(|instant| (instant, None)),
+            DateGrammar::LegacyRustfs => super::legacy_date::read(value).map(|(instant, offset)| (instant, Some(offset))),
         };
-        let object_lock_retain_until_date = field(LOCK_RETAIN_UNTIL)
-            .map(|value| instant(value).ok_or_else(|| unreadable(LOCK_RETAIN_UNTIL, value)))
+        let object_lock_retain_until = field(LOCK_RETAIN_UNTIL)
+            .map(|value| retention(value).ok_or_else(|| unreadable(LOCK_RETAIN_UNTIL, value)))
             .transpose()?;
         Ok(Self {
             object_lock_legal_hold_status: field(LOCK_LEGAL_HOLD)
                 .map(|value| ObjectLockLegalHoldStatus::custom(value.to_owned())),
             object_lock_mode: field(LOCK_MODE).map(|value| ObjectLockMode::custom(value.to_owned())),
-            object_lock_retain_until_date,
+            object_lock_retain_until,
             sse_customer_algorithm: field(SSEC_ALGORITHM).map(str::to_owned),
             sse_customer_key: field(SSEC_KEY).map(SseCustomerKey::from_wire),
             sse_customer_key_md5: field(SSEC_KEY_MD5).map(str::to_owned),
         })
     }
 
-    /// `base`, with the six members set from this reading.
-    pub(super) fn into_fields(self, base: PostObjectFields) -> PostObjectFields {
-        PostObjectFields {
+    /// `base` with the six members set, and the source retention date offset when captured.
+    pub(super) fn into_fields(self, base: PostObjectFields) -> (PostObjectFields, Option<i32>) {
+        let fields = PostObjectFields {
             object_lock_legal_hold_status: self.object_lock_legal_hold_status,
             object_lock_mode: self.object_lock_mode,
-            object_lock_retain_until_date: self.object_lock_retain_until_date,
+            object_lock_retain_until_date: self.object_lock_retain_until.map(|(instant, _)| instant),
             sse_customer_algorithm: self.sse_customer_algorithm,
             sse_customer_key: self.sse_customer_key,
             sse_customer_key_md5: self.sse_customer_key_md5,
             ..base
-        }
+        };
+        (fields, self.object_lock_retain_until.and_then(|(_, offset)| offset))
     }
 }
 
@@ -278,7 +281,7 @@ mod tests {
             DateGrammar::Iso8601Header,
         )
         .expect("every field reads");
-        let fields = read.into_fields(PostObjectFields::default());
+        let (fields, _) = read.into_fields(PostObjectFields::default());
         assert_eq!(fields.object_lock_mode.as_ref().map(|mode| mode.as_str()), Some("GOVERNANCE"));
         assert_eq!(fields.object_lock_retain_until_date.map(|instant| instant.secs()), Some(1_893_456_000));
         assert_eq!(fields.object_lock_legal_hold_status.as_ref().map(|status| status.as_str()), Some("ON"));
@@ -300,7 +303,7 @@ mod tests {
             DateGrammar::LegacyRustfs,
         )
         .expect("nothing to read");
-        let fields = read.into_fields(PostObjectFields::default());
+        let (fields, _) = read.into_fields(PostObjectFields::default());
         assert!(fields.is_empty(), "{fields:?}");
         assert!(!carries_customer_key(&fields));
     }
@@ -341,7 +344,7 @@ mod tests {
             DateGrammar::LegacyRustfs,
         )
         .expect("read as sent");
-        let fields = read.into_fields(PostObjectFields::default());
+        let (fields, _) = read.into_fields(PostObjectFields::default());
         assert_eq!(fields.object_lock_mode.as_ref().map(|mode| mode.as_str()), Some("ARCHIVE"));
         assert_eq!(fields.sse_customer_algorithm.as_deref(), Some(""));
         assert!(carries_customer_key(&fields));
@@ -351,7 +354,7 @@ mod tests {
     /// qualifier; the gateway grammar also reads that qualifier. Neither reads a copy source.
     #[test]
     fn n_the_gate_lookup_answers_only_the_names_it_reads() {
-        let fields = LockAndCustomerKey::read(
+        let (fields, _) = LockAndCustomerKey::read(
             &[
                 (SSEC_ALGORITHM, "AES256"),
                 (SSEC_KEY, "key-text"),

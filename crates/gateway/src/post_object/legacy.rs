@@ -94,7 +94,7 @@ pub(super) fn content_type(fields: &[(&str, &str)]) -> Option<String> {
 /// fail, and the first that does — the bucket-key flag, then `If-Match`, then `If-None-Match`,
 /// then the retain-until date, then the write offset, the member order the other four were
 /// observed in — refuses the upload before authorization, naming the field and the value as sent.
-pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields, S3Error> {
+pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<(PostObjectFields, Option<i32>), S3Error> {
     let text = |name: &str| field(fields, name).map(str::to_owned);
     let condition = |value: &str| is_entity_tag_condition(value).then(|| value.to_owned());
     let managed_fields = super::fields::managed_fields(fields, true)?;
@@ -300,7 +300,7 @@ mod tests {
     /// and a member the form did not carry is absent.
     #[test]
     fn a_text_member_is_carried_as_sent() {
-        let fields = super::object_fields(&[
+        let (fields, _) = super::object_fields(&[
             ("cache-control", " max-age=60 "),
             ("content-disposition", "attachment; filename=\"r\u{e9}sum\u{e9}.pdf\""),
             ("content-language", ""),
@@ -328,12 +328,12 @@ mod tests {
     #[test]
     fn a_numeric_member_is_read_as_rust_reads_it() {
         for (value, expected) in [("true", Some(true)), ("false", Some(false))] {
-            let fields =
+            let (fields, _) =
                 super::object_fields(&[("x-amz-server-side-encryption-bucket-key-enabled", value)]).expect("a Rust boolean");
             assert_eq!(fields.bucket_key_enabled, expected, "{value}");
         }
         for (value, expected) in [("0", 0), ("+5", 5), ("-5", -5), ("9223372036854775807", i64::MAX)] {
-            let fields = super::object_fields(&[("x-amz-write-offset-bytes", value)]).expect("a Rust i64");
+            let (fields, _) = super::object_fields(&[("x-amz-write-offset-bytes", value)]).expect("a Rust i64");
             assert_eq!(fields.write_offset_bytes, Some(expected), "{value}");
         }
         for value in ["True", "1", " true", ""] {
@@ -366,7 +366,7 @@ mod tests {
             "d41d8cd98f00b204e9800998ecf8427e-2",
         ] {
             assert!(super::is_entity_tag_condition(value), "{value:?}");
-            let fields = super::object_fields(&[("if-match", value), ("if-none-match", value)]).expect("a condition");
+            let (fields, _) = super::object_fields(&[("if-match", value), ("if-none-match", value)]).expect("a condition");
             assert_eq!(fields.if_match.as_deref(), Some(value));
             assert_eq!(fields.if_none_match.as_deref(), Some(value));
         }

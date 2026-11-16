@@ -555,18 +555,31 @@ impl RequestContextView {
         self.lifecycle_request_dates.as_ref()
     }
 
+    /// Installs the source retention date offset already decoded by the POST form parser.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_post_object_retain_until_offset_seconds(mut self, offset_seconds: Option<i32>) -> Self {
+        if self.operation == "PostObject" {
+            self.object_lock_retain_until_offset_seconds = offset_seconds;
+        }
+        self
+    }
+
     pub(crate) fn with_request_dates(
         mut self,
         dates: Option<Arc<LifecycleRequestDates>>,
         retention_offset_seconds: Option<i32>,
     ) -> Self {
         self.lifecycle_request_dates = dates;
-        self.object_lock_retain_until_offset_seconds = retention_offset_seconds;
+        // POST forms are decoded by the facade before core attaches its request dates.
+        if self.operation != "PostObject" {
+            self.object_lock_retain_until_offset_seconds = retention_offset_seconds;
+        }
         self
     }
 
     /// The source UTC offset in seconds east of UTC for a RustFS-profile
-    /// `PutObjectRetention` or `PutObject` retention date.
+    /// `PutObjectRetention`, `PutObject`, or `PostObject` retention date.
     ///
     /// Zero represents an explicitly supplied UTC date. The decoded input carries the instant
     /// and its precision. `None` means the date is absent or the operation or profile is different.

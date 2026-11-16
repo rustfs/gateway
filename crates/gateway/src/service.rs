@@ -1009,12 +1009,15 @@ impl S3Service {
             Ok(body) => body,
             Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
         };
-        // A form's key, success plan and permission fields, cloned so the route stage borrows no body.
-        let (effective_key, post_response, post_fields) = match &accepted_body {
-            AcceptedBody::Ordinary(_) => (meta.key().cloned(), None, None),
-            AcceptedBody::PostObject(post) => {
-                (Some(post.key().clone()), Some(post.response_plan()), Some(post.permission_fields()))
-            }
+        // Own the form's request facts so the route and input stages borrow no body.
+        let (effective_key, post_response, post_fields, post_date_offset) = match &accepted_body {
+            AcceptedBody::Ordinary(_) => (meta.key().cloned(), None, None, None),
+            AcceptedBody::PostObject(post) => (
+                Some(post.key().clone()),
+                Some(post.response_plan()),
+                Some(post.permission_fields()),
+                post.retain_until_offset_seconds(),
+            ),
         };
         let defer_post_success_check = M::defers_post_object_success_check(&op);
         let post_success_check = post_response
@@ -1022,20 +1025,16 @@ impl S3Service {
             .and_then(|plan| defer_post_success_check.then(|| plan.success_check()));
         let config = config.meta_auth();
         outcome.identity = verdict.identity().cloned();
-
         let Some(requirement) = M::auth(&op) else {
-            // Registration refuses an operation with no authorisation action, so this is a defect rather than a configuration.
-            // Refused, never permitted: rustfs/rustfs#4845 is what a permissive answer here looks like in production.
+            // Registration requires an action. Fail closed if that invariant breaks (rustfs/rustfs#4845).
             return outcome.refuse_handler(HandlerError::internal_error("this operation declares no authorisation action"));
         };
-        // A request naming one object version is asked the operation's version action, never the
-        // unversioned one (the GHSA-3ppv class), except where the RustFS profile keeps legacy
-        // RustFS's unversioned action; either question names the version.
+        // A named version selects the version action unless the RustFS profile keeps the legacy
+        // unversioned action. Both questions name the version (GHSA-3ppv).
         let named_version = requirement.version_requirement().and(meta.query("versionId"));
         let requirement = requirement
             .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
         let asked_version = named_version.as_deref();
-        // Header-conditional actions AWS requires on top of the base one (`ExtraPermission`).
         let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();
         // A rejected verdict was answered above; refused here rather than reported as anonymous.
@@ -1518,6 +1517,7 @@ impl S3Service {
             let sse = config.sse().cloned().map_err(map)?;
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
                 .map(|context| context.with_post_object_success_check(post_success_check))
+                .map(|context| context.with_post_object_retain_until_offset_seconds(post_date_offset))
                 .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()))
                 .map(|context| match input_bearer {
                     Some(receipt) => context.with_bearer_receipt(receipt),

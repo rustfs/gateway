@@ -252,7 +252,7 @@ where
         let key_text = policy.final_key(&anonymous_key);
         let key =
             ObjectKey::materialize_decoded(key_text, names).map_err(|_| policy_refusal(PostPolicyError::ConditionFailed))?;
-        let (metadata, content_type, object_fields, gateway_bucket_key) = if legacy_store {
+        let (metadata, content_type, (object_fields, retain_until_offset_seconds), gateway_bucket_key) = if legacy_store {
             // Legacy RustFS's own refusal of an unreadable field answers before this bridge's.
             let object_fields = legacy::object_fields(&fields)?;
             legacy::refuse_other_key(key.as_str(), &legacy::stored_key(key_field, filename))
@@ -291,6 +291,7 @@ where
             content_type,
             metadata,
             object_fields,
+            retain_until_offset_seconds,
             gateway_bucket_key,
             permission_fields,
             response,
@@ -316,6 +317,7 @@ pub(crate) struct ResolvedPostObject<B: Body> {
     /// The other `PutObject` members the form set: every one legacy RustFS reads under the RustFS
     /// profile, the Object Lock and encryption members under either grammar.
     object_fields: PostObjectFields,
+    retain_until_offset_seconds: Option<i32>,
     /// As sent, including an unreadable flag: the gateway SSE gate decides its refusal order.
     gateway_bucket_key: Option<String>,
     /// The fields an extra-permission trigger may read, as sent (`fields::permission_fields`).
@@ -333,6 +335,10 @@ where
 {
     pub(crate) fn key(&self) -> &ObjectKey {
         &self.key
+    }
+
+    pub(crate) fn retain_until_offset_seconds(&self) -> Option<i32> {
+        self.retain_until_offset_seconds
     }
 
     pub(crate) fn response_plan(&self) -> PostObjectResponsePlan {

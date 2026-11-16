@@ -18,10 +18,10 @@
 //!
 //! Responsible for: the handler's `PostObjectInput::fields` for each member, and the refusal of a
 //! value legacy RustFS cannot read (before authorization, as legacy RustFS decodes the form before
-//! its access hook runs).
+//! its access hook runs). Also covers the source retention date offset in the handler context.
 //! NOT responsible for: what a backend stores from a member (`compat-sut`'s
 //! `post_object_field_tests.rs`), the form grammar (`post_object_legacy_form.rs`), signed
-//! policies, or the Object Lock and customer-key fields (`post_object_lock_and_key_fields.rs`).
+//! policies, or the other Object Lock and customer-key fields (`post_object_lock_and_key_fields.rs`).
 //! Upstream: the facade's public API. Downstream: nothing.
 //!
 //! Evidence: legacy RustFS (rustfs/rustfs `e870a6d25b`, the S3 stack its `Cargo.toml:318` pins)
@@ -34,24 +34,42 @@
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use http::{Request, StatusCode};
+use http::{Method, Request, StatusCode};
 use http_body_util::BodyExt;
-use rustfs_gateway::dto::{PostObject, PostObjectFields, PostObjectOutput};
-use rustfs_gateway::{Credentials, ETag, Handler, HandlerResult, Req, Resp, S3Service, ServiceBuilder, StaticCredentials};
+use rustfs_gateway::dto::{ListBuckets, ListBucketsOutput, PostObject, PostObjectFields, PostObjectOutput};
+use rustfs_gateway::{ETag, Handler, HandlerResult, Req, Resp, S3Service};
+
+use crate::support::{signed, wired_at_signed_time};
 
 const BOUNDARY: &str = "----RustFSLegacyFields";
+const RETAIN_UNTIL: &str = "x-amz-object-lock-retain-until-date";
+
+struct Handed {
+    fields: PostObjectFields,
+    offset: Option<i32>,
+    cloned_offset: Option<i32>,
+}
 
 /// Records the members each handled form was handed.
 #[derive(Default)]
 struct Backend {
-    handed: Mutex<Option<PostObjectFields>>,
+    handed: Mutex<Option<Handed>>,
 }
 
 impl Handler<PostObject> for Backend {
     async fn call(&self, request: Req<PostObject>) -> HandlerResult<PostObject> {
+        let context = request.context();
+        let offset = context.object_lock_retain_until_offset_seconds();
+        let cloned_offset = context
+            .clone_without_caller_secret()
+            .object_lock_retain_until_offset_seconds();
         let input = request.into_input();
         let _ = input.body.into_body().collect().await;
-        *self.handed.lock().expect("observation lock") = Some(input.fields);
+        *self.handed.lock().expect("observation lock") = Some(Handed {
+            fields: input.fields,
+            offset,
+            cloned_offset,
+        });
         Ok(Resp::new(PostObjectOutput {
             e_tag: Some(ETag::new("storage-etag").expect("the fixture entity tag is valid")),
             version_id: None,
@@ -59,19 +77,20 @@ impl Handler<PostObject> for Backend {
     }
 }
 
-fn service(backend: Arc<Backend>, allow: bool) -> S3Service {
-    let credentials =
-        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials")));
-    ServiceBuilder::new()
+impl Handler<ListBuckets> for Backend {
+    async fn call(&self, request: Req<ListBuckets>) -> HandlerResult<ListBuckets> {
+        assert_eq!(request.context().object_lock_retain_until_offset_seconds(), None);
+        Ok(Resp::new(ListBucketsOutput::default()))
+    }
+}
+
+fn service(backend: Arc<Backend>, allow: bool, legacy: bool) -> S3Service {
+    let builder = wired_at_signed_time()
+        .register::<ListBuckets, _>(Arc::clone(&backend))
         .register::<PostObject, _>(backend)
-        .authenticator(rustfs_gateway::SigV4Authenticator::new(
-            credentials,
-            rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty region set"),
-        ))
-        .authorizer(rustfs_gateway::allow_when(move |_| allow))
-        .legacy_rustfs_post_forms()
-        .build()
-        .expect("complete POST Object service")
+        .authorizer(rustfs_gateway::allow_when(move |_| allow));
+    let builder = if legacy { builder.legacy_rustfs_post_forms() } else { builder };
+    builder.build().expect("complete POST Object service")
 }
 
 /// A form with the key `k`, then `fields` in order, then a one-byte file.
@@ -90,8 +109,13 @@ fn form(fields: &[(&str, &str)]) -> Vec<u8> {
 
 /// Posts the form through a service whose authorizer allows everything or nothing; the answer's
 /// status and body, and what the handler was handed.
-async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Option<PostObjectFields>) {
+async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Option<Handed>) {
     let backend = Arc::new(Backend::default());
+    let service = service(Arc::clone(&backend), allow, true);
+    post_with(&service, &backend, fields).await
+}
+
+async fn post_with(service: &S3Service, backend: &Backend, fields: &[(&str, &str)]) -> (StatusCode, String, Option<Handed>) {
     let body = form(fields);
     let request = Request::builder()
         .method("POST")
@@ -101,7 +125,7 @@ async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Opti
         .header("content-length", body.len())
         .body(Bytes::from(body))
         .expect("valid request");
-    let response = service(Arc::clone(&backend), allow).call_bytes(request).await;
+    let response = service.call_bytes(request).await;
     let status = response.status();
     let answer = response.into_body().collect().await.expect("the answer body").to_bytes();
     let handed = backend.handed.lock().expect("observation lock").take();
@@ -111,7 +135,7 @@ async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Opti
 async fn handed(fields: &[(&str, &str)]) -> PostObjectFields {
     let (status, answer, handed) = post(fields, true).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
-    handed.expect("the handler ran")
+    handed.expect("the handler ran").fields
 }
 
 /// Positive — every text and enumeration member legacy RustFS reads reaches the handler as the form
@@ -254,4 +278,103 @@ async fn an_unreadable_member_is_refused_before_authorization() {
             assert!(handed.is_none(), "{name}");
         }
     }
+}
+
+#[tokio::test]
+async fn retention_date_keeps_its_source_offset_through_dispatch() {
+    for (date, offset) in [
+        ("2030-01-01T08:00:00+08:00", 28_800),
+        ("2029-12-31T23:30:00-00:30", -1_800),
+        ("2030-01-01T00:00:00Z", 0),
+    ] {
+        let (status, answer, observed) = post(&[(RETAIN_UNTIL, date)], true).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{date}: {answer}");
+        assert_eq!(observed.expect("the handler ran").offset, Some(offset), "{date}");
+    }
+}
+
+#[tokio::test]
+async fn retention_instant_keeps_nanoseconds() {
+    let fields = handed(&[(RETAIN_UNTIL, "2030-01-01T08:00:00.123456789+08:00")]).await;
+    let date = fields.object_lock_retain_until_date.expect("the decoded retention date");
+    assert_eq!((date.secs(), date.subsec_nanos()), (1_893_456_000, 123_456_789));
+}
+
+#[tokio::test]
+async fn cloned_context_keeps_retention_offset() {
+    let (status, answer, observed) = post(&[(RETAIN_UNTIL, "2029-12-31T23:30:00-00:30")], true).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
+    assert_eq!(observed.expect("the handler ran").cloned_offset, Some(-1_800));
+}
+
+#[tokio::test]
+async fn retention_offset_is_scoped_to_the_legacy_post_that_supplied_it() {
+    let backend = Arc::new(Backend::default());
+    let legacy = service(Arc::clone(&backend), true, true);
+    let fields = [(RETAIN_UNTIL, "2030-01-01T08:00:00+08:00")];
+    let (status, answer, observed) = post_with(&legacy, &backend, &fields).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
+    assert_eq!(observed.expect("the handler ran").offset, Some(28_800));
+
+    assert_eq!(legacy.call_bytes(signed(Method::GET, "/")).await.status(), StatusCode::OK);
+
+    let (status, answer, observed) = post_with(&legacy, &backend, &[]).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
+    let observed = observed.expect("the handler ran");
+    assert_eq!((observed.fields.object_lock_retain_until_date, observed.offset), (None, None));
+}
+
+#[tokio::test]
+async fn default_profile_decodes_retention_without_carrying_an_offset() {
+    let backend = Arc::new(Backend::default());
+    let gateway = service(Arc::clone(&backend), true, false);
+    let fields = [(RETAIN_UNTIL, "2030-01-01T08:00:00+08:00")];
+    let (status, answer, observed) = post_with(&gateway, &backend, &fields).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
+    let observed = observed.expect("the handler ran");
+    assert_eq!(
+        (observed.fields.object_lock_retain_until_date.map(|date| date.secs()), observed.offset),
+        (Some(1_893_456_000), None),
+    );
+}
+
+#[tokio::test]
+async fn unreadable_retention_dates_are_refused_before_dispatch() {
+    for value in [
+        "2030-02-30T00:00:00Z",
+        "",
+        "2030-01-01T00:00:00+24:00",
+        "2030-01-01T00:00:00Ztrailing",
+    ] {
+        let (status, answer, observed) = post(&[(RETAIN_UNTIL, value)], true).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{value}: {answer}");
+        assert!(answer.contains("<Code>InvalidArgument</Code>"), "{value}: {answer}");
+        assert!(answer.contains(RETAIN_UNTIL), "{value}: {answer}");
+        assert!(observed.is_none(), "{value}");
+    }
+}
+
+#[tokio::test]
+async fn retention_keeps_the_legacy_order_of_field_refusals_and_authorization() {
+    // Put the earliest refusal last in the form to distinguish decoder order from field order.
+    let mut fields = [
+        ("x-amz-write-offset-bytes", "fraction"),
+        (RETAIN_UNTIL, "tomorrow"),
+        ("if-match", "unquoted tag"),
+        ("x-amz-server-side-encryption-bucket-key-enabled", "TRUE"),
+    ];
+    for end in (1..=fields.len()).rev() {
+        let (status, answer, observed) = post(&fields[..end], false).await;
+        let (name, value) = fields[end - 1];
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{answer}");
+        assert!(answer.contains("<Code>InvalidArgument</Code>"), "{answer}");
+        assert!(answer.contains(&format!("invalid field value: {name}: &quot;{value}&quot;")), "{answer}");
+        assert!(observed.is_none(), "{name}");
+    }
+
+    fields[1].1 = "2030-01-01T00:00:00Z";
+    let (status, answer, observed) = post(&fields[1..2], false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{answer}");
+    assert!(answer.contains("<Code>AccessDenied</Code>"), "{answer}");
+    assert!(observed.is_none());
 }

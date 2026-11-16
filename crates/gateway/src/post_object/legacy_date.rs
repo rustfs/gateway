@@ -37,8 +37,8 @@
 
 use rustfs_gateway_types::Timestamp;
 
-/// The instant `value` spells, or `None` for anything legacy RustFS's reader refuses.
-pub(super) fn read(value: &str) -> Option<Timestamp> {
+/// The instant and source UTC offset `value` spells, or `None` for an unreadable date.
+pub(super) fn read(value: &str) -> Option<(Timestamp, i32)> {
     let bytes = value.as_bytes();
     let digits = |at: usize, len: usize| -> Option<i64> {
         let field = bytes.get(at..at.checked_add(len)?)?;
@@ -101,7 +101,8 @@ pub(super) fn read(value: &str) -> Option<Timestamp> {
     if leap && !ends_a_utc_month(seconds) {
         return None;
     }
-    Timestamp::from_secs_nanos(seconds, u32::try_from(nanos).ok()?).ok()
+    let instant = Timestamp::from_secs_nanos(seconds, u32::try_from(nanos).ok()?).ok()?;
+    Some((instant, i32::try_from(offset_seconds).ok()?))
 }
 
 /// Whether the UTC second `seconds` (with its last nanosecond) is the last of a month: 23:59:59
@@ -161,7 +162,7 @@ mod tests {
     use super::read;
 
     fn rendered(value: &str) -> Option<String> {
-        read(value).and_then(|instant| instant.render(TimestampFormat::Iso8601).ok())
+        read(value).and_then(|(instant, _)| instant.render(TimestampFormat::Iso8601).ok())
     }
 
     /// Positive — the spellings legacy RustFS's reader accepts, and the instant each names.
