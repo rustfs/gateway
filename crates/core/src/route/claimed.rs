@@ -289,8 +289,23 @@ impl ClaimedTable {
         entries: Vec<ClaimedEntry>,
         shadowing: &ShadowingDecls,
     ) -> Result<Self, RouteBuildError> {
+        Self::build_scoped(claims, entries, shadowing, false)
+    }
+
+    /// The router has already checked every dialect and operation against this assembly's service.
+    pub(crate) fn build_scoped(
+        claims: Vec<InstalledClaim>,
+        entries: Vec<ClaimedEntry>,
+        shadowing: &ShadowingDecls,
+        independent_service: bool,
+    ) -> Result<Self, RouteBuildError> {
         for installed in &claims {
-            if let Some(rejection) = installed.claim.rejection() {
+            let rejection = if independent_service {
+                installed.claim.service_rejection()
+            } else {
+                installed.claim.rejection()
+            };
+            if let Some(rejection) = rejection {
                 return Err(RouteBuildError::RefusedClaim {
                     prefix: installed.claim.prefix,
                     rejection,

@@ -176,6 +176,9 @@ mod select_restore_roundtrip;
 #[path = "selector_required_params.rs"]
 mod selector_required_params;
 
+#[path = "service_routes.rs"]
+mod service_routes;
+
 #[path = "static_dispatch.rs"]
 mod static_dispatch;
 

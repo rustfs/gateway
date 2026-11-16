@@ -36,6 +36,8 @@ mod legacy_paths;
 mod post_form_replay;
 #[path = "post_object_form.rs"]
 mod post_object_form;
+#[path = "s3vectors_query.rs"]
+mod s3vectors_query;
 #[path = "security_floor.rs"]
 mod security_floor;
 #[path = "security_floor_fixtures/mod.rs"]

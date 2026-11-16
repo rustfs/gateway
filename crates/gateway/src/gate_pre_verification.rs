@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The two bounded reads permitted before signature verification.
+//! Bounded request-body reads permitted before signature verification.
 //!
-//! Responsible for: POST Object's text prelude and the RustFS profile's 8192-byte STS-scoped
-//! body digest, retaining the latter's bytes for the ordinary proof-gated body handoff.
+//! Responsible for: POST Object's text prelude, the RustFS profile's 8192-byte STS body digest,
+//! and S3 Vectors body digests within the service's limits, retaining digested bytes for the
+//! ordinary proof-gated body handoff.
 //! NOT responsible for: credential lookup, signature comparison or interpreting either body.
 //! Upstream: `crate::service` and the built-in authenticator. Downstream: `super::SealedBody`
 //! and `crate::wire_read`, which owns the frame ceilings and idle deadlines.
@@ -31,8 +32,9 @@ use crate::wire_read::{WireFrames, WireProgress};
 
 /// A private read offered only to the built-in authenticator, after credential lookup.
 pub(crate) trait StsBodyReader: Send + Sync {
-    /// Hashes at most 8192 body bytes and retains them for the authenticated handoff.
-    fn digest(&self, timeouts: BodyTimeouts) -> BoxFuture<'_, Result<[u8; 32], S3Error>>;
+    /// Hashes within `ceilings`, or the legacy STS 8192-byte limit when absent, and retains the
+    /// bytes for the authenticated handoff.
+    fn digest(&self, timeouts: BodyTimeouts, ceilings: Option<BodyCeilings>) -> BoxFuture<'_, Result<[u8; 32], S3Error>>;
 }
 
 impl<B> StsBodyReader for SealedBody<B>
@@ -41,7 +43,7 @@ where
     B::Data: Send,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    fn digest(&self, timeouts: BodyTimeouts) -> BoxFuture<'_, Result<[u8; 32], S3Error>> {
+    fn digest(&self, timeouts: BodyTimeouts, ceilings: Option<BodyCeilings>) -> BoxFuture<'_, Result<[u8; 32], S3Error>> {
         Box::pin(async move {
             let mut pending = self.body.lock().await;
             if let Some(result) = self.replay.get() {
@@ -59,18 +61,19 @@ where
             // Retained before polling: dropping this future must not turn a consumed body into EOF.
             let _ = self.sts_progress.set(progress.clone());
             let result = async {
+                let legacy_sts = ceilings.is_none();
+                let ceilings = ceilings.unwrap_or(BodyCeilings {
+                    buffered: 8192,
+                    whole_body: true,
+                    declared: None,
+                });
                 let mut bytes = BytesMut::new();
                 if let Some(body) = body {
-                    let ceilings = BodyCeilings {
-                        buffered: 8192,
-                        whole_body: true,
-                        declared: None,
-                    };
                     let mut frames = WireFrames::new(body, progress, ceilings, timeouts);
                     loop {
                         let frame = core::future::poll_fn(|context| frames.poll_next(context))
                             .await
-                            .map_err(sts_body_refusal)?;
+                            .map_err(|refusal| if legacy_sts { sts_body_refusal(refusal) } else { refusal })?;
                         let Some(frame) = frame else { break };
                         bytes.put(frame);
                     }
@@ -233,6 +236,35 @@ mod tests {
     use super::*;
     use crate::gate::MetadataAdmission;
 
+    #[tokio::test]
+    async fn a_vector_body_at_the_configured_ceiling_is_digested() {
+        let bytes = Bytes::from(vec![b'a'; 16384]);
+        let expected: [u8; 32] = Sha256::digest(&bytes).into();
+        let sealed = SealedBody::seal(Some(Full::new(bytes)), Some(16384));
+        let actual = sealed
+            .digest(BodyTimeouts::S3, Some(BodyCeilings::of("example:PutVectors", 16384)))
+            .await
+            .expect("the exact configured ceiling is accepted");
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn n_a_vector_body_above_the_configured_ceiling_retains_its_size_error() {
+        let sealed = SealedBody::seal(Some(Full::new(Bytes::from(vec![b'a'; 16385]))), Some(16385));
+        let refusal = sealed
+            .digest(BodyTimeouts::S3, Some(BodyCeilings::of("example:PutVectors", 16384)))
+            .await
+            .expect_err("one byte above the configured ceiling is refused");
+        assert_eq!(refusal.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
+
+        let legacy = SealedBody::seal(Some(Full::new(Bytes::from(vec![b'a'; 8193]))), Some(8193));
+        let legacy_refusal = legacy
+            .digest(BodyTimeouts::S3, None)
+            .await
+            .expect_err("STS retains its own ceiling");
+        assert_eq!(legacy_refusal.code(), Some(&ErrorCode::INVALID_REQUEST));
+    }
+
     struct OpenBody {
         frame: Option<Bytes>,
         polls: Arc<AtomicUsize>,
@@ -319,7 +351,7 @@ mod tests {
                 }))),
                 Some(size as u64),
             );
-            let result = sealed.digest(BodyTimeouts::S3).await;
+            let result = sealed.digest(BodyTimeouts::S3, None).await;
             if size == 3 {
                 assert_eq!(result.expect("the accepted control is hashed"), <[u8; 32]>::from(Sha256::digest(b"aaa")));
                 assert_eq!(copied.load(Ordering::SeqCst), 3, "the control copied real source bytes");
@@ -377,9 +409,9 @@ mod tests {
     async fn a_completed_sts_read_survives_a_second_digest_request() {
         let bytes = Bytes::from_static(b"abc");
         let sealed = SealedBody::seal(Some(Full::new(bytes.clone())), Some(3));
-        let first = sealed.digest(BodyTimeouts::S3).await.expect("a bounded completed body");
+        let first = sealed.digest(BodyTimeouts::S3, None).await.expect("a bounded completed body");
         assert_eq!(first, <[u8; 32]>::from(Sha256::digest(&bytes)));
-        assert_eq!(sealed.digest(BodyTimeouts::S3).await.expect("the retained digest"), first);
+        assert_eq!(sealed.digest(BodyTimeouts::S3, None).await.expect("the retained digest"), first);
         let replay = sealed
             .read(
                 &MetadataAdmission::granted_for_test(),
@@ -402,11 +434,14 @@ mod tests {
     #[tokio::test]
     async fn n_a_completed_sts_refusal_survives_a_second_digest_request() {
         let (sealed, polls) = body(Bytes::from(vec![b'a'; 8193]));
-        let first = sealed.digest(BodyTimeouts::S3).await.expect_err("the body exceeds the bound");
+        let first = sealed
+            .digest(BodyTimeouts::S3, None)
+            .await
+            .expect_err("the body exceeds the bound");
         assert_eq!(first.code(), Some(&ErrorCode::INVALID_REQUEST));
         assert!(first.body_unfinished.is_some());
         let second = sealed
-            .digest(BodyTimeouts::S3)
+            .digest(BodyTimeouts::S3, None)
             .await
             .expect_err("a read refusal cannot become an empty digest");
         assert_eq!(second, first);
@@ -417,10 +452,13 @@ mod tests {
     #[tokio::test]
     async fn n_a_canceled_sts_read_is_refused_as_unfinished_on_retry() {
         let (sealed, polls) = body(Bytes::from_static(b"a"));
-        assert!(sealed.digest(BodyTimeouts::S3).now_or_never().is_none(), "the body never reaches EOF");
+        assert!(
+            sealed.digest(BodyTimeouts::S3, None).now_or_never().is_none(),
+            "the body never reaches EOF"
+        );
         assert_eq!(polls.load(Ordering::SeqCst), 2, "one data frame and one pending poll were observed");
         let refusal = sealed
-            .digest(BodyTimeouts::S3)
+            .digest(BodyTimeouts::S3, None)
             .await
             .expect_err("a canceled read cannot become an empty digest");
         assert_eq!(refusal.code(), Some(&ErrorCode::INCOMPLETE_BODY));
@@ -434,7 +472,10 @@ mod tests {
     async fn n_a_completed_sts_refusal_cannot_be_handed_to_an_operation() {
         for streaming in [false, true] {
             let (sealed, _) = body(Bytes::from(vec![b'a'; 8193]));
-            let first = sealed.digest(BodyTimeouts::S3).await.expect_err("the body exceeds the bound");
+            let first = sealed
+                .digest(BodyTimeouts::S3, None)
+                .await
+                .expect_err("the body exceeds the bound");
             let proof = MetadataAdmission::granted_for_test();
             let ceilings = BodyCeilings {
                 buffered: 20000,

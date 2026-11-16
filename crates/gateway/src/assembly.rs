@@ -294,9 +294,13 @@ impl From<BuildError> for AssemblyError {
     fn from(source: BuildError) -> Self {
         let rule = match source {
             BuildError::Registration(_) => RuleRef::REGISTRATION,
-            BuildError::RouteClaimsStandardName { .. } | BuildError::UnverifiedCodecRoute { .. } | BuildError::Route(_) => {
-                RuleRef::ROUTE
-            }
+            BuildError::DialectServiceMismatch { .. }
+            | BuildError::OperationServiceMismatch { .. }
+            | BuildError::ServiceRequiresSigV4 { .. }
+            | BuildError::ServiceScopeChanged { .. }
+            | BuildError::RouteClaimsStandardName { .. }
+            | BuildError::UnverifiedCodecRoute { .. }
+            | BuildError::Route(_) => RuleRef::ROUTE,
         };
         Self::Router {
             source: Box::new(source),

@@ -72,6 +72,7 @@ pub use crate::route::BucketParam;
 use crate::op::Operation;
 use crate::registry::reject;
 use crate::route::{PathClaim, Predicate, RouteEntry, RouteSelector, ShadowingDecl, render_selector};
+use rustfs_gateway_sig::SigService;
 
 /// Where a dialect wants its operation in the ordered table, and what that choice hides.
 ///
@@ -132,6 +133,7 @@ impl DialectOperation {
 #[derive(Clone, Debug)]
 pub struct Dialect {
     name: &'static str,
+    signing_service: Option<SigService>,
     operations: Vec<DialectOperation>,
     claims: &'static [PathClaim],
     claimed: Vec<ClaimedOperation>,
@@ -145,6 +147,20 @@ impl Dialect {
     /// whether they could cover one path.
     #[must_use]
     pub fn assemble(overlay: &'static DialectOverlay) -> DialectBuilder {
+        Self::assemble_scoped(overlay, None)
+    }
+
+    /// Begins a dialect that can be installed only in an independent router for `service`.
+    ///
+    /// Every declared operation must require SigV4 under every policy and use this signing service.
+    /// A claim may have one segment because this router contains only explicit dialect routes,
+    /// with no generated S3 fallback. Ordinary S3 assemblies cannot install this dialect.
+    #[must_use]
+    pub fn assemble_for_service(overlay: &'static DialectOverlay, service: SigService) -> DialectBuilder {
+        Self::assemble_scoped(overlay, Some(service))
+    }
+
+    fn assemble_scoped(overlay: &'static DialectOverlay, signing_service: Option<SigService>) -> DialectBuilder {
         let mut errors = Vec::new();
         if !overlay.vendor_is_well_formed() {
             errors.push(DialectError::MalformedVendor {
@@ -153,7 +169,12 @@ impl Dialect {
             });
         }
         for (index, claim) in overlay.claims.iter().enumerate() {
-            if let Some(rejection) = claim.rejection() {
+            let rejection = if signing_service.is_some() {
+                claim.service_rejection()
+            } else {
+                claim.rejection()
+            };
+            if let Some(rejection) = rejection {
                 errors.push(DialectError::RefusedClaim {
                     dialect: overlay.name,
                     prefix: claim.prefix,
@@ -172,6 +193,7 @@ impl Dialect {
         }
         DialectBuilder {
             overlay,
+            signing_service,
             operations: Vec::new(),
             claimed: Vec::new(),
             forms: Vec::new(),
@@ -179,6 +201,12 @@ impl Dialect {
             used_claims: BTreeSet::new(),
             errors,
         }
+    }
+
+    /// The independent service this dialect requires, or `None` for an ordinary S3 dialect.
+    #[must_use]
+    pub const fn signing_service(&self) -> Option<SigService> {
+        self.signing_service
     }
 
     /// The path prefixes this dialect claims away from S3 routing.
@@ -230,6 +258,7 @@ impl Dialect {
 /// the first and hides the rest.
 #[derive(Debug)]
 pub struct DialectBuilder {
+    signing_service: Option<SigService>,
     overlay: &'static DialectOverlay,
     operations: Vec<DialectOperation>,
     /// Accepted claimed routes (`claimed`).
@@ -328,6 +357,20 @@ impl DialectBuilder {
     /// a claimed route. Returns whether every check passed.
     fn check_record<O: Operation>(&mut self, precedence: u16, declared_selector: String) -> bool {
         let name = O::NAME;
+        if let Some(expected) = self.signing_service {
+            if O::floor().service() != expected {
+                self.errors.push(DialectError::SigningServiceMismatch {
+                    name,
+                    expected,
+                    actual: O::floor().service(),
+                });
+                return false;
+            }
+            if !O::floor().requires_sigv4_under_every_policy() {
+                self.errors.push(DialectError::ServiceRequiresSigV4 { name });
+                return false;
+            }
+        }
         let Some(row) = self.overlay.row(name) else {
             self.errors.push(DialectError::NotInOverlay { name });
             return false;
@@ -447,6 +490,7 @@ impl DialectBuilder {
         if self.errors.is_empty() {
             Ok(Dialect {
                 name: self.overlay.name,
+                signing_service: self.signing_service,
                 operations: self.operations,
                 claims: self.overlay.claims,
                 claimed: self.claimed,

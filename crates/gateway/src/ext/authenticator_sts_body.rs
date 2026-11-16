@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! RustFS's STS-scoped header signature over a bounded body (rustfs/gateway#1230).
+//! Header signatures whose payload digest is computed from a bounded request body.
 //!
-//! Responsible for: asking the private reader only after a key is found (a key that is not found
-//! is answered there, a store fault under the switch as `Unavailable`), using the body's digest
-//! when the payload header is absent, preserving a body-read refusal before signature comparison,
-//! turning a verification failure into the trait's answer, and answering whether a header
-//! signature covers the body (rustfs/gateway#1587).
+//! Responsible for: reading S3 Vectors bodies within the service's limits and preserving RustFS's
+//! STS body reading after credential lookup, using the body's digest when the payload header is
+//! absent, retaining a body-read refusal before signature comparison, turning a verification
+//! failure into the trait's answer, and reporting whether a header signature covers the body.
 //! NOT responsible for: reading body frames or selecting an STS operation.
 //! Upstream: `crate::service` and `super::SigV4Authenticator`. Downstream: the canonical request
 //! verifier in `super` and the proof-gated replay in `crate::gate`.
@@ -27,10 +26,11 @@ use std::sync::OnceLock;
 
 use super::{AuthError, Authentication, AuthenticationOutcome, CredentialLookup, PayloadMode, Presented, SigLocation};
 use super::{SigV4Authenticator, Unavailable, VerificationFailure};
-use crate::gate::{BodyTimeouts, StsBodyReader};
+use crate::gate::{BodyCeilings, BodyTimeouts, StsBodyReader};
 
 pub(super) struct StsBodyReading<'a> {
     reader: &'a dyn StsBodyReader,
+    ceilings: BodyCeilings,
     timeouts: BodyTimeouts,
     /// Set once the body's own digest became the payload token a comparison runs over.
     digested: OnceLock<()>,
@@ -42,10 +42,16 @@ pub(super) struct StsBodyReading<'a> {
 
 impl<'a> Authentication<'a> {
     /// Offered by the pipeline; only the built-in verification path asks the private reader.
-    pub(crate) fn with_sts_body_reader(mut self, reader: Option<&'a dyn StsBodyReader>, timeouts: BodyTimeouts) -> Self {
+    pub(crate) fn with_sts_body_reader(
+        mut self,
+        reader: Option<&'a dyn StsBodyReader>,
+        operation: &str,
+        config: &crate::ServiceConfig,
+    ) -> Self {
         self.sts_body = reader.map(|reader| StsBodyReading {
             reader,
-            timeouts,
+            ceilings: BodyCeilings::of(operation, config.max_buffered_body_bytes()),
+            timeouts: config.request_body_deadlines(),
             digested: OnceLock::new(),
             signed: OnceLock::new(),
         });
@@ -98,9 +104,11 @@ impl SigV4Authenticator {
         presented: &Presented<'_>,
         resolved: &Result<CredentialLookup, super::super::credentials::ProviderError>,
     ) -> Result<Option<PayloadMode>, VerificationFailure> {
-        if !self.scope_policy.legacy_services
+        let vectors = request.sealed().expected_service() == rustfs_gateway_sig::SigService::S3Vectors;
+        let legacy_sts =
+            self.scope_policy.legacy_services && presented.scope().service() == Some(rustfs_gateway_sig::SigService::Sts);
+        if (!vectors && !legacy_sts)
             || request.sealed().marker().location() != SigLocation::Header
-            || presented.scope().service() != Some(rustfs_gateway_sig::SigService::Sts)
             || request.sealed().view().headers().contains_key("x-amz-content-sha256")
         {
             return Ok(None);
@@ -110,13 +118,13 @@ impl SigV4Authenticator {
         // store fault is answered at the same point, so the two keep one latency class here; both
         // answer before the body read and the comparison, so earlier than a wrong signature does.
         // That is a stated deviation from ADR-0051's "no earlier than a wrong signature".
-        if !matches!(resolved, Ok(CredentialLookup::Found(_))) {
+        if !vectors && !matches!(resolved, Ok(CredentialLookup::Found(_))) {
             return Err(self.unresolved_lookup(resolved));
         }
         let reading = request.sts_body.as_ref().ok_or(AuthError::SignatureDoesNotMatch)?;
         let digest = reading
             .reader
-            .digest(reading.timeouts)
+            .digest(reading.timeouts, vectors.then_some(reading.ceilings))
             .await
             .map_err(VerificationFailure::Body)?;
         let _ = reading.digested.set(());
