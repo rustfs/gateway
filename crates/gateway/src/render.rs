@@ -447,8 +447,7 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
     xml.finish()
 }
 
-/// Renders a refusal as the `<Error>` document S3 clients parse, with its response head.
-///
+/// Renders S3 XML and retains a clone of the refusal in response extensions for response filters.
 /// Bodyless statuses omit XML; framework-owned framing and identifiers overwrite refusal headers.
 #[must_use]
 pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
@@ -483,6 +482,7 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
         headers.insert(ETAG, value);
     }
     trace.apply(headers);
+    response.extensions_mut().insert(error.clone());
     // Only the transport turns these typed extensions into socket action.
     response.extensions_mut().insert(error.connection);
     crate::close::attach_lingering_read(error.code.as_ref(), error.body_unfinished, &mut response);
