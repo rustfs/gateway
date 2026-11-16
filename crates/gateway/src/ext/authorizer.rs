@@ -39,8 +39,11 @@
 //! [`Denial`] carries a decision and nothing derived from the request. An authorisation refusal is
 //! answered to a caller whose identity is known but whose permission is not, and a refusal that
 //! explained which condition failed would let that caller map the policy one request at a time.
+//! A host may explicitly return a caller-safe [`HandlerError`] through
+//! [`Authorizer::authorize_route_result`]; its code and message are then part of the host
+//! contract, while the authorization audit records only an indeterminate decision.
 
-use rustfs_gateway_core::{BoxFuture, ResourceIdentity, ResourceShape, Subject};
+use rustfs_gateway_core::{BoxFuture, HandlerError, ResourceIdentity, ResourceShape, Subject};
 use rustfs_gateway_http::{TransportExtensions, WireRequest};
 use rustfs_gateway_sig::{AuthScheme, Identity, RequestNow, SigFamily, SigLocation, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
@@ -448,7 +451,22 @@ impl InputDecisions {
 /// whose did.
 pub trait Authorizer: Send + Sync + 'static {
     /// Decides the routed action and destination before the body is read.
+    ///
+    /// Override [`Self::authorize_route_result`] to return a host-approved wire error.
     fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision>;
+
+    /// Decides the routed action before the body is read, preserving a host-approved error.
+    ///
+    /// The default delegates to [`Self::authorize_route`]. An error refuses the request before
+    /// decoding or invocation, uses the operation's normal handler-error rendering, and is
+    /// audited as indeterminate without including its message in the authorization event.
+    fn authorize_route_result<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Result<Decision, HandlerError>> {
+        Box::pin(async move { Ok(self.authorize_route(context, request).await) })
+    }
 
     /// Decides a normalized Copy source before the destination policy is evaluated.
     ///
@@ -478,6 +496,14 @@ pub trait Authorizer: Send + Sync + 'static {
 impl<T: Authorizer + ?Sized> Authorizer for std::sync::Arc<T> {
     fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
         (**self).authorize_route(context, request)
+    }
+
+    fn authorize_route_result<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Result<Decision, HandlerError>> {
+        (**self).authorize_route_result(context, request)
     }
 
     fn authorize_input<'a>(

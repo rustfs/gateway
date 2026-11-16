@@ -1153,6 +1153,7 @@ impl S3Service {
             );
             let route_started = route_service.inner.authz_clock.monotonic();
             let mut decisions = Vec::with_capacity(if questions.is_empty() { 0 } else { asked.len() });
+            let mut route_error = None;
             // A subject is an account, and an anonymous caller has none: refused without asking,
             // even when a deployment delegates anonymous admission to the authorizer (ADR-0025).
             let anonymous_about_a_subject = route_subjects.is_some() && route_verdict.identity().is_none();
@@ -1160,8 +1161,12 @@ impl S3Service {
                 if anonymous_about_a_subject {
                     break;
                 }
-                match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, question)).await {
-                    Ok(decision) => decisions.push(decision),
+                match catch_boxed_future(|| route_runtime.authorizer.authorize_route_result(&authz_context, question)).await {
+                    Ok(Ok(decision)) => decisions.push(decision),
+                    Ok(Err(error)) => {
+                        route_error = Some(error);
+                        break;
+                    }
                     Err(()) => {
                         crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
                         return Err(from_handler(
@@ -1172,7 +1177,9 @@ impl S3Service {
                     }
                 }
             }
-            let mut route_decision = if anonymous_about_a_subject {
+            let mut route_decision = if route_error.is_some() {
+                Decision::Indeterminate
+            } else if anonymous_about_a_subject {
                 Decision::Deny
             } else {
                 let combined = requirement.decide(route_subjects, &decisions);
@@ -1216,8 +1223,15 @@ impl S3Service {
                     });
                 }
                 for extra_request in &route_extras {
-                    match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, extra_request)).await {
-                        Ok(decision) => {
+                    match catch_boxed_future(|| route_runtime.authorizer.authorize_route_result(&authz_context, extra_request))
+                        .await
+                    {
+                        Ok(Err(error)) => {
+                            route_error = Some(error);
+                            route_decision = Decision::Indeterminate;
+                            break;
+                        }
+                        Ok(Ok(decision)) => {
                             if decision != Decision::Allow {
                                 route_decision = decision;
                                 break;
@@ -1270,7 +1284,10 @@ impl S3Service {
                     authz_started,
                 )
                 .await;
-                return Err(from_denial(denial, response_kind, route_service.inner.view_policy.denial_sentences()));
+                return Err(match route_error {
+                    Some(error) => from_handler(error, response_kind, ConnectionIntent::MayKeepAlive),
+                    None => from_denial(denial, response_kind, route_service.inner.view_policy.denial_sentences()),
+                });
             }
 
             // A claimed row's path is not a bucket surface: a bound bucket's CORS rules do not

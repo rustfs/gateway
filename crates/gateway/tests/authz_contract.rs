@@ -798,3 +798,6 @@ fn redact(body: &str) -> String {
     }
     text
 }
+
+#[path = "authz_contract/route_result.rs"]
+mod route_result;

@@ -501,14 +501,16 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # Standard for the same reason as the vendor fixtures: `acme:Form*`/`acme:Plain*` in
 # crates/core/tests/registration_signed_body.rs and `example:Form`/`example:Plain` in
 # crates/gateway/tests/dialect_claims_signed_body.rs.
-if central_builders != 102 or explicit_builders != 52:
+# explicit=53: the fallible route-authorization fixture in
+# crates/gateway/tests/authz_contract/route_result.rs states Standard for its Full-codec probe.
+if central_builders != 102 or explicit_builders != 53:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=52"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=53"
     )
 
 print(
-    "check_handler_deadline_class: 159 repository builder sites are inventoried "
-    "(154 classified: 102 central standard, 52 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 160 repository builder sites are inventoried "
+    "(155 classified: 102 central standard, 53 explicit; 5 authority tests)"
 )
 PY
