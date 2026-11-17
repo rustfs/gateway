@@ -49,7 +49,7 @@ use crate::trace::Identification;
 impl ViewPolicy {
     /// Adds the name of every legacy reading this policy's state selects to `into`.
     pub(crate) fn legacy_switches(&self, into: &mut BTreeSet<&'static str>) {
-        let readings: [(bool, &'static str); 38] = [
+        let readings: [(bool, &'static str); 39] = [
             (self.checksum_waiver.waives_every_operation(), "accept_all_checksum_omissions"),
             (
                 self.chunk_reading.empty_line_before_trailers,
@@ -101,6 +101,7 @@ impl ViewPolicy {
                 self.claimed_bodies == ClaimedBodies::LegacyRustfs,
                 "bound_claimed_route_bodies_as_legacy_rustfs",
             ),
+            (self.chunk_reading.legacy_trailer_bounds, "bound_aws_chunk_trailers_as_legacy_rustfs"),
             (self.clamp_max_keys, "clamp_oversized_max_keys"),
             (self.unread_body_drain.is_some(), "drain_unread_request_bodies"),
             (self.identification == Identification::LegacyRustfs, "identify_requests_as_legacy_rustfs"),

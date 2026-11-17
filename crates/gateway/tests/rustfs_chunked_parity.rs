@@ -288,3 +288,55 @@ async fn an_unsigned_trailer_after_an_empty_line_is_stored_under_the_profile() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(*stored.0.lock().expect("not poisoned"), [OBJECT.to_vec()]);
 }
+
+// ── legacy RustFS's trailer bounds ─────────────────────────────────────────────────────────
+
+/// RustFS's `trailer-size-limit` section: the checksum and one padding field, 16 KiB with the
+/// final CRLF.
+fn size_limit_fields(section: usize) -> String {
+    let checksum = checksum_line();
+    format!("{checksum}x-padding:{}\r\n", "v".repeat(section - checksum.len() - 14))
+}
+
+/// RustFS's `trailer-count-limit` section: ninety-nine padding fields and the checksum.
+fn count_limit_fields(padding: usize) -> String {
+    format!("{}{}", "x-padding:v\r\n".repeat(padding), checksum_line())
+}
+
+/// Positive — both of RustFS's trailer-bound uploads are stored on both upload operations.
+#[tokio::test]
+async fn trailer_sections_at_legacy_rustfs_bounds_are_stored_under_the_profile() {
+    for fields in [size_limit_fields(16 * 1024), count_limit_fields(99)] {
+        for target in [PUT, PART] {
+            let (service, stored) = assembled(true);
+            let request = upload(target, Mode::UnsignedTrailer, OBJECT.len(), |_| unsigned_body(false, &fields));
+            let (status, body) = answer(&service, request).await;
+            assert_eq!(status, 200, "{target}: {body}");
+            assert_eq!(*stored.0.lock().expect("not poisoned"), [OBJECT.to_vec()], "{target}");
+        }
+    }
+}
+
+/// Negative — the default assembly refuses both, and stores nothing.
+#[tokio::test]
+async fn n_the_default_assembly_keeps_its_trailer_bounds() {
+    for fields in [size_limit_fields(16 * 1024), count_limit_fields(99)] {
+        let (service, stored) = assembled(false);
+        let request = upload(PUT, Mode::UnsignedTrailer, OBJECT.len(), |_| unsigned_body(false, &fields));
+        let (status, body) = answer(&service, request).await;
+        assert_eq!(status, 400, "{body}");
+        assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != OBJECT));
+    }
+}
+
+/// Negative — one byte or one field past legacy RustFS's bounds is refused under the profile.
+#[tokio::test]
+async fn n_trailer_sections_past_legacy_rustfs_bounds_are_refused_under_the_profile() {
+    for fields in [size_limit_fields(16 * 1024 + 1), count_limit_fields(100)] {
+        let (service, stored) = assembled(true);
+        let request = upload(PUT, Mode::UnsignedTrailer, OBJECT.len(), |_| unsigned_body(false, &fields));
+        let (status, body) = answer(&service, request).await;
+        assert_eq!(status, 400, "{body}");
+        assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != OBJECT));
+    }
+}

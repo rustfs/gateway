@@ -43,7 +43,9 @@
 use core::fmt;
 
 use hmac::{Hmac, KeyInit, Mac};
+use http::{HeaderName, HeaderValue};
 use sha2::{Digest, Sha256};
+use smallvec::SmallVec;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
@@ -475,20 +477,22 @@ impl ChunkSigner {
                 }
             })?;
 
+        // Every field but the signature, ordered by name, as legacy RustFS canonicalises a section
+        // that carries undeclared fields; equal names keep their arrival order.
+        let mut fields: SmallVec<[(&HeaderName, &HeaderValue); 2]> = trailers
+            .iter()
+            .filter(|(name, _)| name.as_str() != TRAILER_SIGNATURE_HEADER)
+            .collect();
+        if fields.is_empty() {
+            return Err(ChunkReject::DeclaredTrailerMismatch);
+        }
+        fields.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
         let mut canonical = Sha256::new();
-        let mut signed_fields = 0_u8;
-        for (name, value) in trailers.iter() {
-            if name.as_str() == TRAILER_SIGNATURE_HEADER {
-                continue;
-            }
+        for (name, value) in fields {
             Digest::update(&mut canonical, name.as_str().as_bytes());
             Digest::update(&mut canonical, b":");
             Digest::update(&mut canonical, value.as_bytes());
             Digest::update(&mut canonical, b"\n");
-            signed_fields = signed_fields.saturating_add(1);
-        }
-        if signed_fields != 1 {
-            return Err(ChunkReject::DeclaredTrailerMismatch);
         }
         let digest: [u8; 32] = canonical.finalize().into();
         let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];

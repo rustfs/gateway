@@ -70,6 +70,7 @@ registered before it is removed.
 | `answer_presigned_urls_as_legacy_rustfs` | presigned refusals before the credential lookup, naming the parameter | "signature verification as legacy" (GW-SIG, item 5) | strict SigV4 semantics |
 | `authorize_header_permissions_as_legacy_rustfs` | a tagging or ACL header asks the base permission only | unregistered (GHSA-3ppv-adjacent) | register; then ask `s3:PutObjectTagging` / `s3:PutObjectAcl` as AWS does |
 | `authorize_versions_as_legacy_rustfs` | `HEAD`, tag and ACL reads of a version ask the unversioned action | unregistered (GHSA-3ppv) | register; then the versioned action for every version read |
+| `bound_aws_chunk_trailers_as_legacy_rustfs` | a trailer section of up to 16 KiB and a hundred fields; a field the head did not declare is bounded, covered by the trailer signature and dropped | unregistered (rustfs/backlog#2734) | register; then the core's 1 KiB, two declared fields |
 | `bound_buffered_bodies_as_legacy_rustfs` | buffered bodies read up to 20 MiB with no XML bound below it | unregistered (rustfs/gateway#1173) | register; then the core's ceilings |
 | `bound_claimed_route_bodies_as_legacy_rustfs` | a claimed route's body over 1 MiB refused before its access check | unregistered (rustfs/gateway#1173) | register; then the claimed route's own ceiling |
 | `clamp_oversized_max_keys` | `max-keys` above 1000 lowered to 1000, not refused | "`max-keys` above 1000 silently lowered" | kept until AWS evidence for the out-of-range answer exists (rustfs/gateway#1093) |
@@ -136,7 +137,7 @@ An assembly running the profile writes six lines at start-up, in this order, and
 2. `DIALECT_POSTURE` — whatever dialects the host installed; the launcher installs none;
 3. `PRESIGNED_EXPIRY_POSTURE rule=legacy-rustfs`;
 4. `NAMING_POSTURE slash_policy=rustfs-legacy … key_floor=rustfs-legacy … path_split=rustfs-legacy`;
-5. `PROFILE_POSTURE switches=[…]` — the 43 builder- and router-held readings above, sorted;
+5. `PROFILE_POSTURE switches=[…]` — the 44 builder- and router-held readings above, sorted;
 6. the `SecurityPosture` line a host prints itself — `per-IP bucket: unlimited` and every
    pre-authentication layer under `unlimited pre-authentication layers`.
 

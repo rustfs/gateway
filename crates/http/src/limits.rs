@@ -248,6 +248,9 @@ pub struct ChunkLimits {
     max_overhead_permille: u16,
     overhead_ratio_floor_bytes: u64,
     empty_line_before_trailers: bool,
+    max_trailer_section_bytes: u16,
+    max_trailer_fields: u8,
+    undeclared_trailer_fields: bool,
 }
 
 impl ChunkLimits {
@@ -256,6 +259,14 @@ impl ChunkLimits {
     /// A ceiling on the ceiling. The default is sixteen times lower; this exists so that raising
     /// the limit for an unusual client cannot re-open the unbounded-buffer hole by accident.
     pub const HARD_MAX_CHUNK_SIZE: u32 = 16 * 1024 * 1024;
+
+    /// The largest trailer section any configuration may permit, its final CRLF included: legacy
+    /// RustFS's 16 KiB.
+    pub const HARD_MAX_TRAILER_SECTION_BYTES: u16 = 16 * 1024;
+
+    /// The most trailer fields any configuration may permit, the trailer signature included:
+    /// legacy RustFS's hundred.
+    pub const HARD_MAX_TRAILER_FIELDS: u8 = 100;
 
     /// The default per-chunk data ceiling: one mebibyte.
     pub const DEFAULT_MAX_CHUNK_SIZE: u32 = 1024 * 1024;
@@ -321,6 +332,52 @@ impl ChunkLimits {
         self
     }
 
+    /// The trailer-section ceiling, in bytes, its final CRLF included.
+    #[must_use]
+    pub fn max_trailer_section_bytes(&self) -> u16 {
+        self.max_trailer_section_bytes
+    }
+
+    /// The most fields a trailer section may carry, the trailer signature included.
+    #[must_use]
+    pub fn max_trailer_fields(&self) -> u8 {
+        self.max_trailer_fields
+    }
+
+    /// Whether a trailer field the head did not declare is read, bounded and dropped rather than
+    /// refused.
+    #[must_use]
+    pub fn discards_undeclared_trailer_fields(&self) -> bool {
+        self.undeclared_trailer_fields
+    }
+
+    /// Sets the trailer-section ceilings, clamped between the defaults (1 KiB, two fields) and
+    /// [`ChunkLimits::HARD_MAX_TRAILER_SECTION_BYTES`] and [`ChunkLimits::HARD_MAX_TRAILER_FIELDS`].
+    ///
+    /// The section is parsed from the pipeline's window, so its ceiling is memory one connection
+    /// holds; the hard ceilings are legacy RustFS's and no configuration raises them further.
+    #[must_use]
+    pub fn with_trailer_bounds(mut self, section_bytes: u16, fields: u8) -> Self {
+        let floor = Self::default();
+        self.max_trailer_section_bytes =
+            section_bytes.clamp(floor.max_trailer_section_bytes, Self::HARD_MAX_TRAILER_SECTION_BYTES);
+        self.max_trailer_fields = fields.clamp(floor.max_trailer_fields, Self::HARD_MAX_TRAILER_FIELDS);
+        self
+    }
+
+    /// Reads a trailer field the head did not declare — repeated or not — instead of refusing it:
+    /// it counts against both trailer ceilings, a signed section's signature covers it, and it is
+    /// dropped before the section is handed on, so no consumer ever sees it.
+    ///
+    /// Off by default: only the declared checksum and the trailer signature may arrive. The
+    /// declared fields stay exact either way — each exactly once, and a trailer signature only in
+    /// signed framing.
+    #[must_use]
+    pub fn with_undeclared_trailer_fields_discarded(mut self) -> Self {
+        self.undeclared_trailer_fields = true;
+        self
+    }
+
     /// Sets the per-chunk data ceiling, clamped to [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] and to at
     /// least one byte.
     #[must_use]
@@ -383,6 +440,9 @@ impl Default for ChunkLimits {
             max_overhead_permille: 50,
             overhead_ratio_floor_bytes: 4096,
             empty_line_before_trailers: false,
+            max_trailer_section_bytes: 1024,
+            max_trailer_fields: 2,
+            undeclared_trailer_fields: false,
         }
     }
 }

@@ -17,7 +17,10 @@
 //! Responsible for: proving that [`ChunkLimits::with_empty_line_before_trailers`] accepts exactly
 //! one CRLF between the terminal chunk line and the first trailer field, in both trailer modes,
 //! and that everything around it — a second empty line, bytes after the terminator, a bare LF —
-//! stays refused; and that the default limits refuse the empty line as before.
+//! stays refused; that [`ChunkLimits::with_trailer_bounds`] and
+//! [`ChunkLimits::with_undeclared_trailer_fields_discarded`] read legacy RustFS's 16 KiB, hundred-field
+//! sections, sign-cover an undeclared field and drop it, refusing one byte or one field more; and
+//! that the default limits keep the core's rules.
 //! NOT responsible for: the trailer grammar's default rules (`ingest_verify.rs`) or the codes a
 //! refusal is answered with (`rustfs-gateway`).
 //! Upstream: `rustfs-gateway-http`'s ingest pipeline. Downstream: none.
@@ -206,4 +209,148 @@ fn n_a_tampered_field_after_the_empty_line_fails_the_trailer_signature() {
     let text = String::from_utf8(body).expect("ascii fixture");
     let tampered = text.replace(CHECKSUM.1, "AAAAAA==").into_bytes();
     assert_eq!(refusal(tampered, true, empty_line_limits()), Some(ChunkReject::TrailerSignatureMismatch));
+}
+
+// ── legacy RustFS's trailer bounds ─────────────────────────────────────────────────────
+
+fn legacy_bounds() -> ChunkLimits {
+    ChunkLimits::default()
+        .with_trailer_bounds(ChunkLimits::HARD_MAX_TRAILER_SECTION_BYTES, ChunkLimits::HARD_MAX_TRAILER_FIELDS)
+        .with_undeclared_trailer_fields_discarded()
+}
+
+/// An unsigned body whose trailer section is `fields` followed by the empty line that ends it.
+fn unsigned_trailer_body(fields: &str) -> Vec<u8> {
+    let mut body = b"5\r\nhello\r\n0\r\n".to_vec();
+    body.extend_from_slice(fields.as_bytes());
+    body.extend_from_slice(b"\r\n");
+    body
+}
+
+const CHECKSUM_LINE: &str = "x-amz-checksum-crc32c:NhCmhg==\r\n";
+
+/// A padding field that makes the whole section, final CRLF included, exactly `section` bytes.
+fn padded_to(section: usize) -> String {
+    let padding = "v".repeat(section - CHECKSUM_LINE.len() - "x-padding:\r\n".len() - 2);
+    format!("{CHECKSUM_LINE}x-padding:{padding}\r\n")
+}
+
+fn only_the_checksum(trailers: &TrailingHeaders) {
+    let names: Vec<&str> = trailers.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, [CHECKSUM.0], "an undeclared field was handed on");
+}
+
+/// Positive — a 16 KiB section, its final CRLF included, is read, and the padding is dropped.
+#[test]
+fn a_section_of_exactly_sixteen_kibibytes_is_read_under_legacy_bounds() {
+    let mut pipeline = pipeline(unsigned_trailer_body(&padded_to(16 * 1024)), false, legacy_bounds(), CHECKSUM.0);
+    let (body, trailers) = drive(&mut pipeline).expect("the section is at the bound");
+    assert_eq!(body, b"hello");
+    only_the_checksum(&trailers);
+}
+
+/// Positive — a hundred fields, ninety-nine of them the same undeclared one, are read, and only
+/// the declared checksum is handed on.
+#[test]
+fn a_hundred_fields_are_read_under_legacy_bounds() {
+    let fields = format!("{}{CHECKSUM_LINE}", "x-padding:v\r\n".repeat(99));
+    let mut pipeline = pipeline(unsigned_trailer_body(&fields), false, legacy_bounds(), CHECKSUM.0);
+    let (_, trailers) = drive(&mut pipeline).expect("the count is at the bound");
+    only_the_checksum(&trailers);
+}
+
+/// Positive — in signed framing an undeclared field is covered by the trailer signature, as legacy
+/// RustFS covers it, and still dropped once the signature verified.
+#[test]
+fn a_signed_undeclared_field_is_verified_then_dropped_under_legacy_bounds() {
+    let body = signed_body(&[("x-padding", "v"), CHECKSUM], false);
+    let mut pipeline = pipeline(body, true, legacy_bounds(), CHECKSUM.0);
+    let (_, trailers) = drive(&mut pipeline).expect("the signature covers both fields");
+    assert!(pipeline.trailer_signature_satisfied());
+    let names: Vec<&str> = trailers.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, [CHECKSUM.0, "x-amz-trailer-signature"]);
+}
+
+/// Negative — the default limits refuse an undeclared field and anything past one KiB.
+#[test]
+fn n_the_default_limits_keep_the_core_trailer_bounds() {
+    let fields = format!("x-padding:v\r\n{CHECKSUM_LINE}");
+    assert_eq!(
+        refusal(unsigned_trailer_body(&fields), false, ChunkLimits::default()),
+        Some(ChunkReject::TrailerNotAllowed)
+    );
+    assert_eq!(ChunkLimits::default().max_trailer_section_bytes(), 1024);
+    assert_eq!(ChunkLimits::default().max_trailer_fields(), 2);
+    assert!(!ChunkLimits::default().discards_undeclared_trailer_fields());
+}
+
+/// Negative — one byte past 16 KiB is refused.
+#[test]
+fn n_a_section_one_byte_past_sixteen_kibibytes_is_refused() {
+    assert_eq!(
+        refusal(unsigned_trailer_body(&padded_to(16 * 1024 + 1)), false, legacy_bounds()),
+        Some(ChunkReject::TrailerSizeExceeded)
+    );
+}
+
+/// Negative — a hundred and one fields are refused, even when none is the checksum.
+#[test]
+fn n_a_hundred_and_one_fields_are_refused() {
+    let fields = format!("{}{CHECKSUM_LINE}", "x-padding:v\r\n".repeat(100));
+    assert_eq!(
+        refusal(unsigned_trailer_body(&fields), false, legacy_bounds()),
+        Some(ChunkReject::TrailerCountExceeded)
+    );
+    let undeclared_only = "x-private:v\r\n".repeat(101);
+    assert_eq!(
+        refusal(unsigned_trailer_body(&undeclared_only), false, legacy_bounds()),
+        Some(ChunkReject::TrailerCountExceeded)
+    );
+}
+
+/// Negative — the bounds cannot be raised past legacy RustFS's.
+#[test]
+fn n_the_trailer_bounds_stop_at_their_hard_ceilings() {
+    let limits = ChunkLimits::default().with_trailer_bounds(u16::MAX, u8::MAX);
+    assert_eq!(limits.max_trailer_section_bytes(), 16 * 1024);
+    assert_eq!(limits.max_trailer_fields(), 100);
+    let floor = ChunkLimits::default().with_trailer_bounds(0, 0);
+    assert_eq!(floor.max_trailer_section_bytes(), ChunkLimits::default().max_trailer_section_bytes());
+    assert_eq!(floor.max_trailer_fields(), ChunkLimits::default().max_trailer_fields());
+}
+
+/// Negative — an undeclared field the signature does not cover, or one altered after signing,
+/// fails the trailer signature.
+#[test]
+fn n_an_undeclared_field_outside_the_signature_is_refused() {
+    let signed = String::from_utf8(signed_body(&[CHECKSUM], false)).expect("ascii fixture");
+    let added = signed.replacen("x-amz-trailer-signature", "x-padding:v\r\nx-amz-trailer-signature", 1);
+    assert_eq!(
+        refusal(added.into_bytes(), true, legacy_bounds()),
+        Some(ChunkReject::TrailerSignatureMismatch)
+    );
+    let tampered = String::from_utf8(signed_body(&[("x-padding", "v"), CHECKSUM], false))
+        .expect("ascii fixture")
+        .replacen("x-padding:v", "x-padding:w", 1);
+    assert_eq!(
+        refusal(tampered.into_bytes(), true, legacy_bounds()),
+        Some(ChunkReject::TrailerSignatureMismatch)
+    );
+}
+
+/// Negative — the declared checksum must still arrive exactly once, and an unsigned section still
+/// may not carry a trailer signature.
+#[test]
+fn n_the_declared_fields_are_still_exact_under_legacy_bounds() {
+    for fields in [
+        "x-padding:v\r\n".to_owned(),
+        format!("{CHECKSUM_LINE}{CHECKSUM_LINE}"),
+        format!("{CHECKSUM_LINE}x-amz-trailer-signature:{}\r\n", "0".repeat(64)),
+    ] {
+        assert_eq!(
+            refusal(unsigned_trailer_body(&fields), false, legacy_bounds()),
+            Some(ChunkReject::DeclaredTrailerMismatch),
+            "{fields}"
+        );
+    }
 }

@@ -57,6 +57,7 @@
 //! | `answer_presigned_urls_as_legacy_rustfs` | presigned refusals before the credential lookup, naming the parameter | "signature verification as legacy" (GW-SIG, item 5) |
 //! | `authorize_header_permissions_as_legacy_rustfs` | tagging and ACL headers ask the base permission only | unregistered (GHSA-3ppv-adjacent) |
 //! | `authorize_versions_as_legacy_rustfs` | `HEAD`, tag and ACL reads of a version ask the unversioned action | unregistered (GHSA-3ppv) |
+//! | `bound_aws_chunk_trailers_as_legacy_rustfs` | a trailer section of up to 16 KiB and a hundred fields, undeclared fields signature-covered and dropped | unregistered (rustfs/backlog#2734) |
 //! | `bound_buffered_bodies_as_legacy_rustfs` | buffered bodies read up to 20 MiB with no XML bound below it | unregistered (rustfs/gateway#1173) |
 //! | `bound_claimed_route_bodies_as_legacy_rustfs` | a claimed route's body over 1 MiB refused before its access check | unregistered (rustfs/gateway#1173) |
 //! | `clamp_oversized_max_keys` | `max-keys` above 1000 lowered, not refused | "`max-keys` above 1000 silently lowered" |
@@ -238,6 +239,9 @@ impl ServiceBuilder {
             // RustFS skips an empty line before an aws-chunked trailer section, which its own
             // signer writes (rustfs/backlog#2734).
             .accept_an_empty_line_before_aws_chunk_trailers()
+            // RustFS bounds a trailer section at 16 KiB and a hundred fields, and ignores the
+            // fields its head did not declare (rustfs/backlog#2734).
+            .bound_aws_chunk_trailers_as_legacy_rustfs()
             .bound_claimed_route_bodies_as_legacy_rustfs()
             .bound_buffered_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a bare `Enabled` body (rustfs/backlog#1677, R6).
@@ -426,6 +430,10 @@ mod tests {
             ServiceBuilder::authorize_header_permissions_as_legacy_rustfs,
         ),
         ("authorize_versions_as_legacy_rustfs", ServiceBuilder::authorize_versions_as_legacy_rustfs),
+        (
+            "bound_aws_chunk_trailers_as_legacy_rustfs",
+            ServiceBuilder::bound_aws_chunk_trailers_as_legacy_rustfs,
+        ),
         (
             "bound_buffered_bodies_as_legacy_rustfs",
             ServiceBuilder::bound_buffered_bodies_as_legacy_rustfs,

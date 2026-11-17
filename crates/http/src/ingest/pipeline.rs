@@ -614,7 +614,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                             }
                             self.trailer_signature_satisfied = true;
                         }
-                        self.trailers = Some(trailers);
+                        self.trailers = Some(declaration.declared_only(trailers));
                         self.filled = 0;
                         self.decoder.rebase(end);
                     }

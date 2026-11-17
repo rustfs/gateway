@@ -112,9 +112,11 @@ pub enum ChunkReject {
     TruncatedStream,
     /// A trailer field name is outside the checksum/signature allowlist.
     TrailerNotAllowed,
-    /// More than two trailer fields were declared or received.
+    /// More trailer fields were declared or received than [`crate::ChunkLimits::max_trailer_fields`]
+    /// allows (two by default).
     TrailerCountExceeded,
-    /// The trailer section exceeded 1 KiB, including its terminating CRLF.
+    /// The trailer section exceeded [`crate::ChunkLimits::max_trailer_section_bytes`] (1 KiB by
+    /// default), including its terminating CRLF.
     TrailerSizeExceeded,
     /// A trailer field or declaration is not valid HTTP field syntax.
     MalformedTrailer,

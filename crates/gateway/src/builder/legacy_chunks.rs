@@ -16,8 +16,9 @@
 //! trailer rules as far as this crate's residency bound allows (rustfs/gateway#1173).
 //!
 //! Responsible for: [`ServiceBuilder::read_aws_chunks_as_legacy_rustfs`],
-//! [`ServiceBuilder::accept_an_empty_line_before_aws_chunk_trailers`] and [`ChunkReading`], the
-//! chunk limits the pipeline hands every aws-chunked body it decodes.
+//! [`ServiceBuilder::accept_an_empty_line_before_aws_chunk_trailers`],
+//! [`ServiceBuilder::bound_aws_chunk_trailers_as_legacy_rustfs`] and [`ChunkReading`], the chunk
+//! limits the pipeline hands every aws-chunked body it decodes.
 //! NOT responsible for: the decoder (`rustfs-gateway-http`'s ingest), or the wire length a framed
 //! upload may declare (`crate::gate::max_framed_upload_bytes`).
 //! Upstream: `super::ServiceBuilder`. Downstream: `crate::service`, through
@@ -56,6 +57,21 @@
 //! there as part of the section ([`ChunkLimits::with_empty_line_before_trailers`]); a second one,
 //! an empty line between fields, or a byte after the terminator stays refused, so the section's
 //! end is still the first empty line after a field.
+//!
+//! # Trailer bounds and undeclared fields
+//!
+//! Legacy RustFS bounds a trailer section at 16 KiB, counting every byte after the terminal chunk
+//! line, and at a hundred non-empty lines, the trailer signature included (s3s `5761ddf`,
+//! `aws_chunked_stream.rs:46-54`, `:362-388` and `:448-452`); it reads any field name, keeps
+//! repeats, and in signed framing covers every field but the signature with the trailer signature,
+//! sorted by name (`:396-415`, `:480-498`). It then looks up only the checksum the head declared
+//! (rustfs/rustfs `rustfs/src/app/trailer_adapter.rs:25-37`), so an undeclared field is never read
+//! again. The core allows 1 KiB, two fields and the declared names only. The profile reads legacy
+//! RustFS's bounds ([`ChunkLimits::with_trailer_bounds`]) and its undeclared fields
+//! ([`ChunkLimits::with_undeclared_trailer_fields_discarded`]): bounded, signature-covered, then
+//! dropped before the section reaches anything — handler, metadata or log. Stricter than legacy
+//! RustFS, deliberately: the declared checksum and the trailer signature must still arrive exactly
+//! once each, and an unsigned section may not carry a trailer signature at all.
 
 use rustfs_gateway_http::ChunkLimits;
 
@@ -69,6 +85,8 @@ pub(crate) struct ChunkReading {
     pub(crate) legacy_chunks: bool,
     /// [`ServiceBuilder::accept_an_empty_line_before_aws_chunk_trailers`].
     pub(crate) empty_line_before_trailers: bool,
+    /// [`ServiceBuilder::bound_aws_chunk_trailers_as_legacy_rustfs`].
+    pub(crate) legacy_trailer_bounds: bool,
 }
 
 impl ChunkReading {
@@ -92,6 +110,16 @@ impl ChunkReading {
             // because the core reads that line as the section's end; kept, for exactly one CRLF,
             // so those uploads keep being stored. The intended future behaviour is the core's.
             limits = limits.with_empty_line_before_trailers();
+        }
+        if self.legacy_trailer_bounds {
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a trailer section of up to
+            // 16 KiB and a hundred fields, any name repeated or not. Questionable because a section
+            // sixteen times the core's is held per connection; kept so the clients RustFS serves
+            // today keep working, with every undeclared field dropped once read. The intended
+            // future behaviour is the core's bounds.
+            limits = limits
+                .with_trailer_bounds(ChunkLimits::HARD_MAX_TRAILER_SECTION_BYTES, ChunkLimits::HARD_MAX_TRAILER_FIELDS)
+                .with_undeclared_trailer_fields_discarded();
         }
         limits
     }
@@ -126,6 +154,20 @@ impl ServiceBuilder {
         self.view_policy.chunk_reading.empty_line_before_trailers = true;
         self
     }
+
+    /// Reads an aws-chunked trailer section under legacy RustFS's bounds — 16 KiB with its final
+    /// CRLF, a hundred fields with the trailer signature — and reads the fields the head did not
+    /// declare instead of refusing them: each counts against both bounds, a signed section's
+    /// signature covers it, and it is dropped before the section is handed on.
+    ///
+    /// Off by default: the core allows 1 KiB, two fields, and only the declared checksum and the
+    /// trailer signature. Either way the declared checksum must arrive exactly once, and a section
+    /// past the bounds is refused with nothing stored.
+    #[must_use]
+    pub fn bound_aws_chunk_trailers_as_legacy_rustfs(mut self) -> Self {
+        self.view_policy.chunk_reading.legacy_trailer_bounds = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -135,6 +177,7 @@ mod tests {
     const LEGACY_CHUNKS: ChunkReading = ChunkReading {
         legacy_chunks: true,
         empty_line_before_trailers: false,
+        legacy_trailer_bounds: false,
     };
 
     /// Positive — the profile's limits admit a 16 MiB chunk and any chunk count or framing share.
@@ -176,5 +219,35 @@ mod tests {
     fn n_no_other_reading_accepts_the_empty_line() {
         assert!(!ChunkReading::default().limits().accepts_empty_line_before_trailers());
         assert!(!LEGACY_CHUNKS.limits().accepts_empty_line_before_trailers());
+    }
+
+    /// Positive — the trailer-bound switch lifts both bounds to legacy RustFS's and drops undeclared
+    /// fields, and nothing else.
+    #[test]
+    fn the_trailer_bound_switch_reaches_the_limits_alone() {
+        let limits = ChunkReading {
+            legacy_trailer_bounds: true,
+            ..ChunkReading::default()
+        }
+        .limits();
+        assert_eq!(limits.max_trailer_section_bytes(), 16 * 1024);
+        assert_eq!(limits.max_trailer_fields(), 100);
+        assert!(limits.discards_undeclared_trailer_fields());
+        assert_eq!(limits.max_chunk_size(), ChunkLimits::default().max_chunk_size());
+        assert!(!limits.accepts_empty_line_before_trailers());
+    }
+
+    /// Negative — no other reading moves the trailer bounds.
+    #[test]
+    fn n_no_other_reading_moves_the_trailer_bounds() {
+        let other = ChunkReading {
+            legacy_chunks: true,
+            empty_line_before_trailers: true,
+            legacy_trailer_bounds: false,
+        }
+        .limits();
+        assert_eq!(other.max_trailer_section_bytes(), ChunkLimits::default().max_trailer_section_bytes());
+        assert_eq!(other.max_trailer_fields(), ChunkLimits::default().max_trailer_fields());
+        assert!(!other.discards_undeclared_trailer_fields());
     }
 }
