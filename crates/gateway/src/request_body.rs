@@ -110,7 +110,7 @@ impl StreamingRead {
         }
         if ingest.is_none() && body.as_ref().is_none_or(http_body::Body::is_end_stream) {
             let verdict = if !progress.digest_matches() {
-                Err(codes.streamed_payload_hash_mismatch())
+                Err(crate::gate::content_sha256_mismatch())
             } else {
                 let refuse = move |reject| codes.refusal(reject);
                 claims.begin().verify().map(|_| BodyVerified).map_err(refuse)
@@ -385,7 +385,7 @@ impl<B: http_body::Body> VerifiedRequestBody<B> {
             return self.fail(refusal);
         }
         if !self.progress.digest_matches() {
-            return self.fail(self.codes.streamed_payload_hash_mismatch());
+            return self.fail(crate::gate::content_sha256_mismatch());
         }
         let Some(digests) = self.digests.take() else {
             return self.fail(crate::gate::incomplete());

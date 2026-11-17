@@ -115,13 +115,6 @@ impl IntegrityCodes {
             _ => crate::chunked::ChunkIngest::refusal(pipeline),
         }
     }
-
-    /// Renders a streamed body that does not match its signed `x-amz-content-sha256`: the core's
-    /// `XAmzContentSHA256Mismatch` under either codes, since legacy RustFS does not report it as a
-    /// checksum mismatch (rustfs/rustfs `rustfs/src/error.rs:597-599`).
-    pub(crate) fn streamed_payload_hash_mismatch(self) -> S3Error {
-        crate::gate::content_sha256_mismatch()
-    }
 }
 
 /// One request body's integrity obligations, with the codes its refusals are answered with.
@@ -278,25 +271,12 @@ mod tests {
         }
     }
 
-    /// Negative — a streamed body that misses its signed `x-amz-content-sha256` is not a checksum
-    /// failure to legacy RustFS: it keeps `XAmzContentSHA256Mismatch` under either codes.
-    #[test]
-    fn n_a_missed_payload_digest_is_not_bad_digest_under_the_rustfs_codes() {
-        let streamed = IntegrityCodes::RustFs.streamed_payload_hash_mismatch();
-        assert_eq!((code_of(&streamed), streamed.status().as_u16()), ("XAmzContentSHA256Mismatch", 400));
-        assert!(!streamed.must_close_connection());
-    }
-
     /// Negative — the core's codes are exactly what the refusal carried before this existed.
     #[test]
     fn n_the_model_codes_are_the_refusals_own() {
         for reject in EVERY_REJECT {
             assert_eq!(IntegrityCodes::Model.refusal(reject), checksum_refusal(reject), "{reject:?}");
         }
-        assert_eq!(
-            IntegrityCodes::Model.streamed_payload_hash_mismatch(),
-            crate::gate::content_sha256_mismatch()
-        );
         assert_eq!(IntegrityCodes::default(), IntegrityCodes::Model);
     }
 
