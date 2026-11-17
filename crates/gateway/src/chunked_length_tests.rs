@@ -138,8 +138,14 @@ async fn a_transport_delimited_framed_body_without_a_decoded_length_is_refused_a
 #[test]
 fn the_codec_reads_the_decoded_length_of_a_framed_body() {
     let headers = decoded_length_header("11");
-    assert_eq!(framed_object_length(&unsigned_streaming(), &headers, &transfer_chunked()), Some(11));
-    assert_eq!(framed_object_length(&unsigned_streaming(), &headers, &wire_length(4096)), Some(11));
+    assert_eq!(
+        framed_object_length(&unsigned_streaming(), &headers, &transfer_chunked(), &ChunkLimits::default()),
+        Some(11)
+    );
+    assert_eq!(
+        framed_object_length(&unsigned_streaming(), &headers, &wire_length(4096), &ChunkLimits::default()),
+        Some(11)
+    );
 }
 
 /// Negative — no length is invented: an unframed mode, a framed head without the header, one
@@ -148,13 +154,27 @@ fn the_codec_reads_the_decoded_length_of_a_framed_body() {
 #[test]
 fn no_decoded_length_reaches_the_codec_unless_the_head_passes() {
     let headers = decoded_length_header("11");
-    assert_eq!(framed_object_length(&PayloadMode::Unsigned, &headers, &wire_length(4096)), None);
-    assert_eq!(framed_object_length(&unsigned_streaming(), &HeaderMap::new(), &transfer_chunked()), None);
     assert_eq!(
-        framed_object_length(&unsigned_streaming(), &decoded_length_header("0x0b"), &transfer_chunked()),
+        framed_object_length(&PayloadMode::Unsigned, &headers, &wire_length(4096), &ChunkLimits::default()),
         None
     );
-    assert_eq!(framed_object_length(&unsigned_streaming(), &headers, &wire_length(8)), None);
+    assert_eq!(
+        framed_object_length(&unsigned_streaming(), &HeaderMap::new(), &transfer_chunked(), &ChunkLimits::default()),
+        None
+    );
+    assert_eq!(
+        framed_object_length(
+            &unsigned_streaming(),
+            &decoded_length_header("0x0b"),
+            &transfer_chunked(),
+            &ChunkLimits::default()
+        ),
+        None
+    );
+    assert_eq!(
+        framed_object_length(&unsigned_streaming(), &headers, &wire_length(8), &ChunkLimits::default()),
+        None
+    );
 }
 
 /// Negative — a framed body that declares no decoded length is refused at the head, before a

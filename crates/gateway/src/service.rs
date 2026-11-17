@@ -1312,7 +1312,13 @@ impl S3Service {
             })
         };
 
-        let framed_meta = crate::chunked::framed_meta(&meta, framing_mode.as_ref(), &headers, wire.framing());
+        let framed_meta = crate::chunked::framed_meta(
+            &meta,
+            framing_mode.as_ref(),
+            &headers,
+            wire.framing(),
+            &self.inner.view_policy.chunk_reading.limits(),
+        );
         let dispatch_meta = framed_meta.as_ref().unwrap_or(&meta);
         let body_service = self;
         let body_meta = &meta;

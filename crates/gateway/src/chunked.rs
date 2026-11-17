@@ -56,8 +56,9 @@
 //!
 //! The decoded length is bounded too, and by a different mechanism that is not a ceiling: the
 //! decoder counts what it produces and fails the moment it diverges from
-//! `x-amz-decoded-content-length`, which [`rustfs_gateway_http::validate_decoded_length`] has
-//! already cross-checked against `Content-Length` *before the first byte is read*. So the decoded
+//! `x-amz-decoded-content-length`, which [`rustfs_gateway_http::validate_decoded_length_with`] has
+//! already cross-checked against `Content-Length`, under the limits the body is decoded under,
+//! *before the first byte is read*. So the decoded
 //! size is pinned by the head, not policed by a budget — and alone, when the transport ends the body
 //! (rustfs/gateway#750). It is also what `ContentLength` reads ([`framed_object_length`]).
 //!
@@ -73,8 +74,7 @@ use http::HeaderMap;
 use rustfs_gateway_core::{HandlerError, MetaView, ResponseKind};
 use rustfs_gateway_http::{
     BodyDigests, ChecksumVerified, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength,
-    Framing, IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length,
-    validate_decoded_length_with,
+    Framing, IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length_with,
 };
 use rustfs_gateway_sig::PayloadMode;
 use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress, TrailingHeaders};
@@ -187,7 +187,7 @@ impl ChunkIngest {
     /// Decides whether the chunk parser runs, and assembles what it runs with.
     ///
     /// Everything here is decidable from the head, and all of it happens before a body byte is
-    /// read: [`validate_decoded_length`] cross-checks `x-amz-decoded-content-length` against the
+    /// read: [`validate_decoded_length_with`] cross-checks `x-amz-decoded-content-length` against the
     /// mode and against `Content-Length`, so a body that declares more decoded bytes than the wire
     /// can carry is refused without being transferred.
     ///
@@ -302,12 +302,18 @@ impl ChunkIngest {
 
 /// What `ContentLength` reads for a framed body: the decoded length, which is the object's size
 /// where `Content-Length` counts the framing or is absent. [`ChunkIngest::prepare`]'s own verdict
-/// from the same head; `None` for an unframed mode or any head `prepare` refuses before decode.
-pub(crate) fn framed_object_length(payload: &PayloadMode, headers: &HeaderMap, wire: &Framing) -> Option<u64> {
+/// from the same head, under the same `limits`; `None` for an unframed mode or any head
+/// `prepare` refuses before decode.
+pub(crate) fn framed_object_length(
+    payload: &PayloadMode,
+    headers: &HeaderMap,
+    wire: &Framing,
+    limits: &ChunkLimits,
+) -> Option<u64> {
     let framing = ChunkFraming::derive(&FramingOf(payload))
         .ok()
         .filter(ChunkFraming::is_framed)?;
-    let declared = validate_decoded_length(&framing, decoded_length_header(headers), wire).ok()??;
+    let declared = validate_decoded_length_with(&framing, decoded_length_header(headers), wire, limits).ok()??;
     Some(declared.get())
 }
 
@@ -318,8 +324,9 @@ pub(crate) fn framed_meta<'a>(
     payload: Option<&PayloadMode>,
     headers: &HeaderMap,
     wire: &Framing,
+    limits: &ChunkLimits,
 ) -> Option<MetaView<'a>> {
-    framed_object_length(payload?, headers, wire).map(|length| meta.with_framed_content_length(length))
+    framed_object_length(payload?, headers, wire, limits).map(|length| meta.with_framed_content_length(length))
 }
 
 /// A body refusal under [`ChunkLimits::with_legacy_rustfs_refusals`]: legacy RustFS's code
