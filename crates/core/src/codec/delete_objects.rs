@@ -37,14 +37,20 @@ pub(crate) fn delete_object_key(
     }
 }
 
-pub(super) const STRONG_EMPTY: &str = "\"\"";
+const STRONG_EMPTY: &str = "\"\"";
+
+/// Whether RustFS reads this `<ETag>` text as the strong-empty condition: the quoted pair, or the
+/// empty element an SDK writes for `Some("")`.
+pub(super) fn is_strong_empty_text(value: &str) -> bool {
+    value.is_empty() || value == STRONG_EMPTY
+}
 
 pub(crate) fn delete_object_etag(
     value: &str,
     member: &'static str,
     reading: DocumentReading,
 ) -> Result<DeleteObjectETag, CodecError> {
-    if reading == DocumentReading::RustFs && value == STRONG_EMPTY {
+    if reading == DocumentReading::RustFs && is_strong_empty_text(value) {
         return Ok(DeleteObjectETag::STRONG_EMPTY);
     }
     etag_xml(value, member).map(Into::into)

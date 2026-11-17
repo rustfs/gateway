@@ -103,7 +103,7 @@ fn read_document(
             let capture_retention = request.captures_retention_date() && document.roots.first() == Some(&"Retention");
             let read_scalar = |kind, raw: &str| match kind {
                 Scalar::DateTime if capture_dates || capture_retention => date_time(raw, true),
-                Scalar::EntityTag if delete_objects && raw == super::delete_objects::STRONG_EMPTY => Ok(raw.to_owned()),
+                Scalar::EntityTag if delete_objects && super::delete_objects::is_strong_empty_text(raw) => Ok(raw.to_owned()),
                 _ => rustfs_scalar(kind, raw),
             };
             let root = bound::read(body, document, limits, &read_scalar).map_err(|refusal| match refusal {

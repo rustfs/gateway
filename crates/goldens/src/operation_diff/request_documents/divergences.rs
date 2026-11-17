@@ -95,7 +95,8 @@ fn an_absent_member_the_model_requires_is_refused_by_the_gateway_and_read_by_the
 
 /// A value the legacy stack reads and the gateway cannot hold exactly: a date with a non-zero UTC
 /// offset (the gateway's timestamp is a UTC instant; the legacy stack keeps the offset), and an
-/// entity tag no gateway tag spells (empty, or carrying a quote). Refused rather than stored
+/// entity tag no gateway tag spells (empty in a completion part, or carrying a quote; an empty
+/// `DeleteObjects` entry tag is carried as the strong-empty condition and agrees with legacy). Refused rather than stored
 /// differently.
 ///
 /// Ruling: `rd-doc-0004`

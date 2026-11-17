@@ -455,6 +455,10 @@ fn rustfs_delete_objects_reads_the_three_entry_rejections_and_their_siblings() {
             Some(dto::DeleteObjectKeyRejection::TooLong),
         ),
         (r#"<Key>conditioned</Key><ETag>""</ETag>"#.to_owned(), "conditioned", None),
+        // aws-sdk-s3 serializes `Some("")` as an empty element; RustFS reads it as the same
+        // strong-empty condition as the quoted pair.
+        ("<Key>conditioned</Key><ETag></ETag>".to_owned(), "conditioned", None),
+        ("<Key>conditioned</Key><ETag/>".to_owned(), "conditioned", None),
     ];
     for (entry, key, rejection) in entries {
         let xml = format!("<Delete><Object>{entry}</Object><Object><Key>sibling</Key></Object></Delete>");
@@ -490,6 +494,7 @@ fn rustfs_delete_objects_still_refuses_missing_keys_and_bad_later_members() {
             r#"<Delete><Object><Key>later</Key><ETag>W/""</ETag></Object></Delete>"#,
             "InvalidArgument",
         ),
+        ("<Delete><Object><Key>later</Key><ETag>\"</ETag></Object></Delete>", "InvalidArgument"),
     ] {
         let error = decode_as::<dto::DeleteObjects>(DocumentReading::RustFs, "/photos?delete", TargetKind::Bucket, xml)
             .expect_err("the document must fail before resource derivation");

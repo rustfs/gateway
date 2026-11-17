@@ -351,6 +351,7 @@ fn the_rustfs_delete_entry_carriers_cross_the_legacy_dto_seam_without_losing_tex
         "<Key></Key>".to_owned(),
         format!("<Key>{}x</Key>", "é".repeat(512)),
         r#"<Key>k</Key><ETag>""</ETag>"#.to_owned(),
+        "<Key>k</Key><ETag></ETag>".to_owned(),
         r#"<Key>k</Key><ETag>W/"weak"</ETag>"#.to_owned(),
     ] {
         let xml = format!("<Delete><Object>{entry}</Object></Delete>");

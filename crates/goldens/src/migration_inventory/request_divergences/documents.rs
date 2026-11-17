@@ -89,7 +89,8 @@ pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 7] = [
     RequestDivergence {
         id: "rd-doc-0004",
         operation: "PutBucketLifecycleConfiguration, PutObjectRetention, CompleteMultipartUpload, DeleteObjects",
-        request: "a date with a non-zero UTC offset, or an entity tag no gateway tag can hold (empty, or holding a quote)",
+        request: "a date with a non-zero UTC offset, or an entity tag no gateway tag can hold (empty in a CompleteMultipartUpload \
+                  part, or holding a quote; an empty DeleteObjects entry tag is carried as the strong-empty condition)",
         aws: "lifecycle dates are midnight UTC and a retention date is an ISO 8601 instant; an entity tag is a quoted string",
         aws_evidence: API_LIFECYCLE_EXPIRATION,
         s3s: "the legacy stack keeps the offset — RustFS stores a retention date with it, and writes a lifecycle date's local \
