@@ -213,6 +213,8 @@ mod response_invariants;
 mod response_stream_termination;
 #[path = "rustfs_addressing.rs"]
 mod rustfs_addressing;
+#[path = "rustfs_chunked_parity.rs"]
+mod rustfs_chunked_parity;
 #[path = "rustfs_key_floor.rs"]
 mod rustfs_key_floor;
 #[path = "rustfs_profile.rs"]

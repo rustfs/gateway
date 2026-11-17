@@ -124,6 +124,11 @@ impl ChunkDecoder {
         }
     }
 
+    /// The limits this body is decoded under.
+    pub(crate) fn limits(&self) -> ChunkLimits {
+        self.limits
+    }
+
     /// How many body bytes have been decoded.
     pub(crate) fn decoded_bytes(&self) -> u64 {
         self.decoded_bytes

@@ -247,6 +247,7 @@ pub struct ChunkLimits {
     max_chunk_count_slack: u32,
     max_overhead_permille: u16,
     overhead_ratio_floor_bytes: u64,
+    empty_line_before_trailers: bool,
 }
 
 impl ChunkLimits {
@@ -300,6 +301,24 @@ impl ChunkLimits {
     #[must_use]
     pub fn overhead_ratio_floor_bytes(&self) -> u64 {
         self.overhead_ratio_floor_bytes
+    }
+
+    /// Whether one CRLF may stand between the terminal chunk line and the first trailer field.
+    #[must_use]
+    pub fn accepts_empty_line_before_trailers(&self) -> bool {
+        self.empty_line_before_trailers
+    }
+
+    /// Reads one CRLF between the terminal chunk line and the first trailer field as part of the
+    /// trailer section, the layout legacy RustFS accepts in both trailer modes.
+    ///
+    /// Off by default: there a CRLF in that position ends an empty trailer section. Exactly one is
+    /// skipped — a second still ends the section, so fields after it are bytes after the
+    /// terminator — and the skipped CRLF counts against the section's size ceiling.
+    #[must_use]
+    pub fn with_empty_line_before_trailers(mut self) -> Self {
+        self.empty_line_before_trailers = true;
+        self
     }
 
     /// Sets the per-chunk data ceiling, clamped to [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] and to at
@@ -363,6 +382,7 @@ impl Default for ChunkLimits {
             max_chunk_count_slack: 16,
             max_overhead_permille: 50,
             overhead_ratio_floor_bytes: 4096,
+            empty_line_before_trailers: false,
         }
     }
 }

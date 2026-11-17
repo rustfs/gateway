@@ -558,8 +558,23 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.filled = self.filled.saturating_add(n);
                 Poll::Ready(Ok(()))
             }
-            Poll::Ready(Ok(ReadProgress::Eof { .. })) => Poll::Ready(Err(self.fail(ChunkReject::TruncatedBeforeTrailer))),
+            Poll::Ready(Ok(ReadProgress::Eof { .. })) => {
+                let reject = self.empty_section_at_eof().unwrap_or(ChunkReject::TruncatedBeforeTrailer);
+                Poll::Ready(Err(self.fail(reject)))
+            }
         }
+    }
+
+    /// Under [`ChunkLimits::with_empty_line_before_trailers`], a section that is one CRLF and then
+    /// the end of the body is the empty section legacy RustFS reads there, not a truncated one: its
+    /// verdict is the declaration's, read without the option. `None` for anything else.
+    fn empty_section_at_eof(&self) -> Option<ChunkReject> {
+        let declaration = self.trailer_declaration.as_ref()?;
+        let pending = self.window.get(self.decoder.cursor()..self.filled)?;
+        if !self.decoder.limits().accepts_empty_line_before_trailers() || pending != b"\r\n" {
+            return None;
+        }
+        parse_trailer_section(pending, declaration, &ChunkLimits::default()).err()
     }
 
     /// Settles what happens after the terminal chunk.
@@ -582,7 +597,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
             if self.trailers.is_none() {
                 let start = self.decoder.cursor();
                 let input = self.window.get(start..self.filled).unwrap_or(&[]);
-                match parse_trailer_section(input, declaration) {
+                match parse_trailer_section(input, declaration, &self.decoder.limits()) {
                     Err(reject) => return Poll::Ready(Err(self.fail(reject))),
                     Ok(TrailerProgress::NeedMore) => return self.refill_trailer(cx),
                     Ok(TrailerProgress::Complete { trailers, consumed }) => {

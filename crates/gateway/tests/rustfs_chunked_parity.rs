@@ -1,0 +1,290 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The request-body framing answers of the RustFS profile, byte for byte as RustFS's own
+//! negative SigV4 suite sends them, through the whole service.
+//!
+//! Responsible for: proving that `ServiceBuilder::rustfs_profile` stores the signed and trailer
+//! uploads legacy RustFS stores, and answers the malformed ones with legacy RustFS's code — on
+//! `PutObject` and `UploadPart` alike — with nothing reaching the backend as complete; and that
+//! the default assembly answers each as it did before.
+//! NOT responsible for: the decoder's rules (`rustfs-gateway-http`), each switch's unit behaviour
+//! (`src/builder/legacy_chunks.rs`), or the RustFS host that assembles the profile.
+//! Upstream: `S3Service` with recording `PutObject` and `UploadPart` backends. Downstream: none.
+
+use std::sync::{Arc, Mutex};
+
+use bytes::Bytes;
+use http_body_util::BodyExt as _;
+use rustfs_gateway::sig::{
+    AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, TrailerSet,
+};
+use rustfs_gateway::{ByteStream, Handler, HandlerError, HandlerResult, Req, Resp, S3Service, dto};
+use rustfs_gateway_sig::{DeclaredTrailers, TrailerName};
+use sha2::{Digest as _, Sha256};
+
+use crate::support;
+
+const OBJECT: &[u8] = b"valid-chunked-control";
+const PUT: &str = "/bucket/object";
+const PART: &str = "/bucket/object?partNumber=1&uploadId=upload";
+const CHECKSUM: &str = "x-amz-checksum-sha256";
+
+#[derive(Default)]
+struct Stored(Mutex<Vec<Vec<u8>>>);
+
+struct Backend(Arc<Stored>);
+
+async fn store(stored: &Stored, body: Option<ByteStream>) -> Result<(), HandlerError> {
+    let mut body = body
+        .ok_or_else(|| HandlerError::internal_error("the upload reached its handler without a body stream"))?
+        .into_body();
+    let mut bytes = Vec::new();
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|_| HandlerError::internal_error("the request body stream failed"))?;
+        if let Ok(data) = frame.into_data() {
+            bytes.extend_from_slice(&data);
+        }
+    }
+    stored.0.lock().expect("the record is never poisoned").push(bytes);
+    Ok(())
+}
+
+impl Handler<dto::PutObject> for Backend {
+    fn call(&self, request: Req<dto::PutObject>) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
+        let stored = Arc::clone(&self.0);
+        let body = request.into_input().body;
+        async move {
+            store(&stored, body).await?;
+            Ok(Resp::new(dto::PutObjectOutput::default()))
+        }
+    }
+}
+
+impl Handler<dto::UploadPart> for Backend {
+    fn call(&self, request: Req<dto::UploadPart>) -> impl core::future::Future<Output = HandlerResult<dto::UploadPart>> + Send {
+        let stored = Arc::clone(&self.0);
+        let body = request.into_input().body;
+        async move {
+            store(&stored, body).await?;
+            Ok(Resp::new(dto::UploadPartOutput::default()))
+        }
+    }
+}
+
+fn assembled(profile: bool) -> (S3Service, Arc<Stored>) {
+    let stored = Arc::new(Stored::default());
+    let backend = Arc::new(Backend(Arc::clone(&stored)));
+    let mut builder = support::wired_at_signed_time();
+    if profile {
+        builder = builder.rustfs_profile();
+    }
+    let service = builder
+        .register::<dto::PutObject, _>(Arc::clone(&backend))
+        .register::<dto::UploadPart, _>(backend)
+        .build()
+        .expect("a complete upload assembly");
+    (service, stored)
+}
+
+/// Standard padded base64.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for group in bytes.chunks(3) {
+        let word = group
+            .iter()
+            .enumerate()
+            .fold(0_u32, |acc, (at, byte)| acc | u32::from(*byte) << (16 - 8 * at));
+        for index in 0..4 {
+            if index <= group.len() {
+                out.push(char::from(
+                    ALPHABET[usize::try_from((word >> (18 - 6 * index)) & 0x3F).expect("six bits")],
+                ));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn sha256_base64(data: &[u8]) -> String {
+    base64(&Sha256::digest(data))
+}
+
+/// The payload mode, and whether it declares `x-amz-checksum-sha256` as its trailer.
+#[derive(Clone, Copy)]
+enum Mode {
+    Signed,
+    SignedTrailer,
+    UnsignedTrailer,
+}
+
+impl Mode {
+    fn payload(self) -> PayloadMode {
+        let trailer = || {
+            TrailerSet::Declared(
+                DeclaredTrailers::new([TrailerName::new(CHECKSUM).expect("a trailer name")], false).expect("a declaration"),
+            )
+        };
+        match self {
+            Self::Signed => PayloadMode::StreamingSigned {
+                trailer: TrailerSet::None,
+            },
+            Self::SignedTrailer => PayloadMode::StreamingSigned { trailer: trailer() },
+            Self::UnsignedTrailer => PayloadMode::StreamingUnsigned { trailer: trailer() },
+        }
+    }
+}
+
+/// A header-signed aws-chunked upload to `target` declaring `decoded` bytes, whose body `frame`
+/// writes from the request's chunk-signature chain.
+fn upload(
+    target: &str,
+    mode: Mode,
+    decoded: usize,
+    frame: impl FnOnce(&mut rustfs_gateway::sig::ChunkSigner) -> Vec<u8>,
+) -> http::Request<Bytes> {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    headers.insert(http::header::CONTENT_ENCODING, http::HeaderValue::from_static("aws-chunked"));
+    if !matches!(mode, Mode::Signed) {
+        headers.insert("x-amz-trailer", http::HeaderValue::from_static(CHECKSUM));
+    }
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("an acceptable host");
+    let signing = SigningRequest::new(&http::Method::PUT, path, query, &headers, &host, mode.payload(), stamp)
+        .with_decoded_content_length(decoded as u64);
+    let mut signer = SigV4Signer::new(credentials, scope);
+    let signed = signer.sign_headers(&signing).expect("a signable request");
+    let body = frame(&mut signer.chunk_signer(&signed).expect("a chunk chain"));
+    let mut request = http::Request::builder().method(http::Method::PUT).uri(target);
+    for (name, value) in signed.headers() {
+        request = request.header(name, value);
+    }
+    request
+        .header(http::header::CONTENT_LENGTH, body.len())
+        .body(Bytes::from(body))
+        .expect("a valid request")
+}
+
+/// RustFS's signed framing: the object as one chunk, then `0;chunk-signature=…\r\n\r\n` and, for a
+/// trailer mode, the checksum and the trailer signature after that empty line.
+fn signed_body(chain: &mut rustfs_gateway::sig::ChunkSigner, trailer: bool) -> Vec<u8> {
+    let mut body = chain.encode_chunk(OBJECT);
+    body.extend_from_slice(&chain.encode_chunk(b""));
+    if trailer {
+        let checksum = sha256_base64(OBJECT);
+        let signature = chain.sign_trailer(&format!("{CHECKSUM}:{checksum}\n")).to_owned();
+        body.extend_from_slice(format!("{CHECKSUM}:{checksum}\r\nx-amz-trailer-signature:{signature}\r\n\r\n").as_bytes());
+    }
+    body
+}
+
+fn code(body: &str) -> Option<&str> {
+    support::element_text(body, "Code")
+}
+
+async fn answer(service: &S3Service, request: http::Request<Bytes>) -> (u16, String) {
+    let (status, body) = support::exchange(service, request).await;
+    (status.as_u16(), body)
+}
+
+// ── signed trailers after an empty line ────────────────────────────────────────────────────
+
+/// Positive — the signed-trailer upload RustFS's suite sends, with an empty line between the
+/// terminal chunk and the trailer, is stored on both upload operations.
+#[tokio::test]
+async fn a_signed_trailer_after_an_empty_line_is_stored_under_the_profile() {
+    for target in [PUT, PART] {
+        let (service, stored) = assembled(true);
+        let request = upload(target, Mode::SignedTrailer, OBJECT.len(), |chain| signed_body(chain, true));
+        let (status, body) = answer(&service, request).await;
+        assert_eq!(status, 200, "{target}: {body}");
+        assert_eq!(*stored.0.lock().expect("not poisoned"), [OBJECT.to_vec()], "{target}");
+    }
+}
+
+/// Positive — the plain signed upload is stored under the profile and without it.
+#[tokio::test]
+async fn a_signed_upload_is_stored_with_and_without_the_profile() {
+    for profile in [true, false] {
+        let (service, stored) = assembled(profile);
+        let request = upload(PUT, Mode::Signed, OBJECT.len(), |chain| signed_body(chain, false));
+        let (status, body) = answer(&service, request).await;
+        assert_eq!(status, 200, "{profile}: {body}");
+        assert_eq!(*stored.0.lock().expect("not poisoned"), [OBJECT.to_vec()]);
+    }
+}
+
+/// Negative — the default assembly reads the empty line as an empty trailer section, which lacks
+/// its signature: `403`, nothing stored.
+#[tokio::test]
+async fn n_the_default_assembly_refuses_a_signed_trailer_after_an_empty_line() {
+    let (service, stored) = assembled(false);
+    let request = upload(PUT, Mode::SignedTrailer, OBJECT.len(), |chain| signed_body(chain, true));
+    let (status, body) = answer(&service, request).await;
+    assert_eq!((status, code(&body)), (403, Some("SignatureDoesNotMatch")), "{body}");
+    assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != OBJECT));
+}
+
+/// Negative — under the profile a second empty line is still refused, and nothing is stored.
+#[tokio::test]
+async fn n_two_empty_lines_before_signed_trailers_are_refused_under_the_profile() {
+    let (service, stored) = assembled(true);
+    let request = upload(PUT, Mode::SignedTrailer, OBJECT.len(), |chain| {
+        let mut body = chain.encode_chunk(OBJECT);
+        body.extend_from_slice(&chain.encode_chunk(b""));
+        body.extend_from_slice(b"\r\n");
+        let checksum = sha256_base64(OBJECT);
+        let signature = chain.sign_trailer(&format!("{CHECKSUM}:{checksum}\n")).to_owned();
+        body.extend_from_slice(format!("{CHECKSUM}:{checksum}\r\nx-amz-trailer-signature:{signature}\r\n\r\n").as_bytes());
+        body
+    });
+    let (status, body) = answer(&service, request).await;
+    assert_ne!(status, 200, "{body}");
+    assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != OBJECT));
+}
+
+/// RustFS's unsigned trailer framing: the object as one chunk, the terminal chunk, `fields` and
+/// the empty line that ends them.
+fn unsigned_body(empty_line: bool, fields: &str) -> Vec<u8> {
+    let mut body = format!("{:x}\r\n", OBJECT.len()).into_bytes();
+    body.extend_from_slice(OBJECT);
+    body.extend_from_slice(b"\r\n0\r\n");
+    if empty_line {
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(fields.as_bytes());
+    body.extend_from_slice(b"\r\n");
+    body
+}
+
+fn checksum_line() -> String {
+    format!("{CHECKSUM}:{}\r\n", sha256_base64(OBJECT))
+}
+
+/// Positive — legacy RustFS skips the empty line in the unsigned trailer mode too.
+#[tokio::test]
+async fn an_unsigned_trailer_after_an_empty_line_is_stored_under_the_profile() {
+    let (service, stored) = assembled(true);
+    let request = upload(PUT, Mode::UnsignedTrailer, OBJECT.len(), |_| unsigned_body(true, &checksum_line()));
+    let (status, body) = answer(&service, request).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(*stored.0.lock().expect("not poisoned"), [OBJECT.to_vec()]);
+}

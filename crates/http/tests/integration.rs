@@ -60,6 +60,8 @@ mod ingest_chunk_rules;
 mod ingest_framing;
 #[path = "ingest_known_answer.rs"]
 mod ingest_known_answer;
+#[path = "ingest_legacy_trailers.rs"]
+mod ingest_legacy_trailers;
 #[path = "ingest_perf_gates.rs"]
 mod ingest_perf_gates;
 #[path = "ingest_verify.rs"]

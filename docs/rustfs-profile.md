@@ -52,6 +52,7 @@ registered before it is removed.
 | Switch | Legacy RustFS behaviour kept | rustfs/backlog#2684 entry | Exit condition |
 | --- | --- | --- | --- |
 | `accept_all_checksum_omissions` | no integrity claim required on any request body; one that is sent is compared | "no checksum required on any operation" (R5) | require checksums as the AWS model does |
+| `accept_an_empty_line_before_aws_chunk_trailers` | one CRLF between the terminal chunk line and the first trailer field read as part of the trailer section, in both trailer modes | unregistered (rustfs/backlog#2734) | register; then the core's section, which that CRLF ends |
 | `accept_empty_uploads_without_content_length` | an upload the transport ended empty without `Content-Length` is an empty object | "empty upload without Content-Length stored" | `411 MissingContentLength` (`q-length-0007`) |
 | `accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report` | every key up to 1024 bytes without a NUL reaches storage, which judges it | "paths, keys and addressing as legacy" (`key_floor.rs`) | the AWS key floor; only behind a backend that validates keys itself |
 | `accept_minio_body_literals` | a bare `Enabled` body on a versioning or object-lock write | "bare `Enabled` body" (R6) | complete XML documents only |
@@ -135,7 +136,7 @@ An assembly running the profile writes six lines at start-up, in this order, and
 2. `DIALECT_POSTURE` — whatever dialects the host installed; the launcher installs none;
 3. `PRESIGNED_EXPIRY_POSTURE rule=legacy-rustfs`;
 4. `NAMING_POSTURE slash_policy=rustfs-legacy … key_floor=rustfs-legacy … path_split=rustfs-legacy`;
-5. `PROFILE_POSTURE switches=[…]` — the 42 builder- and router-held readings above, sorted;
+5. `PROFILE_POSTURE switches=[…]` — the 43 builder- and router-held readings above, sorted;
 6. the `SecurityPosture` line a host prints itself — `per-IP bucket: unlimited` and every
    pre-authentication layer under `unlimited pre-authentication layers`.
 

@@ -203,6 +203,7 @@ impl GatewaySeam {
             .leave_bodies_of_bodyless_operations_unread()
             .refuse_unsized_buffered_bodies_as_legacy_rustfs()
             .read_aws_chunks_as_legacy_rustfs()
+            .accept_an_empty_line_before_aws_chunk_trailers()
             .bound_claimed_route_bodies_as_legacy_rustfs()
             .bound_buffered_bodies_as_legacy_rustfs()
             .answer_body_refusals_with_legacy_rustfs_sentences()

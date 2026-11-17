@@ -37,7 +37,6 @@ use crate::builder::buffered_lengths::BufferedLengths;
 use crate::builder::claimed_bodies::ClaimedBodies;
 use crate::builder::credential_sentences::CredentialSentences;
 use crate::builder::denial_sentences::DenialSentences;
-use crate::builder::legacy_chunks::ChunkReading;
 use crate::builder::legacy_heads::AnswerHeads;
 use crate::builder::legacy_sentences::BodySentences;
 use crate::builder::not_modified_headers::NotModifiedHeaders;
@@ -50,8 +49,12 @@ use crate::trace::Identification;
 impl ViewPolicy {
     /// Adds the name of every legacy reading this policy's state selects to `into`.
     pub(crate) fn legacy_switches(&self, into: &mut BTreeSet<&'static str>) {
-        let readings: [(bool, &'static str); 37] = [
+        let readings: [(bool, &'static str); 38] = [
             (self.checksum_waiver.waives_every_operation(), "accept_all_checksum_omissions"),
+            (
+                self.chunk_reading.empty_line_before_trailers,
+                "accept_an_empty_line_before_aws_chunk_trailers",
+            ),
             (self.empty_uploads_without_length, "accept_empty_uploads_without_content_length"),
             (self.body_literals, "accept_minio_body_literals"),
             (
@@ -107,7 +110,7 @@ impl ViewPolicy {
                 "leave_bodies_of_bodyless_operations_unread",
             ),
             (self.post_forms.is_legacy_rustfs(), "legacy_rustfs_post_forms"),
-            (self.chunk_reading == ChunkReading::LegacyRustfs, "read_aws_chunks_as_legacy_rustfs"),
+            (self.chunk_reading.legacy_chunks, "read_aws_chunks_as_legacy_rustfs"),
             (self.legacy_checksum_declarations, "read_checksum_declarations_as_legacy_rustfs"),
             (self.legacy_checksums, "read_checksums_as_legacy_rustfs"),
             (self.empty_headers_absent, "read_empty_headers_as_absent"),

@@ -333,6 +333,37 @@ impl SignedChunker {
         self.out
     }
 
+    /// Appends the terminal chunk and a signed trailer section, and returns the whole body.
+    ///
+    /// The trailer signature covers every field in `fields`, sorted by name and written
+    /// `name:value\n`, chained from the terminal chunk's signature. `empty_line` writes one CRLF
+    /// between the terminal chunk line and the first field, the layout legacy RustFS accepts.
+    pub fn finish_with_trailers(mut self, fields: &[(&str, &str)], empty_line: bool) -> Vec<u8> {
+        let terminal = self.signature_for(&[]);
+        self.out
+            .extend_from_slice(format!("0;chunk-signature={}\r\n", hex_lower(&terminal)).as_bytes());
+        if empty_line {
+            self.out.extend_from_slice(b"\r\n");
+        }
+        let mut sorted = fields.to_vec();
+        sorted.sort_by(|left, right| left.0.cmp(right.0));
+        let canonical: String = sorted.iter().map(|(name, value)| format!("{name}:{value}\n")).collect();
+        let sts = format!(
+            "AWS4-HMAC-SHA256-TRAILER\n{}\n{}\n{}\n{}",
+            self.amz_date,
+            self.scope_line,
+            hex_lower(&terminal),
+            hex_lower(&Sha256::digest(canonical.as_bytes()).into()),
+        );
+        let signature = hmac_sha256(&self.key, sts.as_bytes());
+        for (name, value) in fields {
+            self.out.extend_from_slice(format!("{name}:{value}\r\n").as_bytes());
+        }
+        self.out
+            .extend_from_slice(format!("x-amz-trailer-signature:{}\r\n\r\n", hex_lower(&signature)).as_bytes());
+        self.out
+    }
+
     /// Ends the body without a terminal chunk, which is the truncation attack.
     pub fn finish_truncated(self) -> Vec<u8> {
         self.out

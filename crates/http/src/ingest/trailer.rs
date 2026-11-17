@@ -27,6 +27,7 @@ use rustfs_gateway_types::ChecksumAlgorithm;
 use smallvec::SmallVec;
 
 use crate::ingest::ChunkReject;
+use crate::limits::ChunkLimits;
 use crate::text::trim_ows;
 
 /// The largest complete trailer section, including its final CRLF.
@@ -108,8 +109,18 @@ pub(crate) enum TrailerProgress {
 }
 
 /// Parses one complete trailer section without retaining a second buffer.
-pub(crate) fn parse_trailer_section(input: &[u8], declaration: &TrailerDeclaration) -> Result<TrailerProgress, ChunkReject> {
-    let mut cursor = 0usize;
+pub(crate) fn parse_trailer_section(
+    input: &[u8],
+    declaration: &TrailerDeclaration,
+    limits: &ChunkLimits,
+) -> Result<TrailerProgress, ChunkReject> {
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS skips a CRLF before the first field, so
+    // the option reads exactly one there as part of the section; a second still ends it.
+    let mut cursor = if limits.accepts_empty_line_before_trailers() && input.starts_with(b"\r\n") {
+        2
+    } else {
+        0
+    };
     let mut fields = HeaderMap::new();
 
     loop {
@@ -186,7 +197,7 @@ mod tests {
     fn a_signed_declaration_without_its_final_hmac_has_a_distinct_refusal() {
         let declaration = TrailerDeclaration::parse(&HeaderValue::from_static("x-amz-checksum-crc32"), true)
             .expect("one checksum plus its implicit signature");
-        let result = parse_trailer_section(b"x-amz-checksum-crc32:AAAAAA==\r\n\r\n", &declaration);
+        let result = parse_trailer_section(b"x-amz-checksum-crc32:AAAAAA==\r\n\r\n", &declaration, &ChunkLimits::default());
 
         assert!(matches!(result, Err(ChunkReject::TrailerSignatureMissing)));
     }

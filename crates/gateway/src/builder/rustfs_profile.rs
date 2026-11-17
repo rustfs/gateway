@@ -39,6 +39,7 @@
 //! | Switch | Legacy RustFS behaviour kept | #2684 entry |
 //! | --- | --- | --- |
 //! | `accept_all_checksum_omissions` | no integrity claim required on any request body | "no checksum required on any operation" (R5) |
+//! | `accept_an_empty_line_before_aws_chunk_trailers` | one CRLF between the terminal chunk line and the first trailer field read as part of the section | unregistered (rustfs/backlog#2734) |
 //! | `accept_empty_uploads_without_content_length` | an upload the transport ended empty without `Content-Length` is an empty object | "empty upload without Content-Length stored" |
 //! | `accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report` | every key up to 1024 bytes reaches storage, which judges it | "paths, keys and addressing as legacy" (`key_floor.rs`) |
 //! | `accept_minio_body_literals` | a bare `Enabled` body on a versioning or object-lock write | "bare `Enabled` body" (R6) |
@@ -234,6 +235,9 @@ impl ServiceBuilder {
             // claimed route's body at 1 MiB, and buffers every body it decodes up to 20 MiB
             // (rustfs/gateway#1173).
             .read_aws_chunks_as_legacy_rustfs()
+            // RustFS skips an empty line before an aws-chunked trailer section, which its own
+            // signer writes (rustfs/backlog#2734).
+            .accept_an_empty_line_before_aws_chunk_trailers()
             .bound_claimed_route_bodies_as_legacy_rustfs()
             .bound_buffered_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a bare `Enabled` body (rustfs/backlog#1677, R6).
@@ -363,6 +367,10 @@ mod tests {
     /// (`tests/rustfs_profile.rs`).
     const SWITCHES: &[(&str, Switch)] = &[
         ("accept_all_checksum_omissions", ServiceBuilder::accept_all_checksum_omissions),
+        (
+            "accept_an_empty_line_before_aws_chunk_trailers",
+            ServiceBuilder::accept_an_empty_line_before_aws_chunk_trailers,
+        ),
         (
             "accept_empty_uploads_without_content_length",
             ServiceBuilder::accept_empty_uploads_without_content_length,

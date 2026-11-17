@@ -70,7 +70,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 
 | Path | Contract |
 | --- | --- |
-| `tests/assembly.rs`, `tests/rustfs_profile.rs` | Assembly refusals, one-Arc service, required extensions; the RustFS profile's posture over the reference backend held to `tests/golden/rustfs-profile-posture.txt`, with its control against the default assembly, and the reviewed list of operations that admit a header token (`tests/golden/header-token-operations.txt`) |
+| `tests/assembly.rs`, `tests/rustfs_profile.rs`, `tests/rustfs_chunked_parity.rs` | Assembly refusals, one-Arc service, required extensions; the RustFS profile's aws-chunked answers byte for byte as RustFS's negative SigV4 suite sends them; the RustFS profile's posture over the reference backend held to `tests/golden/rustfs-profile-posture.txt`, with its control against the default assembly, and the reviewed list of operations that admit a header token (`tests/golden/header-token-operations.txt`) |
 | `tests/assembly_order.rs` | Aggregate extension call order and counts |
 | `tests/service_clone_allocations.rs`, `tests/header_lookup_allocations.rs`, `tests/signature_text_allocations.rs`, `tests/static_header_allocations.rs` | Connection clones, metadata lookups and signature text held to independent allocation controls |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
