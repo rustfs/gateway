@@ -205,6 +205,7 @@ impl GatewaySeam {
             .read_aws_chunks_as_legacy_rustfs()
             .accept_an_empty_line_before_aws_chunk_trailers()
             .bound_aws_chunk_trailers_as_legacy_rustfs()
+            .answer_aws_chunk_refusals_as_legacy_rustfs()
             .bound_claimed_route_bodies_as_legacy_rustfs()
             .bound_buffered_bodies_as_legacy_rustfs()
             .answer_body_refusals_with_legacy_rustfs_sentences()

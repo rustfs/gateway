@@ -69,6 +69,7 @@ pub use crate::ingest::signer::{
 pub use crate::ingest::trailer::{MAX_TRAILER_SECTION_BYTES, TrailerDeclaration};
 
 use crate::framing::Framing;
+use crate::limits::ChunkLimits;
 
 /// The signature-derived facts the ingest layer is allowed to read about a payload.
 ///
@@ -214,6 +215,22 @@ pub fn validate_decoded_length(
     header: Option<&str>,
     wire: &Framing,
 ) -> Result<Option<DecodedLength>, ChunkReject> {
+    validate_decoded_length_with(framing, header, wire, &ChunkLimits::default())
+}
+
+/// [`validate_decoded_length`] under `limits`: with
+/// [`ChunkLimits::with_legacy_rustfs_refusals`] the last rule is left to the decoder, which
+/// refuses every body that breaks it before the body ends, as legacy RustFS does.
+///
+/// # Errors
+///
+/// [`ChunkReject::ModeConfusion`], with the specific rule in [`ModeConfusion`].
+pub fn validate_decoded_length_with(
+    framing: &ChunkFraming,
+    header: Option<&str>,
+    wire: &Framing,
+    limits: &ChunkLimits,
+) -> Result<Option<DecodedLength>, ChunkReject> {
     let Some(header) = header else {
         if framing.is_framed() {
             return Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMissing));
@@ -237,7 +254,10 @@ pub fn validate_decoded_length(
             .ok_or(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMalformed))?;
     }
 
-    if wire.is_transport_delimited() {
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS never compares the decoded length with
+    // the wire length, so a short body is refused by whatever its bytes break first. Kept so the
+    // refusal carries legacy RustFS's code; the body cannot complete either way.
+    if wire.is_transport_delimited() || limits.answers_legacy_rustfs_refusals() {
         return Ok(Some(DecodedLength(decoded)));
     }
     // Only a transport-delimited body lacks a wire length, and it has returned above; a zero

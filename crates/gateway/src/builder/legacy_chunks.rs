@@ -17,7 +17,8 @@
 //!
 //! Responsible for: [`ServiceBuilder::read_aws_chunks_as_legacy_rustfs`],
 //! [`ServiceBuilder::accept_an_empty_line_before_aws_chunk_trailers`],
-//! [`ServiceBuilder::bound_aws_chunk_trailers_as_legacy_rustfs`] and [`ChunkReading`], the chunk
+//! [`ServiceBuilder::bound_aws_chunk_trailers_as_legacy_rustfs`],
+//! [`ServiceBuilder::answer_aws_chunk_refusals_as_legacy_rustfs`] and [`ChunkReading`], the chunk
 //! limits the pipeline hands every aws-chunked body it decodes.
 //! NOT responsible for: the decoder (`rustfs-gateway-http`'s ingest), or the wire length a framed
 //! upload may declare (`crate::gate::max_framed_upload_bytes`).
@@ -40,7 +41,8 @@
 //! This crate holds a chunk whole until it ends, and verifies a signed one before any of it is
 //! delivered, so a chunk's size is what one connection holds. The profile lifts the ceiling to the
 //! largest this crate allows, [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] (16 MiB), and no further: a
-//! chunk past it is still refused, `400 InvalidChunkSizeError`, with nothing stored, where legacy
+//! chunk past it is still refused, `400 InvalidChunkSizeError` (`400 EntityTooLarge` under
+//! [`ServiceBuilder::answer_aws_chunk_refusals_as_legacy_rustfs`]), with nothing stored, where legacy
 //! RustFS streams an unsigned one of any size. Reading those needs a decoder that releases an
 //! unsigned chunk before it ends, which rustfs/gateway#1173 leaves open for a decision.
 //! The chunk count and the framing ratio are lifted entirely: each chunk carries at least one body
@@ -72,6 +74,21 @@
 //! dropped before the section reaches anything — handler, metadata or log. Stricter than legacy
 //! RustFS, deliberately: the declared checksum and the trailer signature must still arrive exactly
 //! once each, and an unsigned section may not carry a trailer signature at all.
+//!
+//! # The codes a malformed body is refused with
+//!
+//! Legacy RustFS reports every framing and trailer failure as `400 IncompleteBody`, and a chunk
+//! past its ceiling or a size line past 1 KiB as `400 EntityTooLarge` (s3s `5761ddf`,
+//! `aws_chunked_stream.rs:44-46` and `:141-152`; rustfs/rustfs `rustfs/src/error.rs:614-618`); it
+//! never compares the decoded length with the wire length, so a body too short for its declared
+//! length is refused by whatever its bytes break first. The core answers `400 InvalidRequest` or
+//! `InvalidChunkSizeError`, refuses a size line past 256 bytes, and refuses the short body from the
+//! head. The profile answers with legacy RustFS's codes, reads a size line up to 1 KiB, and leaves
+//! the short body to the decoder ([`ChunkLimits::with_legacy_rustfs_refusals`]). The status, the
+//! point of refusal and the connection verdict stay the decoder's; nothing is stored either way, and
+//! the head's other contradictions keep their own codes. A missing trailer signature stays `403`
+//! where legacy RustFS answers `400 IncompleteBody`: an unauthenticated section is not reworded as a
+//! framing error.
 
 use rustfs_gateway_http::ChunkLimits;
 
@@ -87,6 +104,8 @@ pub(crate) struct ChunkReading {
     pub(crate) empty_line_before_trailers: bool,
     /// [`ServiceBuilder::bound_aws_chunk_trailers_as_legacy_rustfs`].
     pub(crate) legacy_trailer_bounds: bool,
+    /// [`ServiceBuilder::answer_aws_chunk_refusals_as_legacy_rustfs`].
+    pub(crate) legacy_refusals: bool,
 }
 
 impl ChunkReading {
@@ -120,6 +139,16 @@ impl ChunkReading {
             limits = limits
                 .with_trailer_bounds(ChunkLimits::HARD_MAX_TRAILER_SECTION_BYTES, ChunkLimits::HARD_MAX_TRAILER_FIELDS)
                 .with_undeclared_trailer_fields_discarded();
+        }
+        if self.legacy_refusals {
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS answers a malformed body
+            // `IncompleteBody` or `EntityTooLarge` whatever broke, reads a size line up to 1 KiB,
+            // and refuses a body too short for its declared length only once its bytes break.
+            // Questionable because the codes no longer say which rule fired; kept so RustFS's
+            // clients read the codes they read today. The intended future behaviour is the core's.
+            limits = limits
+                .with_legacy_rustfs_refusals()
+                .with_max_chunk_meta_size(ChunkLimits::HARD_MAX_CHUNK_META_SIZE);
         }
         limits
     }
@@ -168,6 +197,21 @@ impl ServiceBuilder {
         self.view_policy.chunk_reading.legacy_trailer_bounds = true;
         self
     }
+
+    /// Answers a malformed aws-chunked body as legacy RustFS does: every framing and trailer
+    /// failure `400 IncompleteBody`, a chunk past its ceiling or a size line past 1 KiB `400
+    /// EntityTooLarge`, a size line read up to 1 KiB, and a body too short for its declared decoded
+    /// length refused by the decoder rather than from the head.
+    ///
+    /// Off by default: the core answers `400 InvalidRequest` or `InvalidChunkSizeError`, reads a
+    /// size line up to 256 bytes, and refuses the short body before reading it. Either way the body
+    /// is refused before its end and nothing is stored; a failed signature stays `403
+    /// SignatureDoesNotMatch`.
+    #[must_use]
+    pub fn answer_aws_chunk_refusals_as_legacy_rustfs(mut self) -> Self {
+        self.view_policy.chunk_reading.legacy_refusals = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +222,7 @@ mod tests {
         legacy_chunks: true,
         empty_line_before_trailers: false,
         legacy_trailer_bounds: false,
+        legacy_refusals: false,
     };
 
     /// Positive — the profile's limits admit a 16 MiB chunk and any chunk count or framing share.
@@ -244,10 +289,39 @@ mod tests {
             legacy_chunks: true,
             empty_line_before_trailers: true,
             legacy_trailer_bounds: false,
+            legacy_refusals: true,
         }
         .limits();
         assert_eq!(other.max_trailer_section_bytes(), ChunkLimits::default().max_trailer_section_bytes());
         assert_eq!(other.max_trailer_fields(), ChunkLimits::default().max_trailer_fields());
         assert!(!other.discards_undeclared_trailer_fields());
+    }
+
+    /// Positive — the refusal switch answers as legacy RustFS and reads a 1 KiB size line, alone.
+    #[test]
+    fn the_refusal_switch_reaches_the_limits_alone() {
+        let limits = ChunkReading {
+            legacy_refusals: true,
+            ..ChunkReading::default()
+        }
+        .limits();
+        assert!(limits.answers_legacy_rustfs_refusals());
+        assert_eq!(limits.max_chunk_meta_size(), 1024);
+        assert_eq!(limits.max_chunk_size(), ChunkLimits::default().max_chunk_size());
+        assert_eq!(limits.max_trailer_section_bytes(), ChunkLimits::default().max_trailer_section_bytes());
+    }
+
+    /// Negative — no other reading answers as legacy RustFS or lengthens the size line.
+    #[test]
+    fn n_no_other_reading_answers_as_legacy_rustfs() {
+        let other = ChunkReading {
+            legacy_chunks: true,
+            empty_line_before_trailers: true,
+            legacy_trailer_bounds: true,
+            legacy_refusals: false,
+        }
+        .limits();
+        assert!(!other.answers_legacy_rustfs_refusals());
+        assert_eq!(other.max_chunk_meta_size(), ChunkLimits::default().max_chunk_meta_size());
     }
 }

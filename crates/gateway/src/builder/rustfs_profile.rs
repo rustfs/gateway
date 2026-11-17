@@ -45,6 +45,7 @@
 //! | `accept_minio_body_literals` | a bare `Enabled` body on a versioning or object-lock write | "bare `Enabled` body" (R6) |
 //! | `accept_mismatched_payload_digests_without_a_body` | a bodyless request's signed digest is not compared | "bodyless signed digest unchecked" |
 //! | `address_paths_as_legacy_rustfs` | the path decoded whole before the bucket split, `GET //` as `GET /` | "paths, keys and addressing as legacy" (`addressing.rs`, `legacy_addressing.rs`) |
+//! | `answer_aws_chunk_refusals_as_legacy_rustfs` | a malformed aws-chunked body `IncompleteBody` or `EntityTooLarge`, a 1 KiB size line, a short body refused by the decoder | unregistered (rustfs/backlog#2734) |
 //! | `answer_body_refusals_with_legacy_rustfs_sentences` | body refusals worded by code, in the API layer's fixed sentences | "digest and short-body failures use one wording" |
 //! | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`, a missed `x-amz-content-sha256` excluded | "checksum failures answer `BadDigest`" |
 //! | `answer_cors_as_legacy_rustfs` | CORS answered in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) |
@@ -242,6 +243,9 @@ impl ServiceBuilder {
             // RustFS bounds a trailer section at 16 KiB and a hundred fields, and ignores the
             // fields its head did not declare (rustfs/backlog#2734).
             .bound_aws_chunk_trailers_as_legacy_rustfs()
+            // RustFS answers a malformed aws-chunked body `IncompleteBody` or `EntityTooLarge`
+            // (rustfs/backlog#2734).
+            .answer_aws_chunk_refusals_as_legacy_rustfs()
             .bound_claimed_route_bodies_as_legacy_rustfs()
             .bound_buffered_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a bare `Enabled` body (rustfs/backlog#1677, R6).
@@ -389,6 +393,10 @@ mod tests {
             ServiceBuilder::accept_mismatched_payload_digests_without_a_body,
         ),
         ("address_paths_as_legacy_rustfs", ServiceBuilder::address_paths_as_legacy_rustfs),
+        (
+            "answer_aws_chunk_refusals_as_legacy_rustfs",
+            ServiceBuilder::answer_aws_chunk_refusals_as_legacy_rustfs,
+        ),
         (
             "answer_body_refusals_with_legacy_rustfs_sentences",
             ServiceBuilder::answer_body_refusals_with_legacy_rustfs_sentences,

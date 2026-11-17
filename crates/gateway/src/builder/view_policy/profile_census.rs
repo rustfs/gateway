@@ -49,7 +49,7 @@ use crate::trace::Identification;
 impl ViewPolicy {
     /// Adds the name of every legacy reading this policy's state selects to `into`.
     pub(crate) fn legacy_switches(&self, into: &mut BTreeSet<&'static str>) {
-        let readings: [(bool, &'static str); 39] = [
+        let readings: [(bool, &'static str); 40] = [
             (self.checksum_waiver.waives_every_operation(), "accept_all_checksum_omissions"),
             (
                 self.chunk_reading.empty_line_before_trailers,
@@ -61,6 +61,7 @@ impl ViewPolicy {
                 self.bodyless_digest == BodylessDigest::Ignored,
                 "accept_mismatched_payload_digests_without_a_body",
             ),
+            (self.chunk_reading.legacy_refusals, "answer_aws_chunk_refusals_as_legacy_rustfs"),
             (
                 self.body_sentences == BodySentences::LegacyRustfs,
                 "answer_body_refusals_with_legacy_rustfs_sentences",

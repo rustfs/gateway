@@ -179,7 +179,9 @@ async fn an_upload_cut_into_small_chunks_is_stored_whole() {
     assert_eq!(stored.body().as_ref(), object.as_slice());
 }
 
-/// Negative — a chunk one byte past 16 MiB is refused and no object is stored.
+/// Negative — a chunk one byte past 16 MiB is refused and no object is stored, `400
+/// EntityTooLarge`: the code legacy RustFS gives a chunk past its own ceiling (s3s `5761ddf`
+/// `aws_chunked_stream.rs:150`), though it streams an unsigned one of any size.
 #[tokio::test]
 async fn n_a_chunk_past_sixteen_mebibytes_stores_nothing() {
     let root = TestRoot::new();
@@ -191,11 +193,7 @@ async fn n_a_chunk_past_sixteen_mebibytes_stores_nothing() {
     )
     .await;
     assert_eq!(response.status(), 400, "{}", body_of(&response));
-    assert!(
-        body_of(&response).contains("<Code>InvalidChunkSizeError</Code>"),
-        "{}",
-        body_of(&response)
-    );
+    assert!(body_of(&response).contains("<Code>EntityTooLarge</Code>"), "{}", body_of(&response));
     let read = exchange(&service, as_main(http::Method::GET, "/chunks/huge", Bytes::new())).await;
     assert_eq!(read.status(), 404, "the refused upload was stored");
 }

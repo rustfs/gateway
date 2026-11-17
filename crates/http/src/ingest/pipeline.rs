@@ -298,6 +298,12 @@ impl<R> IngestPipeline<R> {
         self.window.len()
     }
 
+    /// The limits this pipeline decodes under, which also say how its refusals are answered.
+    #[must_use]
+    pub fn limits(&self) -> ChunkLimits {
+        self.decoder.limits()
+    }
+
     /// The framing this pipeline was built for.
     #[must_use]
     pub fn framing(&self) -> ChunkFraming {

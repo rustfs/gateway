@@ -74,6 +74,7 @@ use rustfs_gateway_core::{HandlerError, MetaView, ResponseKind};
 use rustfs_gateway_http::{
     BodyDigests, ChecksumVerified, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength,
     Framing, IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length,
+    validate_decoded_length_with,
 };
 use rustfs_gateway_sig::PayloadMode;
 use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress, TrailingHeaders};
@@ -173,7 +174,14 @@ impl ChunkIngest {
     }
 
     pub(crate) fn refusal<R>(pipeline: &IngestPipeline<R>) -> S3Error {
-        pipeline.reject().map_or_else(chunk_stream_failed, from_chunk_reject)
+        let legacy = pipeline.limits().answers_legacy_rustfs_refusals();
+        pipeline.reject().map_or_else(chunk_stream_failed, |reject| {
+            if legacy {
+                legacy_rustfs_refusal(reject)
+            } else {
+                from_chunk_reject(reject)
+            }
+        })
     }
 
     /// Decides whether the chunk parser runs, and assembles what it runs with.
@@ -210,7 +218,7 @@ impl ChunkIngest {
             None
         };
 
-        let declared = validate_decoded_length(&framing, decoded_length_header(headers), wire)
+        let declared = validate_decoded_length_with(&framing, decoded_length_header(headers), wire, &limits)
             .map_err(from_chunk_reject)?
             .ok_or_else(|| {
                 from_chunk_reject(ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::DecodedLengthMissing))
@@ -312,6 +320,25 @@ pub(crate) fn framed_meta<'a>(
     wire: &Framing,
 ) -> Option<MetaView<'a>> {
     framed_object_length(payload?, headers, wire).map(|length| meta.with_framed_content_length(length))
+}
+
+/// A body refusal under [`ChunkLimits::with_legacy_rustfs_refusals`]: legacy RustFS's code
+/// ([`ChunkReject::legacy_rustfs_error_code`]) where it differs from the core's, the status and the
+/// connection verdict the decoder's.
+fn legacy_rustfs_refusal(reject: ChunkReject) -> S3Error {
+    let code = reject.legacy_rustfs_error_code();
+    let message = if code == ErrorCode::ENTITY_TOO_LARGE {
+        "The chunked encoding of the request body exceeds a size this service reads."
+    } else if code == ErrorCode::INCOMPLETE_BODY {
+        "You did not provide the number of bytes specified by the Content-Length HTTP header."
+    } else {
+        return from_chunk_reject(reject);
+    };
+    crate::render::from_transport_limit(
+        HandlerError::new(code, message),
+        reject.to_status(),
+        crate::close::after_chunk_reject(&reject),
+    )
 }
 
 /// `x-amz-decoded-content-length` as text, for [`validate_decoded_length`] to judge.

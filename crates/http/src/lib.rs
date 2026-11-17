@@ -97,7 +97,7 @@ pub use crate::host::{EffectiveHost, HostError, HostSource, MAX_HOST_BYTES, RawH
 pub use crate::ingest::{
     ChunkFraming, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, DecodedLength, IngestPipeline, IngestPolicy,
     MAX_SCOPE_LINE_BYTES, MAX_TRAILER_SECTION_BYTES, MIN_CHUNK_META_BYTES, ModeConfusion, PayloadFramingSource, ScopeId,
-    SigningKeyCache, TrailerDeclaration, validate_decoded_length,
+    SigningKeyCache, TrailerDeclaration, validate_decoded_length, validate_decoded_length_with,
 };
 pub use crate::limits::{ChunkLimits, LimitKind, Limits};
 pub use crate::metadata::{

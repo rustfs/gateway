@@ -198,6 +198,25 @@ impl ChunkReject {
         }
     }
 
+    /// The S3 error code legacy RustFS answers this refusal with, for
+    /// [`crate::ChunkLimits::with_legacy_rustfs_refusals`].
+    ///
+    /// Legacy RustFS reports every framing and trailer failure of a body it decodes as
+    /// `IncompleteBody`, a chunk or a size line past its ceiling as `EntityTooLarge`, and a failed
+    /// chunk signature as `SignatureDoesNotMatch` (s3s `5761ddf`,
+    /// `crates/s3s/src/stream/aws_chunked_stream.rs:141-152`, mapped by rustfs/rustfs
+    /// `rustfs/src/error.rs:614-618`). The refusals the head decides — a mode confusion, a trailer
+    /// in a mode without one — and a missing trailer signature keep [`Self::error_code`].
+    #[must_use]
+    pub fn legacy_rustfs_error_code(&self) -> ErrorCode {
+        match self {
+            Self::ModeConfusion(_) | Self::TrailerInNonTrailerMode | Self::TrailerSignatureMissing => self.error_code(),
+            Self::SignatureChainBroken { .. } | Self::TrailerSignatureMismatch => ErrorCode::SIGNATURE_DOES_NOT_MATCH,
+            Self::ChunkSizeTooLarge { .. } | Self::ChunkMetaTooLong => ErrorCode::ENTITY_TOO_LARGE,
+            _ => ErrorCode::INCOMPLETE_BODY,
+        }
+    }
+
     /// Whether anything received so far may be committed.
     ///
     /// Always `false`. It is a method rather than a constant so the reason travels with the type:

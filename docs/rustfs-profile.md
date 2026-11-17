@@ -58,6 +58,7 @@ registered before it is removed.
 | `accept_minio_body_literals` | a bare `Enabled` body on a versioning or object-lock write | "bare `Enabled` body" (R6) | complete XML documents only |
 | `accept_mismatched_payload_digests_without_a_body` | a bodyless request's signed digest is not compared | "bodyless signed digest unchecked" | compare the signed digest on every request |
 | `address_paths_as_legacy_rustfs` | the path decoded whole before the bucket split, judged before routing, `GET //` as `GET /` | "paths, keys and addressing as legacy" (`addressing.rs`, `legacy_addressing.rs`) | split the path as it arrived; refuse an escaped bucket label |
+| `answer_aws_chunk_refusals_as_legacy_rustfs` | a malformed aws-chunked body `400 IncompleteBody`, a chunk or a size line past its ceiling `400 EntityTooLarge`, a size line read up to 1 KiB, a body too short for its decoded length refused by the decoder | unregistered (rustfs/backlog#2734) | register; then the core's codes and head-time length check |
 | `answer_body_refusals_with_legacy_rustfs_sentences` | body refusals worded by code in the API layer's fixed sentences, `XAmzContentSHA256Mismatch` included | "digest and short-body failures use one wording" | the core's per-refusal sentences |
 | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`; a body missing its signed `x-amz-content-sha256` is not one and stays `XAmzContentSHA256Mismatch` | "checksum failures answer `BadDigest`" | `InvalidRequest` and `XAmzContentChecksumMismatch` |
 | `answer_cors_as_legacy_rustfs` | CORS answered in a layer in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) | register; then the core's CORS runtime |
@@ -137,7 +138,7 @@ An assembly running the profile writes six lines at start-up, in this order, and
 2. `DIALECT_POSTURE` — whatever dialects the host installed; the launcher installs none;
 3. `PRESIGNED_EXPIRY_POSTURE rule=legacy-rustfs`;
 4. `NAMING_POSTURE slash_policy=rustfs-legacy … key_floor=rustfs-legacy … path_split=rustfs-legacy`;
-5. `PROFILE_POSTURE switches=[…]` — the 44 builder- and router-held readings above, sorted;
+5. `PROFILE_POSTURE switches=[…]` — the 45 builder- and router-held readings above, sorted;
 6. the `SecurityPosture` line a host prints itself — `per-IP bucket: unlimited` and every
    pre-authentication layer under `unlimited pre-authentication layers`.
 

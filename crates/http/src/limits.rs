@@ -251,6 +251,7 @@ pub struct ChunkLimits {
     max_trailer_section_bytes: u16,
     max_trailer_fields: u8,
     undeclared_trailer_fields: bool,
+    legacy_rustfs_refusals: bool,
 }
 
 impl ChunkLimits {
@@ -267,6 +268,10 @@ impl ChunkLimits {
     /// The most trailer fields any configuration may permit, the trailer signature included:
     /// legacy RustFS's hundred.
     pub const HARD_MAX_TRAILER_FIELDS: u8 = 100;
+
+    /// The longest chunk-size line any configuration may permit, its CRLF included: legacy
+    /// RustFS's 1 KiB.
+    pub const HARD_MAX_CHUNK_META_SIZE: u16 = 1024;
 
     /// The default per-chunk data ceiling: one mebibyte.
     pub const DEFAULT_MAX_CHUNK_SIZE: u32 = 1024 * 1024;
@@ -378,6 +383,26 @@ impl ChunkLimits {
         self
     }
 
+    /// Whether this body's refusals are answered as legacy RustFS answers them.
+    #[must_use]
+    pub fn answers_legacy_rustfs_refusals(&self) -> bool {
+        self.legacy_rustfs_refusals
+    }
+
+    /// Answers this body's refusals as legacy RustFS does: with
+    /// [`crate::ChunkReject::legacy_rustfs_error_code`], and from the decoder rather than the head
+    /// when the declared decoded length cannot fit the wire length
+    /// ([`crate::validate_decoded_length_with`]), so the refusal is the one the bytes earn.
+    ///
+    /// Off by default. Deferring that one head check admits no body: a decoded length the wire
+    /// cannot carry is one no complete body reaches, so the decoder refuses every such body before
+    /// its end — reading at most the `Content-Length` the transport already bounds.
+    #[must_use]
+    pub fn with_legacy_rustfs_refusals(mut self) -> Self {
+        self.legacy_rustfs_refusals = true;
+        self
+    }
+
     /// Sets the per-chunk data ceiling, clamped to [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] and to at
     /// least one byte.
     #[must_use]
@@ -387,11 +412,10 @@ impl ChunkLimits {
     }
 
     /// Sets the chunk-size line ceiling, clamped to at least [`ChunkLimits::MIN_CHUNK_META_SIZE`]
-    /// and to at most [`crate::MAX_CHUNK_SIZE_LINE_BYTES`].
+    /// and to at most [`ChunkLimits::HARD_MAX_CHUNK_META_SIZE`].
     #[must_use]
     pub fn with_max_chunk_meta_size(mut self, bytes: u16) -> Self {
-        let ceiling = u16::try_from(crate::MAX_CHUNK_SIZE_LINE_BYTES).unwrap_or(u16::MAX);
-        self.max_chunk_meta_size = bytes.clamp(Self::MIN_CHUNK_META_SIZE, ceiling);
+        self.max_chunk_meta_size = bytes.clamp(Self::MIN_CHUNK_META_SIZE, Self::HARD_MAX_CHUNK_META_SIZE);
         self
     }
 
@@ -443,6 +467,7 @@ impl Default for ChunkLimits {
             max_trailer_section_bytes: 1024,
             max_trailer_fields: 2,
             undeclared_trailer_fields: false,
+            legacy_rustfs_refusals: false,
         }
     }
 }

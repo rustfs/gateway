@@ -449,3 +449,112 @@ async fn n_checksum_and_md5_mismatches_stay_bad_digest_under_the_profile() {
 fn md5_digest(data: &[u8]) -> Vec<u8> {
     md5::Md5::digest(data).to_vec()
 }
+
+// ── malformed aws-chunked bodies ───────────────────────────────────────────────────────────
+
+const NAMED: &[u8] = b"private-chunked-fixture-body";
+
+/// One of RustFS's `aws_chunked_named_errors_reject_put_and_upload_part` requests, byte for byte:
+/// the case, the mode it is signed in, and the body.
+fn named_error(target: &str, case: &str) -> http::Request<Bytes> {
+    let unsigned = matches!(case, "trailers-over-limit" | "too-many-trailers");
+    let mode = if unsigned { Mode::UnsignedTrailer } else { Mode::Signed };
+    upload(target, mode, NAMED.len(), |chain| match case {
+        "signature" | "final-signature" => {
+            let mut body = chain.encode_chunk(NAMED);
+            body.extend_from_slice(&chain.encode_chunk(b""));
+            let at = if case == "signature" {
+                body.windows(2).position(|window| window == b"\r\n").expect("a chunk header") + 2
+            } else {
+                body.len() - 5
+            };
+            body[at] = if body[at] == b'a' { b'b' } else { b'a' };
+            body
+        }
+        "format" => b"invalid-chunk-size\r\n".to_vec(),
+        "metadata-at-limit" | "metadata-over-limit" => {
+            let size = if case == "metadata-at-limit" { 1024 } else { 1025 };
+            let mut body = vec![b'z'; size - 2];
+            body.extend_from_slice(b"\r\n");
+            body
+        }
+        "chunk-over-limit" => format!("10000001;chunk-signature={}\r\n", "0".repeat(64)).into_bytes(),
+        _ => {
+            let mut body = format!("{:x}\r\n", NAMED.len()).into_bytes();
+            body.extend_from_slice(NAMED);
+            body.extend_from_slice(b"\r\n0\r\n");
+            if case == "trailers-over-limit" {
+                body.extend_from_slice(format!("x-private:{}\r\n\r\n", "v".repeat(16385 - 14)).as_bytes());
+            } else {
+                body.extend_from_slice("x-private:v\r\n".repeat(101).as_bytes());
+                body.extend_from_slice(b"\r\n");
+            }
+            body
+        }
+    })
+}
+
+const NAMED_ERRORS: [(&str, u16, &str); 8] = [
+    ("signature", 403, "SignatureDoesNotMatch"),
+    ("final-signature", 403, "SignatureDoesNotMatch"),
+    ("format", 400, "IncompleteBody"),
+    ("metadata-at-limit", 400, "IncompleteBody"),
+    ("metadata-over-limit", 400, "EntityTooLarge"),
+    ("chunk-over-limit", 400, "EntityTooLarge"),
+    ("trailers-over-limit", 400, "IncompleteBody"),
+    ("too-many-trailers", 400, "IncompleteBody"),
+];
+
+/// Negative — every malformed body RustFS's suite sends is answered with legacy RustFS's status
+/// and code on both upload operations, names nothing private, and stores nothing.
+#[tokio::test]
+async fn n_malformed_chunked_bodies_are_answered_as_legacy_rustfs_under_the_profile() {
+    for (case, expected_status, expected_code) in NAMED_ERRORS {
+        for target in [PUT, PART] {
+            let (service, stored) = assembled(true);
+            let (status, body) = answer(&service, named_error(target, case)).await;
+            assert_eq!((status, code(&body)), (expected_status, Some(expected_code)), "{case} {target}: {body}");
+            for private in ["private-chunked-fixture-body", "chunk-signature=", "x-private", "ChunkReject"] {
+                assert!(!body.contains(private), "{case} {target} exposed {private}: {body}");
+            }
+            assert!(
+                stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != NAMED),
+                "{case} {target}"
+            );
+        }
+    }
+}
+
+/// Negative — the default assembly keeps the core's answers: framing refusals `InvalidRequest`, a
+/// chunk past its ceiling `InvalidChunkSizeError`, decided from the head where the head decides it.
+#[tokio::test]
+async fn n_the_default_assembly_keeps_the_cores_chunk_refusals() {
+    for (case, expected) in [
+        ("format", "InvalidRequest"),
+        ("metadata-at-limit", "InvalidRequest"),
+        ("metadata-over-limit", "InvalidRequest"),
+        ("chunk-over-limit", "InvalidRequest"),
+        ("too-many-trailers", "InvalidRequest"),
+        ("signature", "SignatureDoesNotMatch"),
+    ] {
+        let (service, stored) = assembled(false);
+        let (_, body) = answer(&service, named_error(PUT, case)).await;
+        assert_eq!(code(&body), Some(expected), "{case}: {body}");
+        assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != NAMED), "{case}");
+    }
+}
+
+/// Negative — a decoded length the wire cannot carry, read under the profile, is never stored
+/// however well-formed the bytes it does carry are.
+#[tokio::test]
+async fn n_a_body_shorter_than_its_decoded_length_is_never_stored_under_the_profile() {
+    let (service, stored) = assembled(true);
+    let request = upload(PUT, Mode::Signed, NAMED.len() + 1000, |chain| {
+        let mut body = chain.encode_chunk(NAMED);
+        body.extend_from_slice(&chain.encode_chunk(b""));
+        body
+    });
+    let (status, body) = answer(&service, request).await;
+    assert_eq!((status, code(&body)), (400, Some("IncompleteBody")), "{body}");
+    assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != NAMED));
+}
