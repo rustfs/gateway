@@ -842,7 +842,7 @@ impl S3Service {
                         &payload,
                         if external_bound { Some(0) } else { declared_length },
                     )
-                    .with_post_policy_limits(post_policy_limits)
+                    .with_post_form(post_policy_limits, routed_body.post_filename())
                     .with_claimed_route(claimed)
                     // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
                     // chain is verified with the same key and seed the request signature was, and
@@ -1009,6 +1009,7 @@ impl S3Service {
             Ok(body) => body,
             Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
         };
+        let post_key_constraints = accepted_body.post_key_constraints(&verdict);
         // Own the form's request facts so the route and input stages borrow no body.
         let (effective_key, post_response, post_fields, post_date_offset) = match &accepted_body {
             AcceptedBody::Ordinary(_) => (meta.key().cloned(), None, None, None),
@@ -1534,6 +1535,7 @@ impl S3Service {
             let sse = config.sse().cloned().map_err(map)?;
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
                 .map(|context| context.with_post_object_success_check(post_success_check))
+                .map(|context| context.with_post_object_key_constraints(post_key_constraints))
                 .map(|context| context.with_post_object_retain_until_offset_seconds(post_date_offset))
                 .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()))
                 .map(|context| match input_bearer {

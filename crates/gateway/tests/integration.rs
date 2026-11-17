@@ -181,6 +181,8 @@ mod post_object_lock_and_key_fields;
 mod post_object_redirect_field;
 #[path = "post_object_runtime.rs"]
 mod post_object_runtime;
+#[path = "post_object_signed_filename.rs"]
+mod post_object_signed_filename;
 #[path = "post_object_sigv2.rs"]
 mod post_object_sigv2;
 #[path = "post_object_streaming.rs"]

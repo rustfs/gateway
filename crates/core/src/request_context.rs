@@ -74,6 +74,9 @@ use crate::authz::{Subject, Subjects};
 use crate::codec::view::LifecycleRequestDates;
 use crate::route::PathParams;
 
+#[path = "request_context_post.rs"]
+mod post;
+
 /// How the request named its bucket, as the facade's host resolver decided it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AddressingStyle {
@@ -354,6 +357,7 @@ pub struct RequestContextView {
     lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
     object_lock_retain_until_offset_seconds: Option<i32>,
     post_object_success_check: Option<PostObjectSuccessCheck>,
+    post_object_key_constraints: Option<Arc<rustfs_gateway_sig::post_policy::PostKeyConstraints>>,
 }
 
 impl RequestContextView {
@@ -393,6 +397,7 @@ impl RequestContextView {
             lifecycle_request_dates: self.lifecycle_request_dates.clone(),
             object_lock_retain_until_offset_seconds: self.object_lock_retain_until_offset_seconds,
             post_object_success_check: self.post_object_success_check,
+            post_object_key_constraints: self.post_object_key_constraints.clone(),
         }
     }
 
@@ -462,6 +467,7 @@ impl RequestContextView {
             lifecycle_request_dates: None,
             object_lock_retain_until_offset_seconds: None,
             post_object_success_check: None,
+            post_object_key_constraints: None,
         })
     }
 
@@ -531,6 +537,7 @@ impl RequestContextView {
             lifecycle_request_dates: None,
             object_lock_retain_until_offset_seconds: None,
             post_object_success_check: None,
+            post_object_key_constraints: None,
         }
     }
 

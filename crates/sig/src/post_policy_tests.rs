@@ -632,3 +632,113 @@ fn n_an_unnamed_field_is_refused_after_the_bucket_and_the_size() {
         Some(PostPolicyError::FieldNotInPolicy)
     );
 }
+
+fn encoded_with_key_conditions(replacement: &str) -> String {
+    let decoded = String::from_utf8(decode_base64(POLICY, 4096).expect("fixture policy")).expect("UTF-8 policy");
+    let original = r#"["starts-with","$key","uploads/"]"#;
+    assert!(decoded.contains(original), "fixture has a key condition");
+    decoded
+        .replace(original, replacement)
+        .as_bytes()
+        .chunks(3)
+        .map(|chunk| match chunk {
+            [a, b, c] => crate::codec::encode_base64_exact(&[*a, *b, *c]),
+            [a, b] => crate::codec::encode_base64_exact(&[*a, *b]),
+            [a] => crate::codec::encode_base64_exact(&[*a]),
+            _ => unreachable!("chunks of three are nonempty"),
+        })
+        .collect()
+}
+
+#[test]
+fn post_key_constraints_keep_exact_key_boundaries() {
+    let encoded = encoded_with_key_conditions(r#"{"key":"uploads/report.txt"}"#);
+    let signature = "0".repeat(64);
+    let policy = parse(&fields_with_policy(&signature, &encoded), "report.txt").expect("exact key policy");
+    let constraints = policy.key_constraints();
+    assert!(constraints.permits("uploads/report.txt"));
+    for key in ["uploads/other.txt", "uploads/report.txt/child", "Uploads/report.txt", ""] {
+        assert!(!constraints.permits(key), "{key}");
+    }
+}
+
+#[test]
+fn post_key_constraints_intersect_all_prefixes_without_changing_final_key() {
+    let encoded = encoded_with_key_conditions(r#"["starts-with","$key","uploads/"],["starts-with","$key","uploads/report"]"#);
+    let signature = "0".repeat(64);
+    let policy = parse(&fields_with_policy(&signature, &encoded), "report.txt").expect("intersecting prefixes");
+    let constraints = policy.key_constraints();
+    assert!(constraints.permits("uploads/report-other"));
+    for key in ["uploads/other", "upload/report.txt", "Uploads/report.txt", ""] {
+        assert!(!constraints.permits(key), "{key}");
+    }
+    assert_eq!(
+        policy.enforce_final("example-bucket", "uploads/report-other", 1).err(),
+        Some(PostPolicyError::ConditionFailed),
+        "the existing single-object final check must remain exact"
+    );
+}
+
+#[test]
+fn post_key_constraints_intersect_exact_and_prefix_rules() {
+    let encoded = encoded_with_key_conditions(r#"{"key":"uploads/report.txt"},["starts-with","$key","uploads/"]"#);
+    let signature = "0".repeat(64);
+    let policy = parse(&fields_with_policy(&signature, &encoded), "report.txt").expect("intersecting key rules");
+    let constraints = policy.key_constraints();
+    assert!(constraints.permits("uploads/report.txt"));
+    assert!(!constraints.permits("uploads/another"));
+    assert!(!constraints.permits("outside/report.txt"));
+}
+
+#[test]
+fn post_key_constraints_for_sigv2_follow_the_same_exact_rule() {
+    let encoded = crate::codec::encode_base64_exact(COVERAGE_POLICY);
+    let fields = sigv2_form_with(&encoded, &[]);
+    let policy =
+        SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", PostPolicyLimits::default(), RequestNow::from_unix_seconds(0))
+            .expect("legacy SigV2 policy");
+    let constraints = policy.key_constraints();
+    assert!(constraints.permits("upload"));
+    assert!(!constraints.permits("upload/child"));
+    assert!(!constraints.permits("other"));
+}
+
+#[test]
+fn post_key_constraints_for_sigv2_intersect_prefixes() {
+    let encoded = crate::codec::encode_base64_exact(
+        br#"{"expiration":"2030-01-02T12:34:56Z","conditions":[{"bucket":"example-bucket"},["starts-with","$key","upl"],["starts-with","$key","upload"]]}"#,
+    );
+    let fields = sigv2_form_with(&encoded, &[]);
+    let policy =
+        SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", PostPolicyLimits::default(), RequestNow::from_unix_seconds(0))
+            .expect("legacy SigV2 prefix policy");
+    let constraints = policy.key_constraints();
+    assert!(constraints.permits("upload/member"));
+    assert!(!constraints.permits("upl-other"));
+    assert!(!constraints.permits("outside"));
+}
+
+#[test]
+fn post_key_constraints_without_a_key_rule_deny_every_member() {
+    let encoded =
+        crate::codec::encode_base64_exact(br#"{"expiration":"2030-01-02T12:34:56Z","conditions":[{"bucket":"example-bucket"}]}"#);
+    let fields = sigv2_form_with(&encoded, &[]);
+    let policy =
+        SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", PostPolicyLimits::default(), RequestNow::from_unix_seconds(0))
+            .expect("legacy defers unlisted field refusal");
+    assert!(!policy.key_constraints().permits("upload"));
+    assert!(!policy.key_constraints().permits("other"));
+    assert_eq!(
+        policy.enforce_final("example-bucket", "upload", 1).err(),
+        Some(PostPolicyError::FieldNotInPolicy)
+    );
+}
+
+#[test]
+fn post_key_constraints_debug_does_not_reveal_key_values() {
+    let signature = "0".repeat(64);
+    let policy = parse(&valid_fields(&signature), "report.txt").expect("prefix policy");
+    let debug = format!("{:?}", policy.key_constraints());
+    assert!(!debug.contains("uploads"), "{debug}");
+    assert!(!debug.contains("report"), "{debug}");
+}

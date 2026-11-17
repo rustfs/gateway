@@ -20,11 +20,106 @@
 
 use super::PostPolicyError;
 use crate::post_policy_json::JsonValue;
+use std::fmt;
 
 pub(super) enum Condition {
     Exact(String, String),
     StartsWith(String, String),
     ContentLengthRange(u64, u64),
+}
+
+/// The intersection of the key conditions parsed from a POST policy.
+///
+/// This is not an authorization proof. A host may use it only after the
+/// gateway has verified the same form signature and enforced its routed bucket,
+/// final upload key, field coverage and file-size conditions.
+#[derive(Clone)]
+pub struct PostKeyConstraints {
+    rules: Vec<KeyRule>,
+}
+
+#[derive(Clone)]
+enum KeyRule {
+    Exact(String),
+    StartsWith(String),
+}
+
+impl PostKeyConstraints {
+    pub(super) fn from_conditions(conditions: &[Condition]) -> Self {
+        let rules = conditions
+            .iter()
+            .filter_map(|condition| match condition {
+                Condition::Exact(name, value) if name == "key" => Some(KeyRule::Exact(value.clone())),
+                Condition::StartsWith(name, value) if name == "key" => Some(KeyRule::StartsWith(value.clone())),
+                _ => None,
+            })
+            .collect();
+        Self { rules }
+    }
+
+    /// Whether all recorded key conditions allow `key`.
+    ///
+    /// A policy without a key condition denies every derived key.
+    #[must_use]
+    pub fn permits(&self, key: &str) -> bool {
+        !self.rules.is_empty()
+            && self.rules.iter().all(|rule| match rule {
+                KeyRule::Exact(expected) => key == expected,
+                KeyRule::StartsWith(prefix) => key.starts_with(prefix),
+            })
+    }
+}
+
+impl fmt::Debug for PostKeyConstraints {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PostKeyConstraints")
+            .field("rule_count", &self.rules.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl super::PostPolicy {
+    /// The parsed key conditions, not a signature or final-admission proof.
+    #[must_use]
+    pub fn key_constraints(&self) -> &PostKeyConstraints {
+        &self.key_constraints
+    }
+}
+
+impl super::SigV2PostPolicy {
+    /// The parsed key conditions, not a signature or final-admission proof.
+    #[must_use]
+    pub fn key_constraints(&self) -> &PostKeyConstraints {
+        &self.key_constraints
+    }
+}
+
+/// How a policy binds the bucket its form is routed to.
+///
+/// A browser form names its bucket in the URL, and the `bucket` form field is optional: minio-java
+/// sends none (rustfs/gateway#756). With the field, the routed bucket must equal it, and the
+/// policy's `$bucket` conditions were checked against it at parse time. Without it, those
+/// conditions are kept here and checked against the routed bucket. A form bound by neither is
+/// refused at parse time, so a signature never authorizes an upload into whichever bucket the URL
+/// happens to name.
+pub(super) struct BucketBinding {
+    pub(super) field: Option<String>,
+    pub(super) rules: Vec<BucketRule>,
+}
+
+pub(super) enum BucketRule {
+    Exact(String),
+    StartsWith(String),
+}
+
+impl BucketBinding {
+    pub(super) fn admits(&self, bucket: &str) -> bool {
+        self.field.as_deref().is_none_or(|field| field == bucket)
+            && self.rules.iter().all(|rule| match rule {
+                BucketRule::Exact(expected) => bucket == expected,
+                BucketRule::StartsWith(prefix) => bucket.starts_with(prefix.as_str()),
+            })
+    }
 }
 
 pub(super) fn parse_policy(root: JsonValue, ascii_case_insensitive: bool) -> Result<(String, Vec<Condition>), PostPolicyError> {

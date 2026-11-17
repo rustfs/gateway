@@ -44,6 +44,7 @@ use crate::request_body::{BodyMonitor, StreamingRead};
 use crate::wire_read::{WireFrames, WireProgress};
 use crate::{ErrorCode, HandlerError, RequestBody, ResponseKind};
 
+mod key_constraints;
 mod response;
 use response::PostObjectResponsePlan;
 
@@ -88,6 +89,12 @@ pub(crate) struct PostObjectPrelude<B: Body> {
     timeouts: BodyTimeouts,
     /// The request's declared body length, from which the legacy grammar fixes the file's.
     declared_length: Option<u64>,
+}
+
+impl<B: Body> PostObjectPrelude<B> {
+    pub(crate) fn file_name(&self) -> Option<&str> {
+        self.reader.file_name()
+    }
 }
 
 impl<B> PostObjectPrelude<B>

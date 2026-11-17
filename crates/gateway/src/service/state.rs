@@ -97,9 +97,36 @@ pub(super) enum RoutedBody<B: http_body::Body> {
     PostObject(Box<PostObjectPrelude<B>>),
 }
 
+impl<B: http_body::Body> RoutedBody<B> {
+    pub(super) fn post_filename(&self) -> Option<&str> {
+        match self {
+            Self::PostObject(prelude) => prelude.file_name(),
+            Self::Ordinary(_) => None,
+        }
+    }
+}
+
 pub(super) enum AcceptedBody<B: http_body::Body> {
     Ordinary(SealedBody<B>),
     PostObject(Box<ResolvedPostObject<B>>),
+}
+
+impl<B: http_body::Body> AcceptedBody<B> {
+    pub(super) fn post_key_constraints(
+        &self,
+        verdict: &rustfs_gateway_sig::Verdict,
+    ) -> Option<rustfs_gateway_sig::post_policy::PostKeyConstraints> {
+        let rustfs_gateway_sig::Verdict::Authenticated { scheme, .. } = verdict else {
+            return None;
+        };
+        if scheme.location != rustfs_gateway_sig::SigLocation::FormField {
+            return None;
+        }
+        match self {
+            Self::PostObject(post) => post.key_constraints(scheme.family).cloned(),
+            Self::Ordinary(_) => None,
+        }
+    }
 }
 
 /// What the transport said about this connection, or [`TransportSecurity::Plaintext`].

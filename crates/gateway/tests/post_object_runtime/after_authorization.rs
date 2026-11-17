@@ -81,12 +81,33 @@ impl PostObjectHandler for Backend {
             } else {
                 assert!(principal.verified_form_session_token().is_none());
             }
+            let constraints = context
+                .post_object_key_constraints()
+                .expect("authenticated form key constraints");
+            assert!(constraints.permits("upload"));
+            assert!(!constraints.permits("upload/other"));
+            assert!(!constraints.permits("other"));
             assert!(!format!("{context:?}").contains(FORM_TOKEN));
             let copy = context.clone_without_caller_secret();
             assert!(copy.principal().expect("signed copy").verified_form_session_token().is_none());
             assert_eq!(copy.post_object_success_check(), context.post_object_success_check());
+            assert!(
+                !copy
+                    .post_object_key_constraints()
+                    .expect("copied key constraints")
+                    .permits("other")
+            );
+            let cleared = copy.with_post_object_key_constraints(None);
+            assert!(
+                cleared.post_object_key_constraints().is_none(),
+                "an absent replacement must clear old constraints"
+            );
         } else {
             assert!(context.principal().is_none());
+            assert!(
+                context.post_object_key_constraints().is_none(),
+                "anonymous forms have no signed constraints"
+            );
         }
         Box::pin(async move {
             tokio::task::yield_now().await;

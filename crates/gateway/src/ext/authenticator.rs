@@ -301,7 +301,7 @@ pub struct Authentication<'a> {
     declared_content_length: Option<u64>,
     chunks: Option<&'a ChunkSink>,
     unrouted_post_policy: Option<&'a rustfs_gateway_sig::UnroutedPostPolicy>,
-    post_policy_limits: Option<rustfs_gateway_sig::PostPolicyLimits>,
+    post_form: presented::PostAuthentication<'a>,
     signature_mismatch: std::sync::OnceLock<rustfs_gateway_sig::SignatureMismatchDetail>,
     /// Legacy RustFS's words for a refusal under a RustFS-profile reading; only the built-in
     /// authenticator publishes one, and only on a refusal.
@@ -349,7 +349,7 @@ impl<'a> Authentication<'a> {
             declared_content_length,
             chunks: None,
             unrouted_post_policy: None,
-            post_policy_limits: None,
+            post_form: presented::PostAuthentication::EMPTY,
             signature_mismatch: std::sync::OnceLock::new(),
             legacy_refusal: std::sync::OnceLock::new(),
             sts_body: None,
@@ -575,7 +575,7 @@ impl SigV4Authenticator {
             location,
             self.scope_policy.region_rule(),
             request.unrouted_post_policy,
-            request.post_policy_limits,
+            &request.post_form,
         ) else {
             if let Some((error, refusal)) = self.scope_policy.unreadable_scope_refusal(sealed, location) {
                 let _ = request.legacy_refusal.set(refusal);

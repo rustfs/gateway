@@ -28,7 +28,8 @@ use reading::PolicyReading;
 
 #[path = "post_policy_conditions.rs"]
 mod conditions;
-use conditions::{Condition, parse_policy};
+pub use conditions::PostKeyConstraints;
+use conditions::{BucketBinding, BucketRule, Condition, parse_policy};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -152,6 +153,7 @@ pub struct PostPolicy {
     session_token: Option<SessionToken>,
     bucket: BucketBinding,
     final_key: String,
+    key_constraints: PostKeyConstraints,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
 }
@@ -227,6 +229,7 @@ impl PostPolicy {
                 .map_err(|_| PostPolicyError::Malformed)?,
             bucket: common.bucket,
             final_key: common.final_key,
+            key_constraints: common.key_constraints,
             minimum_file_bytes: common.minimum_file_bytes,
             maximum_file_bytes: common.maximum_file_bytes,
         })
@@ -297,6 +300,7 @@ pub struct SigV2PostPolicy {
     encoded: String,
     bucket: BucketBinding,
     final_key: String,
+    key_constraints: PostKeyConstraints,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
     unlisted_field: bool,
@@ -396,6 +400,7 @@ impl SigV2PostPolicy {
             encoded: common.encoded,
             bucket: common.bucket,
             final_key: common.final_key,
+            key_constraints: common.key_constraints,
             minimum_file_bytes: common.minimum_file_bytes,
             maximum_file_bytes: common.maximum_file_bytes,
             unlisted_field: common.unlisted_field,
@@ -445,6 +450,7 @@ struct CommonPolicy {
     encoded: String,
     bucket: BucketBinding,
     final_key: String,
+    key_constraints: PostKeyConstraints,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
     unlisted_field: bool,
@@ -579,6 +585,7 @@ fn enforce_policy_fields(
             rules: bucket_rules,
         },
         final_key,
+        key_constraints: PostKeyConstraints::from_conditions(conditions),
         minimum_file_bytes,
         maximum_file_bytes,
         unlisted_field,
@@ -607,34 +614,6 @@ fn enforce_final_values(
         return Err(PostPolicyError::FieldNotInPolicy);
     }
     Ok(PostPolicyEnforcement(()))
-}
-
-/// How a policy binds the bucket its form is routed to.
-///
-/// A browser form names its bucket in the URL, and the `bucket` form field is optional: minio-java
-/// sends none (rustfs/gateway#756). With the field, the routed bucket must equal it, and the
-/// policy's `$bucket` conditions were checked against it at parse time. Without it, those
-/// conditions are kept here and checked against the routed bucket. A form bound by neither is
-/// refused at parse time, so a signature never authorizes an upload into whichever bucket the URL
-/// happens to name.
-struct BucketBinding {
-    field: Option<String>,
-    rules: Vec<BucketRule>,
-}
-
-enum BucketRule {
-    Exact(String),
-    StartsWith(String),
-}
-
-impl BucketBinding {
-    fn admits(&self, bucket: &str) -> bool {
-        self.field.as_deref().is_none_or(|field| field == bucket)
-            && self.rules.iter().all(|rule| match rule {
-                BucketRule::Exact(expected) => bucket == expected,
-                BucketRule::StartsWith(prefix) => bucket.starts_with(prefix.as_str()),
-            })
-    }
 }
 
 fn condition_value<'a>(fields: &'a FieldSet<'a>, name: &str, final_key: &'a str) -> Result<&'a str, PostPolicyError> {

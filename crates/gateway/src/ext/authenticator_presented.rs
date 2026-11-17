@@ -25,9 +25,27 @@ use rustfs_gateway_sig::{
     RegionRule, SealedAws, SessionToken, SigLocation, SigV4Authorization, Signature,
 };
 
-impl super::Authentication<'_> {
+pub(super) struct PostAuthentication<'a> {
+    limits: Option<PostPolicyLimits>,
+    filename: Option<&'a str>,
+}
+
+impl PostAuthentication<'_> {
+    pub(super) const EMPTY: Self = Self {
+        limits: None,
+        filename: None,
+    };
+}
+
+impl<'a> super::Authentication<'a> {
     pub(crate) const fn with_post_policy_limits(mut self, limits: Option<PostPolicyLimits>) -> Self {
-        self.post_policy_limits = limits;
+        self.post_form.limits = limits;
+        self
+    }
+
+    pub(crate) const fn with_post_form(mut self, limits: Option<PostPolicyLimits>, filename: Option<&'a str>) -> Self {
+        self.post_form.limits = limits;
+        self.post_form.filename = filename;
         self
     }
 }
@@ -49,7 +67,7 @@ impl<'a> Presented<'a> {
         location: SigLocation,
         rule: RegionRule,
         unrouted: Option<&'a rustfs_gateway_sig::UnroutedPostPolicy>,
-        limits: Option<PostPolicyLimits>,
+        form: &PostAuthentication<'_>,
     ) -> Result<Self, AuthError> {
         match location {
             SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), rule)?))),
@@ -59,8 +77,14 @@ impl<'a> Presented<'a> {
                 }
 
                 let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let policy = PostPolicy::parse_with(fields, "", limits.unwrap_or_default(), sealed.clock().now(), rule)
-                    .map_err(PostPolicyError::auth_error)?;
+                let policy = PostPolicy::parse_with(
+                    fields,
+                    form.filename.unwrap_or_default(),
+                    form.limits.unwrap_or_default(),
+                    sealed.clock().now(),
+                    rule,
+                )
+                .map_err(PostPolicyError::auth_error)?;
                 Ok(Self::Form(Box::new(policy)))
             }
             SigLocation::Header => {
