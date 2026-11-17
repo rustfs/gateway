@@ -41,8 +41,9 @@ const PUT: &str = "/bucket/object";
 const PART: &str = "/bucket/object?partNumber=1&uploadId=upload";
 const CHECKSUM: &str = "x-amz-checksum-sha256";
 
+/// The bodies a handler read, and the `Content-Length` each `PutObject` handler was shown.
 #[derive(Default)]
-struct Stored(Mutex<Vec<Vec<u8>>>);
+struct Stored(Mutex<Vec<Vec<u8>>>, Mutex<Vec<i64>>);
 
 struct Backend(Arc<Stored>);
 
@@ -64,7 +65,13 @@ async fn store(stored: &Stored, body: Option<ByteStream>) -> Result<(), HandlerE
 impl Handler<dto::PutObject> for Backend {
     fn call(&self, request: Req<dto::PutObject>) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
         let stored = Arc::clone(&self.0);
-        let body = request.into_input().body;
+        let input = request.into_input();
+        stored
+            .1
+            .lock()
+            .expect("the record is never poisoned")
+            .push(input.content_length);
+        let body = input.body;
         async move {
             store(&stored, body).await?;
             Ok(Resp::new(dto::PutObjectOutput::default()))
@@ -265,7 +272,7 @@ async fn n_two_empty_lines_before_signed_trailers_are_refused_under_the_profile(
         body
     });
     let (status, body) = answer(&service, request).await;
-    assert_ne!(status, 200, "{body}");
+    assert_eq!((status, code(&body)), (403, Some("SignatureDoesNotMatch")), "{body}");
     assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != OBJECT));
 }
 
@@ -557,4 +564,7 @@ async fn n_a_body_shorter_than_its_decoded_length_is_never_stored_under_the_prof
     let (status, body) = answer(&service, request).await;
     assert_eq!((status, code(&body)), (400, Some("IncompleteBody")), "{body}");
     assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != NAMED));
+    // The wire carries far fewer than 1000 bytes. The head is accepted under the profile, so the
+    // handler is shown the declared decoded length, the same verdict the pipeline reached.
+    assert_eq!(*stored.1.lock().expect("not poisoned"), [(NAMED.len() + 1000) as i64]);
 }
