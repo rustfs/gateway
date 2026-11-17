@@ -47,8 +47,9 @@ use crate::render::{S3Error, from_transport_limit};
 /// a value that is not valid for its algorithm and a digest that does not match as a checksum
 /// mismatch (rustfs/rustfs@1e7065101d `crates/rio/src/checksum.rs:644-664`,
 /// `crates/rio/src/hash_reader.rs:593-613`), which its API layer answers with `400 BadDigest`
-/// (`rustfs/src/error.rs:545-561` and `:714-730`). The same mapping turns a streamed body that does
-/// not match its signed `x-amz-content-sha256` into `BadDigest` (`rustfs/src/error.rs:452-465`).
+/// (`rustfs/src/error.rs:545-561` and `:714-730`). A body that does not match its signed
+/// `x-amz-content-sha256` is not one: the RustFS the profile now serves answers it
+/// `XAmzContentSHA256Mismatch` (`rustfs/src/error.rs:597-599`, observed by its negative SigV4 suite).
 /// The core keeps the AWS model's codes — `InvalidRequest` for an unreadable value,
 /// `XAmzContentChecksumMismatch` and `XAmzContentSHA256Mismatch` for a mismatch — as its default.
 ///
@@ -115,20 +116,11 @@ impl IntegrityCodes {
         }
     }
 
-    /// Renders a streamed body that does not match its signed `x-amz-content-sha256`.
-    ///
-    /// Only the streamed path: legacy RustFS reports a buffered body's payload-hash mismatch as
-    /// `500 InternalError`, which this does not copy, so the buffered path keeps the core's code.
+    /// Renders a streamed body that does not match its signed `x-amz-content-sha256`: the core's
+    /// `XAmzContentSHA256Mismatch` under either codes, since legacy RustFS does not report it as a
+    /// checksum mismatch (rustfs/rustfs `rustfs/src/error.rs:597-599`).
     pub(crate) fn streamed_payload_hash_mismatch(self) -> S3Error {
-        let refusal = crate::gate::content_sha256_mismatch();
-        match self {
-            Self::Model => refusal,
-            Self::RustFs => crate::render::from_handler(
-                HandlerError::new(ErrorCode::BAD_DIGEST, "the request body does not match x-amz-content-sha256"),
-                rustfs_gateway_core::ResponseKind::Other,
-                ConnectionIntent::MayKeepAlive,
-            ),
-        }
+        crate::gate::content_sha256_mismatch()
     }
 }
 
@@ -284,8 +276,15 @@ mod tests {
             assert_eq!(refusal.status(), reject.to_status(), "{reject:?}");
             assert!(!refusal.must_close_connection(), "{reject:?}");
         }
+    }
+
+    /// Negative — a streamed body that misses its signed `x-amz-content-sha256` is not a checksum
+    /// failure to legacy RustFS: it keeps `XAmzContentSHA256Mismatch` under either codes.
+    #[test]
+    fn n_a_missed_payload_digest_is_not_bad_digest_under_the_rustfs_codes() {
         let streamed = IntegrityCodes::RustFs.streamed_payload_hash_mismatch();
-        assert_eq!((code_of(&streamed), streamed.status().as_u16()), ("BadDigest", 400));
+        assert_eq!((code_of(&streamed), streamed.status().as_u16()), ("XAmzContentSHA256Mismatch", 400));
+        assert!(!streamed.must_close_connection());
     }
 
     /// Negative — the core's codes are exactly what the refusal carried before this existed.

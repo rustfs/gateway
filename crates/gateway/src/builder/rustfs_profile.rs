@@ -46,7 +46,7 @@
 //! | `accept_mismatched_payload_digests_without_a_body` | a bodyless request's signed digest is not compared | "bodyless signed digest unchecked" |
 //! | `address_paths_as_legacy_rustfs` | the path decoded whole before the bucket split, `GET //` as `GET /` | "paths, keys and addressing as legacy" (`addressing.rs`, `legacy_addressing.rs`) |
 //! | `answer_body_refusals_with_legacy_rustfs_sentences` | body refusals worded by code, in the API layer's fixed sentences | "digest and short-body failures use one wording" |
-//! | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest` | "checksum failures answer `BadDigest`" |
+//! | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`, a missed `x-amz-content-sha256` excluded | "checksum failures answer `BadDigest`" |
 //! | `answer_cors_as_legacy_rustfs` | CORS answered in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) |
 //! | `answer_credential_refusals_with_legacy_rustfs_sentences` | the two credential refusals in RustFS's words | unregistered (rustfs/gateway#1120) |
 //! | `answer_denials_with_legacy_rustfs_sentence` | every denial is `Access Denied` | unregistered (rustfs/gateway#1349) |

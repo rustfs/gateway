@@ -58,8 +58,8 @@ registered before it is removed.
 | `accept_minio_body_literals` | a bare `Enabled` body on a versioning or object-lock write | "bare `Enabled` body" (R6) | complete XML documents only |
 | `accept_mismatched_payload_digests_without_a_body` | a bodyless request's signed digest is not compared | "bodyless signed digest unchecked" | compare the signed digest on every request |
 | `address_paths_as_legacy_rustfs` | the path decoded whole before the bucket split, judged before routing, `GET //` as `GET /` | "paths, keys and addressing as legacy" (`addressing.rs`, `legacy_addressing.rs`) | split the path as it arrived; refuse an escaped bucket label |
-| `answer_body_refusals_with_legacy_rustfs_sentences` | body refusals worded by code in the API layer's fixed sentences | "digest and short-body failures use one wording" | the core's per-refusal sentences |
-| `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest` | "checksum failures answer `BadDigest`" | `InvalidRequest` and `XAmzContentChecksumMismatch` |
+| `answer_body_refusals_with_legacy_rustfs_sentences` | body refusals worded by code in the API layer's fixed sentences, `XAmzContentSHA256Mismatch` included | "digest and short-body failures use one wording" | the core's per-refusal sentences |
+| `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`; a body missing its signed `x-amz-content-sha256` is not one and stays `XAmzContentSHA256Mismatch` | "checksum failures answer `BadDigest`" | `InvalidRequest` and `XAmzContentChecksumMismatch` |
 | `answer_cors_as_legacy_rustfs` | CORS answered in a layer in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) | register; then the core's CORS runtime |
 | `answer_credential_refusals_with_legacy_rustfs_sentences` | the two credential refusals in RustFS's words | unregistered (rustfs/gateway#1120) | register; then the core's sentences |
 | `answer_denials_with_legacy_rustfs_sentence` | every authorization denial is `Access Denied` | unregistered (rustfs/gateway#1349) | register; then the core's per-stage sentence |

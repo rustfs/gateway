@@ -102,9 +102,10 @@ async fn n_a_refused_overwrite_keeps_the_stored_object() {
 }
 
 /// Negative — a streamed body that does not match its signed `x-amz-content-sha256` is
-/// `BadDigest`, as legacy RustFS answers it, and is not stored.
+/// `XAmzContentSHA256Mismatch`, not a checksum failure, as RustFS answers it
+/// (rustfs/rustfs `rustfs/src/error.rs:597-599` at the RustFS the profile now serves, held by its `tampered_payload_is_rejected`), and is not stored.
 #[tokio::test]
-async fn n_a_streamed_body_that_does_not_match_its_payload_hash_is_bad_digest() {
+async fn n_a_streamed_body_that_does_not_match_its_payload_hash_is_a_payload_digest_mismatch() {
     let root = TestRoot::new();
     let service = with_bucket(&root).await;
     let signed_for_hello = signed(
@@ -116,7 +117,7 @@ async fn n_a_streamed_body_that_does_not_match_its_payload_hash_is_bad_digest() 
         &[],
     );
     let swapped = signed_for_hello.map(|_| Bytes::from_static(b"HELLO"));
-    assert_code(&exchange(&service, swapped).await, 400, "BadDigest");
+    assert_code(&exchange(&service, swapped).await, 400, "XAmzContentSHA256Mismatch");
     assert_code(&get(&service, "/digests/swapped").await, 404, "NoSuchKey");
 }
 

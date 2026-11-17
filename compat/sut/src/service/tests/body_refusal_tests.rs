@@ -29,6 +29,9 @@ use hmac::{Hmac, KeyInit, Mac};
 
 /// Legacy RustFS's sentence for `BadDigest` (`rustfs/src/error.rs:307`).
 const BAD_DIGEST: &str = "The Content-Md5 you specified did not match what we received.";
+/// Legacy RustFS's sentence for `XAmzContentSHA256Mismatch` (`rustfs/src/error.rs:24`), as the
+/// document escapes it.
+const CONTENT_SHA256_MISMATCH: &str = "The provided &apos;x-amz-content-sha256&apos; header does not match what was computed.";
 /// Legacy RustFS's sentence for `IncompleteBody` (`rustfs/src/error.rs:339`).
 const INCOMPLETE_BODY: &str = "You did not provide the number of bytes specified by the Content-Length HTTP header.";
 /// Legacy RustFS's sentence for an upload declared larger than 5 GiB.
@@ -166,9 +169,10 @@ async fn a_streaming_upload_with_its_declared_trailer_is_stored() {
     assert_eq!(read.body().as_ref(), data);
 }
 
-/// Negative — every body that does not match its claim is `400 BadDigest` with legacy RustFS's
-/// sentence, and stores nothing: a signed payload swapped after signing, a mismatched and an
-/// unreadable `x-amz-checksum-crc32`, a mismatched `Content-MD5`.
+/// Negative — every body that does not match its claim is refused with legacy RustFS's code and
+/// sentence, and stores nothing: a signed payload swapped after signing is
+/// `XAmzContentSHA256Mismatch` (rustfs/rustfs `rustfs/src/error.rs:597-599` at the RustFS the profile now serves, held by its `tampered_payload_is_rejected`); a mismatched and an unreadable
+/// `x-amz-checksum-crc32` and a mismatched `Content-MD5` are `BadDigest`.
 #[tokio::test]
 async fn n_a_body_that_does_not_match_its_claim_is_legacy_bad_digest_and_stores_nothing() {
     let root = TestRoot::new();
@@ -182,7 +186,12 @@ async fn n_a_body_that_does_not_match_its_claim_is_legacy_bad_digest_and_stores_
         &[],
     )
     .map(|_| Bytes::from_static(b"HELLO"));
-    assert_answer(&exchange(&service, swapped).await, 400, "BadDigest", BAD_DIGEST);
+    assert_answer(
+        &exchange(&service, swapped).await,
+        400,
+        "XAmzContentSHA256Mismatch",
+        CONTENT_SHA256_MISMATCH,
+    );
     assert_absent(&service, "/refusals/swapped").await;
 
     for (key, header, value) in [

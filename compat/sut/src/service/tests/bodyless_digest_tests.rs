@@ -109,8 +109,9 @@ async fn a_bodyless_request_declaring_another_digest_is_served() {
     assert_eq!(gone.status(), 404, "the delete removed the object, as legacy's does");
 }
 
-/// Negative — an upload declaring another payload's digest is still `400 BadDigest` and stores
-/// nothing, as on legacy RustFS.
+/// Negative — an upload declaring another payload's digest is still refused, `400
+/// XAmzContentSHA256Mismatch` as RustFS answers it (rustfs/rustfs `rustfs/src/error.rs:597-599` at the RustFS the profile now serves, held by its `tampered_payload_is_rejected`), and
+/// stores nothing.
 #[tokio::test]
 async fn n_an_upload_declaring_another_digest_is_still_refused() {
     let root = TestRoot::new();
@@ -118,7 +119,7 @@ async fn n_an_upload_declaring_another_digest_is_still_refused() {
     let refused = exchange(&service, signed_with_other_digest(http::Method::PUT, "/digests/fresh", b"hello")).await;
     let body = body_of(&refused);
     assert_eq!(refused.status(), 400, "{body}");
-    assert!(body.contains("<Code>BadDigest</Code>"), "{body}");
+    assert!(body.contains("<Code>XAmzContentSHA256Mismatch</Code>"), "{body}");
     let read = exchange(&service, as_main(http::Method::GET, "/digests/fresh", Bytes::new())).await;
     assert_eq!(read.status(), 404, "the refused upload was stored");
 }

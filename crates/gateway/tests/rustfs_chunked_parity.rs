@@ -200,9 +200,17 @@ fn code(body: &str) -> Option<&str> {
     support::element_text(body, "Code")
 }
 
+/// Sends `request` with its body cut into 64 KiB transport frames, as a socket delivers it.
 async fn answer(service: &S3Service, request: http::Request<Bytes>) -> (u16, String) {
-    let (status, body) = support::exchange(service, request).await;
-    (status.as_u16(), body)
+    let (parts, body) = request.into_parts();
+    let frames: Vec<Result<http_body::Frame<Bytes>, std::convert::Infallible>> = body
+        .chunks(64 * 1024)
+        .map(|piece| Ok(http_body::Frame::data(Bytes::copy_from_slice(piece))))
+        .collect();
+    let body = http_body_util::StreamBody::new(futures_util::stream::iter(frames));
+    let response = service.call(http::Request::from_parts(parts, body)).await;
+    let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
+    (collected.status().as_u16(), String::from_utf8_lossy(collected.body()).into_owned())
 }
 
 // ── signed trailers after an empty line ────────────────────────────────────────────────────
@@ -339,4 +347,105 @@ async fn n_trailer_sections_past_legacy_rustfs_bounds_are_refused_under_the_prof
         assert_eq!(status, 400, "{body}");
         assert!(stored.0.lock().expect("not poisoned").iter().all(|bytes| bytes != OBJECT));
     }
+}
+
+// ── a body that does not match its signed x-amz-content-sha256 ─────────────────────────────
+
+/// Legacy RustFS's sentence for `XAmzContentSHA256Mismatch` (rustfs/rustfs `rustfs/src/error.rs:24`).
+const SHA256_MISMATCH_SENTENCE: &str = "The provided 'x-amz-content-sha256' header does not match what was computed.";
+
+/// A header-signed upload of `body` whose `x-amz-content-sha256` is the digest of something else.
+fn tampered(target: &str, body: Vec<u8>, extra: &[(&str, &str)]) -> http::Request<Bytes> {
+    signed_put(target, body, extra, Sha256::digest(b"a different payload").into())
+}
+
+/// A header-signed upload of `body` declaring `claimed` as its `x-amz-content-sha256`.
+fn signed_put(target: &str, body: Vec<u8>, extra: &[(&str, &str)], claimed: [u8; 32]) -> http::Request<Bytes> {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    for (name, value) in extra {
+        headers.insert(
+            http::HeaderName::from_bytes(name.as_bytes()).expect("a header name"),
+            http::HeaderValue::from_str(value).expect("a header value"),
+        );
+    }
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("an acceptable host");
+    let signing = SigningRequest::new(&http::Method::PUT, path, query, &headers, &host, PayloadMode::ExactSha256(claimed), stamp)
+        .with_wire_content_length(body.len() as u64);
+    let signed = SigV4Signer::new(credentials, scope)
+        .sign_headers(&signing)
+        .expect("a signable request");
+    let mut request = http::Request::builder().method(http::Method::PUT).uri(target);
+    for (name, value) in signed.headers() {
+        request = request.header(name, value);
+    }
+    request
+        .header(http::header::CONTENT_LENGTH, body.len())
+        .body(Bytes::from(body))
+        .expect("a valid request")
+}
+
+fn message(body: &str) -> Option<String> {
+    support::element_text(body, "Message").map(|text| text.replace("&apos;", "'"))
+}
+
+/// Positive — every size RustFS's suite sends, with and without a matching `Content-MD5`, on both
+/// upload operations: `400 XAmzContentSHA256Mismatch` in RustFS's words, nothing stored.
+#[tokio::test]
+async fn a_body_that_misses_its_signed_digest_is_answered_as_legacy_rustfs() {
+    for size in [0, 24, 2 * 1024 * 1024, 17 * 1024 * 1024] {
+        let object = vec![b'a'; size];
+        let md5 = base64(&md5_digest(&object));
+        for extra in [vec![], vec![("content-md5", md5.as_str())]] {
+            for target in [PUT, PART] {
+                let (service, stored) = assembled(true);
+                let (status, body) = answer(&service, tampered(target, object.clone(), &extra)).await;
+                assert_eq!(
+                    (status, code(&body), message(&body).as_deref()),
+                    (400, Some("XAmzContentSHA256Mismatch"), Some(SHA256_MISMATCH_SENTENCE)),
+                    "{size} {target} {extra:?}: {body}"
+                );
+                assert!(stored.0.lock().expect("not poisoned").is_empty(), "{size} {target}");
+            }
+        }
+    }
+}
+
+/// Negative — the default assembly keeps its own code and sentence.
+#[tokio::test]
+async fn n_the_default_assembly_answers_a_missed_digest_in_its_own_words() {
+    for size in [0, 24] {
+        let (service, stored) = assembled(false);
+        let (status, body) = answer(&service, tampered(PUT, vec![b'a'; size], &[])).await;
+        assert_eq!((status, code(&body)), (400, Some("XAmzContentSHA256Mismatch")), "{body}");
+        assert_ne!(message(&body).as_deref(), Some(SHA256_MISMATCH_SENTENCE), "{body}");
+        assert!(stored.0.lock().expect("not poisoned").is_empty());
+    }
+}
+
+/// Negative — under the profile a mismatched `x-amz-checksum-*` or `Content-MD5` is still
+/// `BadDigest`: only the signed payload digest changed its code.
+#[tokio::test]
+async fn n_checksum_and_md5_mismatches_stay_bad_digest_under_the_profile() {
+    let object = vec![b'a'; 24];
+    let wrong_md5 = base64(&md5_digest(b"something else"));
+    let wrong_crc = base64(&[0, 0, 0, 0]);
+    for (name, value) in [
+        ("content-md5", wrong_md5.as_str()),
+        ("x-amz-checksum-crc32", wrong_crc.as_str()),
+    ] {
+        let (service, stored) = assembled(true);
+        let request = signed_put(PUT, object.clone(), &[(name, value)], Sha256::digest(&object).into());
+        let (status, body) = answer(&service, request).await;
+        assert_eq!((status, code(&body)), (400, Some("BadDigest")), "{name}: {body}");
+        assert!(stored.0.lock().expect("not poisoned").is_empty(), "{name}");
+    }
+}
+
+fn md5_digest(data: &[u8]) -> Vec<u8> {
+    md5::Md5::digest(data).to_vec()
 }

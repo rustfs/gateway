@@ -84,10 +84,10 @@ async fn n_a_base64_digest_signed_as_sent_is_refused() {
 }
 
 /// Negative — the body is held to the digest: an upload whose body does not hash to the base64
-/// digest it declares, signed over that digest's hex, is legacy RustFS's `400 BadDigest`, and
-/// neither a new key nor an overwrite is stored.
+/// digest it declares, signed over that digest's hex, is RustFS's `400 XAmzContentSHA256Mismatch`
+/// (rustfs/rustfs `rustfs/src/error.rs:597-599` at the RustFS the profile now serves, held by its `tampered_payload_is_rejected`), and neither a new key nor an overwrite is stored.
 #[tokio::test]
-async fn n_a_body_that_does_not_match_its_base64_digest_is_bad_digest() {
+async fn n_a_body_that_does_not_match_its_base64_digest_is_a_payload_digest_mismatch() {
     let root = TestRoot::new();
     let service = with_object(&root).await;
     for path in ["/digests/absent", "/digests/k"] {
@@ -98,9 +98,11 @@ async fn n_a_body_that_does_not_match_its_base64_digest_is_bad_digest() {
         let answer = exchange(&service, put).await;
         let body = body_of(&answer);
         assert_eq!(answer.status(), 400, "{path}: {body}");
-        assert!(body.contains("<Code>BadDigest</Code>"), "{path}: {body}");
+        assert!(body.contains("<Code>XAmzContentSHA256Mismatch</Code>"), "{path}: {body}");
         assert!(
-            body.contains("<Message>The Content-Md5 you specified did not match what we received.</Message>"),
+            body.contains(
+                "<Message>The provided &apos;x-amz-content-sha256&apos; header does not match what was computed.</Message>"
+            ),
             "{path}: {body}"
         );
     }

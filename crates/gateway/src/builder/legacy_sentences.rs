@@ -16,7 +16,7 @@
 //! writes for its code (rustfs/gateway#1099).
 //!
 //! Responsible for: [`ServiceBuilder::answer_body_refusals_with_legacy_rustfs_sentences`], the
-//! three sentences, and [`BodySentences::restyle`], which the pipeline applies to a refusal of the
+//! four sentences, and [`BodySentences::restyle`], which the pipeline applies to a refusal of the
 //! request body and to a refusal of the request head's declared length.
 //! NOT responsible for: choosing a refusal's code (the refusing stage, and `crate::integrity` for
 //! the RustFS profile's `BadDigest`) or rendering it (`crate::render`).
@@ -35,6 +35,9 @@
 //! mismatched trailer checksum and a mismatched `Content-MD5` all answer the `BadDigest` sentence; a
 //! body cut short, a truncated aws-chunked body and a decoded-length mismatch answer the
 //! `IncompleteBody` one; a 5 GiB + 1 `PutObject` or `UploadPart` answers the `EntityTooLarge` one.
+//! The RustFS the profile now serves answers a body that does not match its signed
+//! `x-amz-content-sha256` `XAmzContentSHA256Mismatch`, in a fourth sentence of its own
+//! (`rustfs/src/error.rs:24` and `:446-447`, held by its `tampered_payload_is_rejected`).
 //!
 //! The codes themselves are not this module's: `BadDigest` for a checksum failure is
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`]'s, and the other two are the core's
@@ -58,20 +61,25 @@ pub(crate) const RUSTFS_INCOMPLETE_BODY: &str =
 /// Legacy RustFS's sentence for an upload declared larger than its single-request ceiling.
 pub(crate) const RUSTFS_UPLOAD_TOO_LARGE: &str = "Request body exceeds the configured maximum object size.";
 
+/// Legacy RustFS's sentence for a body that does not match its signed `x-amz-content-sha256`
+/// (rustfs/rustfs `rustfs/src/error.rs:24`, applied at `:446-447`).
+pub(crate) const RUSTFS_CONTENT_SHA256_MISMATCH: &str =
+    "The provided 'x-amz-content-sha256' header does not match what was computed.";
+
 /// Which sentences an assembly answers a request-body refusal with.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum BodySentences {
     /// This gateway's own sentences.
     #[default]
     Gateway,
-    /// Legacy RustFS's, for the three codes it answers with a fixed sentence.
+    /// Legacy RustFS's, for the four codes it answers with a fixed sentence.
     LegacyRustfs,
 }
 
 impl BodySentences {
     /// `refusal`, with legacy RustFS's sentence when this assembly answers with those and the
     /// refusal's code is one RustFS answers with a fixed sentence. Everything else about the refusal
-    /// — code, status, connection, the unread-body proof — is kept. A refusal of these three codes
+    /// — code, status, connection, the unread-body proof — is kept. A refusal of these four codes
     /// carries no headers or document elements to keep: the error-resolution authority admits none
     /// for them.
     pub(crate) fn restyle(self, refusal: S3Error) -> S3Error {
@@ -88,6 +96,8 @@ impl BodySentences {
         // intended future behaviour is this gateway's sentences, which name what was checked.
         let sentence = if code == ErrorCode::BAD_DIGEST {
             RUSTFS_BAD_DIGEST
+        } else if code == ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH {
+            RUSTFS_CONTENT_SHA256_MISMATCH
         } else if code == ErrorCode::INCOMPLETE_BODY {
             RUSTFS_INCOMPLETE_BODY
         } else if code == ErrorCode::ENTITY_TOO_LARGE && refusal.status() == StatusCode::BAD_REQUEST {
@@ -102,7 +112,7 @@ impl BodySentences {
 }
 
 impl ServiceBuilder {
-    /// Answers a refusal of the request body — `BadDigest`, `IncompleteBody`, and a `400
+    /// Answers a refusal of the request body — `BadDigest`, `XAmzContentSHA256Mismatch`, `IncompleteBody`, and a `400
     /// EntityTooLarge` for a declared length above the ceiling — with the fixed sentence legacy
     /// RustFS writes for that code, as RustFS does today (rustfs/gateway#1099).
     ///
@@ -132,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn the_legacy_sentences_replace_only_the_message_of_the_three_codes() {
+    fn the_legacy_sentences_replace_only_the_message_of_the_four_codes() {
         for (code, status, connection, sentence) in [
             (
                 ErrorCode::BAD_DIGEST,
@@ -152,6 +162,12 @@ mod tests {
                 ConnectionIntent::Close,
                 RUSTFS_UPLOAD_TOO_LARGE,
             ),
+            (
+                ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH,
+                StatusCode::BAD_REQUEST,
+                ConnectionIntent::MayKeepAlive,
+                RUSTFS_CONTENT_SHA256_MISMATCH,
+            ),
         ] {
             let original = refusal(code.clone(), "the gateway's own sentence", status, connection);
             let restyled = BodySentences::LegacyRustfs.restyle(original.clone());
@@ -167,7 +183,6 @@ mod tests {
     fn n_every_other_refusal_keeps_its_sentence() {
         for (code, status) in [
             (ErrorCode::ENTITY_TOO_LARGE, StatusCode::PAYLOAD_TOO_LARGE),
-            (ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH, StatusCode::BAD_REQUEST),
             (ErrorCode::X_AMZ_CONTENT_CHECKSUM_MISMATCH, StatusCode::BAD_REQUEST),
             (ErrorCode::INVALID_DIGEST, StatusCode::BAD_REQUEST),
             (ErrorCode::INVALID_REQUEST, StatusCode::BAD_REQUEST),
