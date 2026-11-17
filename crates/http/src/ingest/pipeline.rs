@@ -140,6 +140,10 @@ pub struct IngestPipeline<R> {
     trailers: Option<TrailingHeaders>,
     trailer_section_complete: bool,
     trailer_signature_satisfied: bool,
+    /// Section bytes the last parse already saw without finishing; zero before the first parse.
+    trailer_seen: usize,
+    #[cfg(test)]
+    trailer_parses: usize,
 }
 
 impl<R> IngestPipeline<R> {
@@ -205,6 +209,9 @@ impl<R> IngestPipeline<R> {
             trailers: None,
             trailer_section_complete: false,
             trailer_signature_satisfied: !framing.declares_trailers() || !framing.has_chunk_signatures(),
+            trailer_seen: 0,
+            #[cfg(test)]
+            trailer_parses: 0,
         })
     }
 
@@ -603,9 +610,25 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
             if self.trailers.is_none() {
                 let start = self.decoder.cursor();
                 let input = self.window.get(start..self.filled).unwrap_or(&[]);
+                // A section can only complete on a line feed, so a fill without one cannot change
+                // the answer, unless the section has reached its bound. Re-parsing each such fill
+                // would rebuild the field map once per byte a slow peer sends.
+                let limit = usize::from(self.decoder.limits().max_trailer_section_bytes());
+                let fresh = input.get(self.trailer_seen..).unwrap_or(&[]);
+                if self.trailer_seen > 0 && input.len() < limit && !fresh.contains(&b'\n') {
+                    self.trailer_seen = input.len();
+                    return self.refill_trailer(cx);
+                }
+                #[cfg(test)]
+                {
+                    self.trailer_parses = self.trailer_parses.saturating_add(1);
+                }
                 match parse_trailer_section(input, declaration, &self.decoder.limits()) {
                     Err(reject) => return Poll::Ready(Err(self.fail(reject))),
-                    Ok(TrailerProgress::NeedMore) => return self.refill_trailer(cx),
+                    Ok(TrailerProgress::NeedMore) => {
+                        self.trailer_seen = input.len();
+                        return self.refill_trailer(cx);
+                    }
                     Ok(TrailerProgress::Complete { trailers, consumed }) => {
                         let end = start.saturating_add(consumed);
                         if end != self.filled {

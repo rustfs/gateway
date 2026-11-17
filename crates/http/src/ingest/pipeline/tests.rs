@@ -250,3 +250,59 @@ fn n_truncated_fragmented_data_stays_unverified_and_has_inline_metadata() {
     assert!(!pipeline.commit_allowed());
     assert_eq!(pending, (1, 4, false, 0));
 }
+
+fn trailer_pipeline(section: &str, slice: usize) -> IngestPipeline<ScriptReader> {
+    let limits = ChunkLimits::default()
+        .with_trailer_bounds(16 * 1024, 100)
+        .with_undeclared_trailer_fields_discarded();
+    let mut body = b"5\r\nhello\r\n0\r\n".to_vec();
+    body.extend_from_slice(section.as_bytes());
+    let declaration = TrailerDeclaration::parse(&http::HeaderValue::from_static("x-amz-checksum-crc32c"), false)
+        .expect("an allowed declaration");
+    support::unsigned_trailer_pipeline(body, slice, 5, no_observers(), limits)
+        .with_trailer_declaration(declaration)
+        .expect("the declaration matches the framing mode")
+}
+
+fn trailer_outcome(section: &str, slice: usize) -> (Result<Vec<u8>, ChunkReject>, usize) {
+    let mut pipeline = trailer_pipeline(section, slice);
+    let result = drain_pipeline(&mut pipeline, 64).map_err(|_| pipeline.reject().expect("a refusal names its reason"));
+    (result, pipeline.trailer_parses)
+}
+
+/// A trailer section sent a byte at a time reads as it does whole, and is parsed about once per
+/// line rather than once per byte.
+#[test]
+fn a_valid_trailer_section_sent_a_byte_at_a_time_is_not_reparsed_per_byte() {
+    let section = format!("x-padding:{}\r\nx-amz-checksum-crc32c:NhCmhg==\r\n\r\n", "a".repeat(3000));
+    let (whole, _) = trailer_outcome(&section, 65_536);
+    let (dribbled, parses) = trailer_outcome(&section, 1);
+    assert_eq!(whole, Ok(b"hello".to_vec()));
+    assert_eq!(dribbled, whole);
+    assert!(parses < 10, "{parses} parses for a {}-byte section", section.len());
+}
+
+/// Negative — an over-limit section is refused the same way when it arrives a byte at a time, and
+/// still without being parsed per byte.
+#[test]
+fn n_an_over_limit_trailer_section_sent_a_byte_at_a_time_is_refused_as_whole() {
+    let section = format!(
+        "{}x-amz-checksum-crc32c:NhCmhg==\r\n\r\n",
+        format!("x-padding:{}\r\n", "a".repeat(190)).repeat(90)
+    );
+    assert!(section.len() > 16 * 1024);
+    let (whole, _) = trailer_outcome(&section, 65_536);
+    let (dribbled, parses) = trailer_outcome(&section, 1);
+    assert_eq!(whole, Err(ChunkReject::TrailerSizeExceeded));
+    assert_eq!(dribbled, whole);
+    assert!(parses <= 90 + 2, "one parse per line at most, saw {parses}");
+}
+
+/// Negative — a single over-long line with no line feed is refused at the bound, not later.
+#[test]
+fn n_a_line_without_a_line_feed_is_refused_at_the_bound() {
+    let section = format!("x-padding:{}", "a".repeat(20_000));
+    let (dribbled, parses) = trailer_outcome(&section, 1);
+    assert_eq!(dribbled, Err(ChunkReject::TrailerSizeExceeded));
+    assert!(parses < 5, "saw {parses}");
+}
