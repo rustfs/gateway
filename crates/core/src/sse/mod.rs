@@ -85,7 +85,7 @@ pub use headers::{
     COPY_SSEC_ALGORITHM, COPY_SSEC_KEY, COPY_SSEC_KEY_MD5, CUSTOMER_ALGORITHM, ManagedRejection, NEVER_IN_A_RESPONSE,
     SSE_ALGORITHM, SSE_BUCKET_KEY_ENABLED, SSE_CONTEXT, SSE_KMS_KEY_ID, SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5, SseHeaders,
 };
-pub use key::{CUSTOMER_KEY_BYTES, KEY_DIGEST_BYTES, KeyFingerprint};
+pub use key::{CUSTOMER_KEY_BYTES, KEY_DIGEST_BYTES, KeyFingerprint, KeyRejection};
 
 /// Whether the connection a request arrived on was encrypted.
 ///
@@ -231,8 +231,8 @@ pub enum SseRejection {
     CustomerTrioIncomplete(KeySide),
     /// A customer algorithm that is not `AES256`.
     CustomerAlgorithmUnknown(KeySide),
-    /// The key and its digest are not a well-formed, agreeing pair.
-    CustomerKeyMalformed(KeySide),
+    /// The key and its digest are not a well-formed, agreeing pair, and which rule said so.
+    CustomerKeyMalformed(KeySide, KeyRejection),
     /// The managed channel's own values.
     ManagedChannelInvalid(ManagedRejection),
 }
@@ -257,7 +257,9 @@ impl SseRejection {
     /// key of the wrong width, a digest of the wrong width, and a well-formed pair that does not
     /// agree — under one sentence. Telling a caller *which* of those it made distinguishes "your
     /// digest is wrong" from "your key is wrong", and those two are the same request seen from
-    /// two sides.
+    /// two sides. The variant still carries the rule ([`KeyRejection`]) for the one assembly that
+    /// answers as legacy RustFS did, which names it (`ServiceBuilder::answer_customer_key_refusals_as_legacy_rustfs`
+    /// in the facade); this sentence never reads it.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
         match self {
@@ -279,10 +281,10 @@ impl SseRejection {
             SseRejection::CustomerAlgorithmUnknown(KeySide::CopySource) => {
                 "the copy-source customer-provided encryption algorithm must be AES256"
             }
-            SseRejection::CustomerKeyMalformed(KeySide::Target) => {
+            SseRejection::CustomerKeyMalformed(KeySide::Target, _) => {
                 "the customer-provided encryption key and its MD5 must be base64 of 32 and 16 bytes and must agree"
             }
-            SseRejection::CustomerKeyMalformed(KeySide::CopySource) => {
+            SseRejection::CustomerKeyMalformed(KeySide::CopySource, _) => {
                 "the copy-source customer-provided encryption key and its MD5 must be base64 of 32 and 16 bytes and must agree"
             }
             SseRejection::ManagedChannelInvalid(managed) => managed_reason(managed),
@@ -500,7 +502,7 @@ fn fingerprint_side(trio: &headers::CustomerTrio<'_>, side: KeySide) -> Result<O
     };
     key::fingerprint_of(text.expose(), digest)
         .map(Some)
-        .map_err(|_| SseRejection::CustomerKeyMalformed(side))
+        .map_err(|rejection| SseRejection::CustomerKeyMalformed(side, rejection))
 }
 
 #[cfg(test)]

@@ -50,6 +50,7 @@
 //! | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`, a missed `x-amz-content-sha256` excluded | "checksum failures answer `BadDigest`" |
 //! | `answer_cors_as_legacy_rustfs` | CORS answered in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) |
 //! | `answer_credential_refusals_with_legacy_rustfs_sentences` | the two credential refusals in RustFS's words | unregistered (rustfs/gateway#1120) |
+//! | `answer_customer_key_refusals_as_legacy_rustfs` | a refused customer key `400 InvalidRequest`, one sentence per rule, the width named | unregistered (rustfs/backlog#2734) |
 //! | `answer_denials_with_legacy_rustfs_sentence` | every denial is `Access Denied` | unregistered (rustfs/gateway#1349) |
 //! | `answer_head_refusals_without_content_length` | a refused `HEAD` carries no `Content-Length` | unregistered (rustfs/gateway#1120) |
 //! | `answer_header_signatures_as_legacy_rustfs` | header-signature refusals before the credential lookup, naming the field | "signature verification as legacy" (GW-SIG, item 4) |
@@ -204,6 +205,9 @@ impl ServiceBuilder {
             // cleartext before routing, in its own words (rustfs/gateway#1349); whether TLS is
             // required at all is the host's `sse_config`.
             .refuse_plaintext_customer_keys_before_routing()
+            // RustFS answers a refused customer key `InvalidRequest`, one sentence per rule
+            // (rustfs/backlog#2734).
+            .answer_customer_key_refusals_as_legacy_rustfs()
             // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060).
             .leave_anonymous_streaming_payloads_undecoded()
             // RustFS answers an ARN copy source `501` before its source policy is asked (ADR-0045).
@@ -415,6 +419,10 @@ mod tests {
         (
             "answer_credential_refusals_with_legacy_rustfs_sentences",
             ServiceBuilder::answer_credential_refusals_with_legacy_rustfs_sentences,
+        ),
+        (
+            "answer_customer_key_refusals_as_legacy_rustfs",
+            ServiceBuilder::answer_customer_key_refusals_as_legacy_rustfs,
         ),
         (
             "answer_denials_with_legacy_rustfs_sentence",

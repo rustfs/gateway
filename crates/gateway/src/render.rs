@@ -32,7 +32,7 @@ use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ETag, ErrorCode, EtagRender};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 
-use crate::builder::denial_sentences::DenialSentences;
+use crate::builder::{denial_sentences::DenialSentences, sse_refusals::SseRefusals};
 use crate::{close::ConnectionIntent, ext::Denial, trace::RequestTrace};
 
 /// Optional refusal headers, details, and redacted signature diagnostics behind one pointer.
@@ -328,18 +328,17 @@ pub(crate) fn from_denial(denial: Denial, response: ResponseKind, sentences: Den
     )
 }
 
-pub(crate) fn from_sse(rejection: rustfs_gateway_core::SseRejection, response: ResponseKind) -> S3Error {
-    // `reason()` is a constant sentence per variant and `code()` is one of two codes. Nothing
-    // from the request reaches either, which is the property `crates/core`'s
-    // `n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id` pins: a refusal about a key
-    // must not quote the key, the digest, the expected digest, or a KMS key id.
+pub(crate) fn from_sse(rejection: &rustfs_gateway_core::SseRejection, response: ResponseKind, words: SseRefusals) -> S3Error {
+    // The words are the assembly's (`crate::builder::sse_refusals`): the core's constant sentence,
+    // or legacy RustFS's, whose width sentence states a length and nothing else. No request byte
+    // reaches either, which `crates/core`'s `n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id`
+    // and `sse_refusals`' `n_no_legacy_sentence_carries_a_key_or_a_digest` pin.
     //
     // The status comes from the shared table rather than being written here, so that
     // `InvalidRequest` means the same thing in a `400` from this stage as it does anywhere
     // else. The connection survives: the caller is authenticated by this point and the
     // request head was fully readable, so none of RFC 9112 §9.3's reasoning applies.
-    let code = rejection.code();
-    from_handler(HandlerError::new(code, rejection.reason()), response, ConnectionIntent::MayKeepAlive)
+    from_handler(words.error(rejection), response, ConnectionIntent::MayKeepAlive)
 }
 
 pub(crate) fn from_codec(error: CodecError, response: ResponseKind) -> S3Error {

@@ -91,6 +91,7 @@ mod post_object_handler;
 mod rustfs_profile;
 mod secret_scope;
 pub(crate) mod sigv4_header_guard;
+pub(crate) mod sse_refusals;
 pub(crate) mod version_actions;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;

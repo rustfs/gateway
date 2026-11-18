@@ -197,6 +197,8 @@ pub(crate) struct ViewPolicy {
     /// Where a customer-provided key on a cleartext connection is answered
     /// (`super::plaintext_customer_keys`).
     pub(crate) plaintext_customer_keys: PlaintextCustomerKeys,
+    /// Whose words a refused SSE header is answered in (`super::sse_refusals`).
+    pub(crate) sse_refusals: super::sse_refusals::SseRefusals,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
     /// Whether the body of an operation that takes none is read (`super::bodyless_bodies`).

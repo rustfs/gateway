@@ -238,6 +238,7 @@ impl GatewaySeam {
                 PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
             ))
             .refuse_plaintext_customer_keys_before_routing()
+            .answer_customer_key_refusals_as_legacy_rustfs()
             .read_request_documents_as_rustfs()
             .write_responses_as_rustfs()
             .host_resolver(Resolver::new(false))

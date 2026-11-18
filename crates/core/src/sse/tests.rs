@@ -431,28 +431,39 @@ fn n_a_customer_algorithm_other_than_aes256_is_refused() {
 }
 
 /// A key of the wrong width, a digest of the wrong width, a lenient spelling, and a pair that
-/// does not agree — all one refusal.
+/// does not agree — all one refusal and one sentence, each carrying the rule that fired.
 #[test]
 fn n_every_malformed_or_disagreeing_pair_is_one_refusal() {
-    let pairs: [(&'static str, &'static str); 6] = [
+    use super::base64::Base64Error;
+    let pairs: [(&'static str, &'static str, KeyRejection); 6] = [
         // The right key with somebody else's digest.
-        (KEY_A, MD5_B),
+        (KEY_A, MD5_B, KeyRejection::Disagree),
         // Somebody else's key with the right digest: the same mistake from the other side.
-        (KEY_B, MD5_A),
+        (KEY_B, MD5_A, KeyRejection::Disagree),
         // Thirty-one bytes.
-        ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==", MD5_A),
+        ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==", MD5_A, KeyRejection::KeyWidth(31)),
         // Thirty-three bytes.
-        ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g", MD5_A),
+        ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g", MD5_A, KeyRejection::KeyWidth(33)),
         // A digest of fifteen bytes.
-        (KEY_A, "AAECAwQFBgcICQoLDA0O"),
+        (KEY_A, "AAECAwQFBgcICQoLDA0O", KeyRejection::Digest(Base64Error::TooShort)),
         // The key without its padding.
-        ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8", MD5_A),
+        (
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            MD5_A,
+            KeyRejection::Key(Base64Error::Padding),
+        ),
     ];
-    for (key, digest) in pairs {
+    for (key, digest, rule) in pairs {
+        let refusal = refused(over_tls(&target_trio_owned(key, digest)));
         assert_eq!(
-            refused(over_tls(&target_trio_owned(key, digest))),
-            SseRejection::CustomerKeyMalformed(KeySide::Target),
+            refusal,
+            SseRejection::CustomerKeyMalformed(KeySide::Target, rule),
             "key {key:?} with digest {digest:?} produced a different refusal"
+        );
+        assert_eq!(
+            refusal.reason(),
+            SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::Disagree).reason(),
+            "the gateway's sentence does not tell the rules apart"
         );
     }
 }
@@ -465,7 +476,10 @@ fn n_a_disagreeing_copy_source_pair_is_refused_on_its_own_side() {
         (COPY_SSEC_KEY, KEY_A),
         (COPY_SSEC_KEY_MD5, MD5_B),
     ];
-    assert_eq!(refused(over_tls(&headers)), SseRejection::CustomerKeyMalformed(KeySide::CopySource));
+    assert_eq!(
+        refused(over_tls(&headers)),
+        SseRejection::CustomerKeyMalformed(KeySide::CopySource, KeyRejection::Disagree)
+    );
 }
 
 /// A repeated key header is two keys, and two keys is not a value this service picks between.
@@ -480,7 +494,10 @@ fn n_a_repeated_customer_key_header_is_refused() {
         (SSEC_KEY, KEY_B),
         (SSEC_KEY_MD5, MD5_A),
     ];
-    assert_eq!(refused(over_tls(&headers)), SseRejection::CustomerKeyMalformed(KeySide::Target));
+    assert_eq!(
+        refused(over_tls(&headers)),
+        SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::Key(super::base64::Base64Error::Padding))
+    );
 }
 
 // ── negative: the managed channel through a real request head ────────────────────────────────
@@ -526,8 +543,9 @@ fn n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id() {
         SseRejection::CustomerTrioIncomplete(KeySide::CopySource),
         SseRejection::CustomerAlgorithmUnknown(KeySide::Target),
         SseRejection::CustomerAlgorithmUnknown(KeySide::CopySource),
-        SseRejection::CustomerKeyMalformed(KeySide::Target),
-        SseRejection::CustomerKeyMalformed(KeySide::CopySource),
+        SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::Disagree),
+        SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::KeyWidth(31)),
+        SseRejection::CustomerKeyMalformed(KeySide::CopySource, KeyRejection::Disagree),
         SseRejection::ManagedChannelInvalid(ManagedRejection::QualifierWithoutAlgorithm),
         SseRejection::ManagedChannelInvalid(ManagedRejection::KmsQualifierWithoutKmsAlgorithm),
         SseRejection::ManagedChannelInvalid(ManagedRejection::BucketKeyNotABoolean),
@@ -659,11 +677,11 @@ fn n_a_form_customer_key_over_tls_is_held_to_the_header_rules() {
     );
     assert_eq!(
         refused(over_tls(&target_trio(KEY_A, MD5_B))),
-        SseRejection::CustomerKeyMalformed(KeySide::Target)
+        SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::Disagree)
     );
     assert_eq!(
         refused(over_tls(&target_trio(KEY_B, MD5_A))),
-        SseRejection::CustomerKeyMalformed(KeySide::Target)
+        SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::Disagree)
     );
     let mut contradiction = target_trio(KEY_A, MD5_A);
     contradiction.push((SSE_ALGORITHM, "AES256"));

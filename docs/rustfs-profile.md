@@ -63,6 +63,7 @@ registered before it is removed.
 | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`; a body missing its signed `x-amz-content-sha256` is not one and stays `XAmzContentSHA256Mismatch` | "checksum failures answer `BadDigest`" | `InvalidRequest` and `XAmzContentChecksumMismatch` |
 | `answer_cors_as_legacy_rustfs` | CORS answered in a layer in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) | register; then the core's CORS runtime |
 | `answer_credential_refusals_with_legacy_rustfs_sentences` | the two credential refusals in RustFS's words | unregistered (rustfs/gateway#1120) | register; then the core's sentences |
+| `answer_customer_key_refusals_as_legacy_rustfs` | a refused customer key, on either position, `400 InvalidRequest` with RustFS's sentence for its rule: an incomplete trio, an algorithm other than `AES256`, a key that is not base64, a key of the wrong width (naming the width, never a key byte or a digest), a digest that is not the key's | unregistered (rustfs/backlog#2734) | register; then the core's `InvalidArgument` and one sentence for every key fault |
 | `answer_denials_with_legacy_rustfs_sentence` | every authorization denial is `Access Denied` | unregistered (rustfs/gateway#1349) | register; then the core's per-stage sentence |
 | `answer_head_refusals_without_content_length` | a refused `HEAD` carries no `Content-Length` | unregistered (rustfs/gateway#1120) | register; then the core's framed refusal |
 | `answer_header_signatures_as_legacy_rustfs` | header-signature refusals before the credential lookup, naming the field | "signature verification as legacy" (GW-SIG, item 4) | strict SigV4 semantics |
@@ -139,7 +140,7 @@ An assembly running the profile writes six lines at start-up, in this order, and
 2. `DIALECT_POSTURE` — whatever dialects the host installed; the launcher installs none;
 3. `PRESIGNED_EXPIRY_POSTURE rule=legacy-rustfs`;
 4. `NAMING_POSTURE slash_policy=rustfs-legacy … key_floor=rustfs-legacy … path_split=rustfs-legacy`;
-5. `PROFILE_POSTURE switches=[…]` — the 46 builder- and router-held readings above, sorted;
+5. `PROFILE_POSTURE switches=[…]` — the 47 builder- and router-held readings above, sorted;
 6. the `SecurityPosture` line a host prints itself — `per-IP bucket: unlimited` and every
    pre-authentication layer under `unlimited pre-authentication layers`.
 

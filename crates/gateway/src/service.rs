@@ -1331,7 +1331,7 @@ impl S3Service {
                     AcceptedBody::PostObject(post) => post.sse_proof(proof, connection, &body_service.inner.sse),
                     AcceptedBody::Ordinary(_) => Ok(proof),
                 })
-                .map_err(|rejection| from_sse(rejection, response_kind))?;
+                .map_err(|rejection| from_sse(&rejection, response_kind, view_policy.sse_refusals))?;
             if let Some(refusal) = view_policy.refusal_before_decode(operation, &body_wire.headers()) {
                 return Err(from_handler(refusal, response_kind, ConnectionIntent::MayKeepAlive));
             }

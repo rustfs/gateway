@@ -50,7 +50,7 @@
 
 use zeroize::Zeroizing;
 
-use super::base64::{Base64Error, decode_exact};
+use super::base64::{Base64Error, decode_exact, decoded_len};
 
 /// The width of the key a client provides: AES-256, so 256 bits.
 pub const CUSTOMER_KEY_BYTES: usize = 32;
@@ -112,17 +112,28 @@ impl KeyFingerprint {
 ///
 /// # Errors
 ///
-/// [`KeyRejection`] naming which of the three rules fired. The caller is expected to collapse
-/// every variant into one client-visible sentence: see [`super::SseRejection`].
+/// [`KeyRejection`] naming which rule fired. The gateway collapses every variant into one
+/// client-visible sentence: see [`super::SseRejection`].
 pub fn fingerprint_of(key_base64: &str, digest_base64: &str) -> Result<KeyFingerprint, KeyRejection> {
     let key: Zeroizing<[u8; CUSTOMER_KEY_BYTES]> =
-        Zeroizing::new(decode_exact::<CUSTOMER_KEY_BYTES>(key_base64).map_err(KeyRejection::Key)?);
+        Zeroizing::new(decode_exact::<CUSTOMER_KEY_BYTES>(key_base64).map_err(|error| key_refusal(key_base64, error))?);
     let presented = KeyFingerprint(decode_exact::<KEY_DIGEST_BYTES>(digest_base64).map_err(KeyRejection::Digest)?);
     let computed = KeyFingerprint(md5_of(&key));
     if computed.matches(&presented) {
         Ok(computed)
     } else {
         Err(KeyRejection::Disagree)
+    }
+}
+
+/// Why a key did not decode to its width: a width when it is canonical base64 of another length,
+/// measured whole by [`super::base64::decoded_len`], and the decoder's rule otherwise.
+fn key_refusal(key_base64: &str, error: Base64Error) -> KeyRejection {
+    match error {
+        Base64Error::TooLong | Base64Error::TooShort => {
+            decoded_len(key_base64).map_or_else(KeyRejection::Key, KeyRejection::KeyWidth)
+        }
+        other => KeyRejection::Key(other),
     }
 }
 
@@ -137,13 +148,16 @@ fn md5_of(key: &[u8; CUSTOMER_KEY_BYTES]) -> [u8; KEY_DIGEST_BYTES] {
 
 /// Why a customer key and its digest were refused.
 ///
-/// Three variants, one client-visible sentence. The split exists so this module's tests can say
-/// which rule fired; see [`super::SseRejection::CustomerKeyMalformed`] for why the answer a client
-/// receives does not make the distinction.
+/// Four variants, one client-visible sentence by default. The split says which rule fired; see
+/// [`super::SseRejection::CustomerKeyMalformed`] for why the gateway's answer does not make the
+/// distinction, and for the one assembly that does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyRejection {
-    /// The key is not canonical base64 of exactly thirty-two bytes.
+    /// The key is not canonical base64.
     Key(Base64Error),
+    /// The key is canonical base64 of this many bytes, not thirty-two. A length, never a byte of
+    /// the key.
+    KeyWidth(usize),
     /// The digest is not canonical base64 of exactly sixteen bytes.
     Digest(Base64Error),
     /// Both decoded, and the digest is not the digest of the key.
@@ -241,18 +255,28 @@ mod tests {
         assert_eq!(wrong_digest, wrong_key);
     }
 
+    /// Negative — a canonical key of the wrong width is refused as a width, naming the width it
+    /// decoded to, before anything is compared: `short` carries its own true digest, so a
+    /// comparison that ran would agree.
     #[test]
     fn n_a_key_of_the_wrong_width_is_refused_before_anything_is_compared() {
-        // 31 bytes and 33 bytes, each with a well-formed 16-byte digest beside it.
-        for spelling in [
-            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==",
-            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g",
+        for (spelling, digest, width) in [
+            ("c2hvcnQ=", "TwnaqdlbyxZqMCQHoOC6vg==", 5),
+            ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg==", MD5_A, 31),
+            ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g", MD5_A, 33),
         ] {
-            assert!(
-                matches!(refused(fingerprint_of(spelling, MD5_A)), KeyRejection::Key(_)),
-                "accepted a key of the wrong width: {spelling:?}"
-            );
+            assert_eq!(refused(fingerprint_of(spelling, digest)), KeyRejection::KeyWidth(width), "{spelling:?}");
         }
+    }
+
+    /// Negative — a key far past the width is measured whole, not at the byte the decoder ran out
+    /// of room; and a long text that stops being base64 after the width is not a width.
+    #[test]
+    fn n_a_long_key_is_measured_whole_and_a_long_malformed_key_is_not_a_width() {
+        let sixty_four = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==";
+        assert_eq!(refused(fingerprint_of(sixty_four, MD5_A)), KeyRejection::KeyWidth(64));
+        let malformed_tail = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj!!!!";
+        assert!(matches!(refused(fingerprint_of(malformed_tail, MD5_A)), KeyRejection::Key(_)));
     }
 
     #[test]

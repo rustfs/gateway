@@ -87,6 +87,30 @@ fn value_of(byte: u8) -> Result<u8, Base64Error> {
 ///
 /// [`Base64Error`] naming the rule that fired.
 pub fn decode_into(input: &str, out: &mut [u8]) -> Result<usize, Base64Error> {
+    let mut slots = out.iter_mut();
+    walk(input, |full| {
+        *slots.next().ok_or(Base64Error::TooLong)? = full;
+        Ok(())
+    })
+}
+
+/// How many bytes `input` decodes to, under every rule [`decode_into`] applies, without holding
+/// a decoded byte anywhere.
+///
+/// For a refusal that must state a width: a customer key of the wrong width is answered with the
+/// width it has (legacy RustFS's sentence), and measuring it by decoding into a buffer would leave
+/// key bytes in memory nothing zeroizes.
+///
+/// # Errors
+///
+/// [`Base64Error`] naming the rule that fired; never [`Base64Error::TooLong`].
+pub fn decoded_len(input: &str) -> Result<usize, Base64Error> {
+    walk(input, |_| Ok(()))
+}
+
+/// The one pass both readings share: validates `input` and hands each decoded byte to `emit`,
+/// returning how many it handed over.
+fn walk(input: &str, mut emit: impl FnMut(u8) -> Result<(), Base64Error>) -> Result<usize, Base64Error> {
     let bytes = input.as_bytes();
     if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return Err(Base64Error::Padding);
@@ -118,8 +142,7 @@ pub fn decode_into(input: &str, out: &mut [u8]) -> Result<usize, Base64Error> {
             // Masked to eight bits, so the conversion cannot fail; `try_from` keeps the
             // no-`unwrap` rule without inventing a fallback value.
             let full = u8::try_from((accumulator >> bits) & 0xff).map_err(|_| Base64Error::Alphabet)?;
-            let slot = out.get_mut(written).ok_or(Base64Error::TooLong)?;
-            *slot = full;
+            emit(full)?;
             written += 1;
         }
     }
@@ -270,6 +293,27 @@ mod tests {
         for spelling in ["A", "AA", "AAA", "AAAAA"] {
             assert_eq!(decode_exact::<32>(spelling), Err(Base64Error::Padding), "accepted {spelling:?}");
         }
+    }
+
+    /// Negative — the length is reported only for a value the decoder would accept at that width:
+    /// every spelling `decode_into` refuses for its shape is refused here for the same rule.
+    #[test]
+    fn n_a_length_is_reported_only_for_canonical_text() {
+        assert_eq!(decoded_len(KEY_B64.trim_end_matches('=')), Err(Base64Error::Padding));
+        assert_eq!(decoded_len("--__AwQF"), Err(Base64Error::Alphabet));
+        assert_eq!(decoded_len("AAECAwQFBgcICQoLDA0ODD=="), Err(Base64Error::NonCanonical));
+        assert_eq!(decoded_len("AAEC=AAA"), Err(Base64Error::Padding));
+        assert_eq!(decoded_len(""), Err(Base64Error::Padding));
+    }
+
+    /// Positive — a canonical value of any width reports the bytes it decodes to, past any fixed
+    /// width a caller would hold it to.
+    #[test]
+    fn a_canonical_value_reports_its_decoded_length() {
+        assert_eq!(decoded_len("c2hvcnQ="), Ok(5));
+        assert_eq!(decoded_len(MD5_B64), Ok(16));
+        assert_eq!(decoded_len(KEY_B64), Ok(32));
+        assert_eq!(decoded_len("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"), Ok(33));
     }
 
     #[test]

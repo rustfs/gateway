@@ -81,6 +81,8 @@ mod cors_runtime;
 mod credential_runtime;
 #[path = "custom_signature_verifier.rs"]
 mod custom_signature_verifier;
+#[path = "customer_key_refusals.rs"]
+mod customer_key_refusals;
 #[path = "dialect_claims_runtime.rs"]
 mod dialect_claims_runtime;
 #[path = "dialect_claims_signed_body.rs"]
