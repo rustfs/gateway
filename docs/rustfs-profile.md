@@ -141,6 +141,7 @@ switch, through the authenticator's own `Debug` posture.
 | `accept_legacy_rustfs_signing_services` | `s3`, `sts` and `s3tables` verified on every operation, any other service `501` | "signature verification as legacy" (GW-SIG, items 1–2) | the routed operation's own service |
 | `answer_credential_scope_refusals_as_legacy_rustfs` | a scope date or region refusal in RustFS's code and words | "signature verification as legacy" (GW-SIG, item 6) | strict SigV4 semantics |
 | `read_signed_headers_as_legacy_rustfs` | `SignedHeaders` read verbatim; a list that does not cover what it must refused in RustFS's words | "signature verification as legacy" (GW-SIG, items 7–8) | strict SigV4 semantics |
+| `accept_unsigned_cloudfront_id_as_legacy_rustfs` | a request with an `x-amz-cf-id` header its signature does not name served, header-signed or presigned | unregistered (rustfs/backlog#2684) | AWS's rule: refuse an unsigned `x-amz-*` header |
 | `answer_credential_store_faults_as_unavailable` | a credential-store fault answered `500 InternalError`, which SDKs retry | R-068 (rustfs/gateway#1585, ADR-0051) | a deployment choice; stays while hosts want a retryable answer to a store outage |
 
 ## Reading the posture

@@ -358,6 +358,9 @@ impl SigV4Authenticator {
             // It reads `SignedHeaders` verbatim, and answers a list that does not cover what it
             // must in its own words (rustfs/gateway#1130).
             .read_signed_headers_as_legacy_rustfs()
+            // It serves a request carrying the `x-amz-cf-id` header CloudFront adds after the
+            // client signed, header-signed or presigned (rustfs/backlog#2684).
+            .accept_unsigned_cloudfront_id_as_legacy_rustfs()
             // It answers a credential store it cannot read with `500 InternalError`, which SDKs
             // retry, not the terminal `InvalidAccessKeyId` (rustfs/gateway#1585, ADR-0051).
             .answer_credential_store_faults_as_unavailable()
@@ -610,7 +613,7 @@ mod tests {
         SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty"))
     }
 
-    /// The authenticator preset is the explicit nine-switch chain, switch for switch, and differs
+    /// The authenticator preset is the explicit ten-switch chain, switch for switch, and differs
     /// from the untouched authenticator on every one of them.
     #[test]
     fn the_authenticator_preset_is_the_explicit_chain() {
@@ -623,6 +626,7 @@ mod tests {
             .accept_legacy_rustfs_signing_services()
             .answer_credential_scope_refusals_as_legacy_rustfs()
             .read_signed_headers_as_legacy_rustfs()
+            .accept_unsigned_cloudfront_id_as_legacy_rustfs()
             .answer_credential_store_faults_as_unavailable();
         let preset = authenticator().rustfs_profile();
         assert_eq!(format!("{preset:?}"), format!("{explicit:?}"));
@@ -637,6 +641,7 @@ mod tests {
             "answers_scope_refusals_as_legacy_rustfs: true",
             "verifies_paths_as_legacy_rustfs: true",
             "reads_signed_headers_as_legacy_rustfs: true",
+            "accepts_unsigned_cloudfront_id_as_legacy_rustfs: true",
             "answers_credential_store_faults_as_unavailable: true",
         ] {
             assert!(format!("{preset:?}").contains(switch), "{switch}: {preset:?}");

@@ -150,6 +150,7 @@ impl GatewaySeam {
             .accept_legacy_rustfs_signing_services()
             .answer_credential_scope_refusals_as_legacy_rustfs()
             .read_signed_headers_as_legacy_rustfs()
+            .accept_unsigned_cloudfront_id_as_legacy_rustfs()
             .answer_credential_store_faults_as_unavailable();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));

@@ -66,12 +66,19 @@ impl Handler<dto::PutObject> for Backend {
 }
 
 fn service(legacy: bool) -> (S3Service, Arc<Backend>) {
+    service_with(legacy, false)
+}
+
+fn service_with(legacy: bool, cloudfront: bool) -> (S3Service, Arc<Backend>) {
     let backend = Arc::new(Backend::default());
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id")));
     let mut authenticator = SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty"));
     if legacy {
         authenticator = authenticator.read_signed_headers_as_legacy_rustfs();
+    }
+    if cloudfront {
+        authenticator = authenticator.accept_unsigned_cloudfront_id_as_legacy_rustfs();
     }
     let service = ServiceBuilder::new()
         .authenticator(authenticator)
@@ -378,5 +385,110 @@ async fn n_the_default_keeps_the_gateway_answers() {
         assert!(body.contains(&format!("<Code>{code}</Code>")), "{body}");
         assert!(!body.contains("missing signed header"), "{body}");
         assert!(!body.contains("were not signed"), "{body}");
+    }
+}
+
+async fn answer_cf(legacy: bool, cloudfront: bool, request: http::Request<Bytes>) -> (http::StatusCode, String, u32) {
+    let (service, calls) = service_with(legacy, cloudfront);
+    let (status, body) = support::exchange(&service, request).await;
+    let reached = *calls.calls.lock().expect("the record is never poisoned");
+    (status, body, reached)
+}
+
+const CF_NAMED: &str = "host;x-amz-cf-id;x-amz-content-sha256;x-amz-date";
+
+/// A header-signed request whose signature names `x-amz-cf-id` with value `signed`, sent with `sent`.
+fn get_naming_cloudfront(signed: &str, sent: &str) -> http::Request<Bytes> {
+    let headers = format!(
+        "host:s3.example.com\nx-amz-cf-id:{signed}\nx-amz-content-sha256:{PAYLOAD}\nx-amz-date:{}\n",
+        support::SIGNED_AT_STAMP
+    );
+    get(CF_NAMED, &headers, CF_NAMED, &[("x-amz-cf-id", sent)])
+}
+
+/// A presigned `GET` signed over `host` and, when given, `signed_cf`, sent with `extra` headers.
+fn presigned(signed_cf: Option<&str>, extra: &[(&str, &str)]) -> http::Request<Bytes> {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, "s3.example.com".parse().expect("host"));
+    if let Some(value) = signed_cf {
+        headers.insert("x-amz-cf-id", value.parse().expect("value"));
+    }
+    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("host");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("timestamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("scope");
+    let signing = SigningRequest::new(&http::Method::GET, "/bucket/key", "", &headers, &host, PayloadMode::Unsigned, stamp);
+    let mut signer = SigV4Signer::new(SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("credentials"), scope);
+    let signed = signer.presign(&signing, 900).expect("signable request");
+    let mut request = http::Request::builder()
+        .method("GET")
+        .uri(format!("/bucket/key?{}", signed.query()))
+        .header(http::header::HOST, "s3.example.com");
+    for (name, value) in extra {
+        request = request.header(*name, *value);
+    }
+    request.body(Bytes::new()).expect("request")
+}
+
+/// Positive — under the CloudFront switch a request carrying an `x-amz-cf-id` its signature does
+/// not name is served, header-signed and presigned, under either list reading; one that names it
+/// honestly is served too.
+#[tokio::test]
+async fn an_unsigned_cloudfront_id_is_served_under_the_switch() {
+    let list = "host;x-amz-content-sha256;x-amz-date";
+    for legacy in [false, true] {
+        let request = get(list, &three(AWS), list, &[("x-amz-cf-id", "cdn")]);
+        let (status, body, reached) = answer_cf(legacy, true, request).await;
+        assert_eq!((status, reached), (http::StatusCode::OK, 1), "header, {legacy}: {body}");
+        let (status, body, reached) = answer_cf(legacy, true, presigned(None, &[("x-amz-cf-id", "cdn")])).await;
+        assert_eq!((status, reached), (http::StatusCode::OK, 1), "presigned, {legacy}: {body}");
+        let (status, body, reached) = answer_cf(legacy, true, get_naming_cloudfront("cdn", "cdn")).await;
+        assert_eq!((status, reached), (http::StatusCode::OK, 1), "named, {legacy}: {body}");
+        let (status, body, reached) = answer_cf(legacy, true, presigned(Some("cdn"), &[("x-amz-cf-id", "cdn")])).await;
+        assert_eq!((status, reached), (http::StatusCode::OK, 1), "presigned named, {legacy}: {body}");
+    }
+}
+
+/// Negative — without the switch the same requests are refused as before, in both forms.
+#[tokio::test]
+async fn n_an_unsigned_cloudfront_id_is_refused_without_the_switch() {
+    let list = "host;x-amz-content-sha256;x-amz-date";
+    for legacy in [false, true] {
+        let request = get(list, &three(AWS), list, &[("x-amz-cf-id", "cdn")]);
+        let (status, body, reached) = answer_cf(legacy, false, request).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "header, {legacy}: {body}");
+        let (status, body, reached) = answer_cf(legacy, false, presigned(None, &[("x-amz-cf-id", "cdn")])).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "presigned, {legacy}: {body}");
+    }
+}
+
+/// Negative — the switch lets exactly one name through: neighbours and lookalikes are refused in
+/// both forms, and so is any other unsigned header beside an allowed `x-amz-cf-id`.
+#[tokio::test]
+async fn n_the_cloudfront_switch_lets_no_other_header_through() {
+    let list = "host;x-amz-content-sha256;x-amz-date";
+    for other in ["x-amz-tagging", "x-amz-cf-idx", "x-amz-cf", "x-amz-meta-cf-id"] {
+        let request = get(list, &three(AWS), list, &[(other, "v")]);
+        let (status, body, reached) = answer_cf(true, true, request).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "header {other}: {body}");
+        let (status, body, reached) = answer_cf(true, true, presigned(None, &[(other, "v")])).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "presigned {other}: {body}");
+    }
+    let request = get(list, &three(AWS), list, &[("x-amz-cf-id", "cdn"), ("x-amz-tagging", "k=v")]);
+    let (status, body, reached) = answer_cf(true, true, request).await;
+    assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "{body}");
+}
+
+/// Negative — a client that names `x-amz-cf-id` is held to it: a value changed after signing is a
+/// signature mismatch, in both forms, switch or no switch.
+#[tokio::test]
+async fn n_a_named_cloudfront_id_is_still_verified() {
+    for cloudfront in [false, true] {
+        let (status, body, reached) = answer_cf(true, cloudfront, get_naming_cloudfront("cdn", "tampered")).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "header, {cloudfront}: {body}");
+        assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
+        let request = presigned(Some("cdn"), &[("x-amz-cf-id", "tampered")]);
+        let (status, body, reached) = answer_cf(true, cloudfront, request).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "presigned, {cloudfront}: {body}");
+        assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
     }
 }

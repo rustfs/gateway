@@ -36,7 +36,7 @@ use super::legacy_credential::{
 use super::legacy_refusal::LegacyRefusal;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AuthError, CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, SealedAws,
-    ServiceReading, SigLocation, SignedHeaderSet, UriPathCandidates, X_AMZ_DATE, X_AMZ_DATE_HEADER,
+    ServiceReading, SigLocation, SignedHeaderRules, SignedHeaderSet, UriPathCandidates, X_AMZ_DATE, X_AMZ_DATE_HEADER,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -64,6 +64,16 @@ pub(super) struct ScopePolicy {
     pub(super) legacy_services: bool,
     /// Legacy RustFS's answers to a scope date and a region it refuses (rustfs/gateway#1130).
     pub(super) legacy_scope_refusals: bool,
+}
+
+/// The opt-in `SignedHeaders` policies of [`SigV4Authenticator`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct SignedHeaderPolicy {
+    /// The list read verbatim, and its refusals answered in legacy RustFS's words
+    /// (rustfs/gateway#1130).
+    pub(super) legacy: bool,
+    /// `x-amz-cf-id` allowed outside the list (rustfs/backlog#2684).
+    pub(super) unsigned_cloudfront_id: bool,
 }
 
 impl ScopePolicy {
@@ -239,14 +249,12 @@ impl SigV4Authenticator {
         wire_content_length: Option<u64>,
         location: SigLocation,
     ) -> Result<SignedHeaderSet, AuthError> {
-        match (self.legacy_signed_headers, location) {
-            (true, SigLocation::Header) => {
-                SignedHeaderSet::parse_and_enforce_header_as_legacy_rustfs(raw, headers, wire_content_length)
-            }
-            (false, SigLocation::Header) => SignedHeaderSet::parse_and_enforce_header(raw, headers, wire_content_length),
-            (true, _) => SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(raw, headers, wire_content_length),
-            (false, _) => SignedHeaderSet::parse_and_enforce(raw, headers, wire_content_length),
-        }
+        let rules = SignedHeaderRules {
+            header_auth: location == SigLocation::Header,
+            legacy_list: self.signed_headers.legacy,
+            unsigned_cloudfront_id: self.signed_headers.unsigned_cloudfront_id,
+        };
+        SignedHeaderSet::parse_and_enforce_with(raw, headers, wire_content_length, rules)
     }
 
     /// Legacy RustFS's words for a `SignedHeaders` list refused with `error`, under the legacy
@@ -260,7 +268,7 @@ impl SigV4Authenticator {
         location: SigLocation,
         error: &AuthError,
     ) -> Option<LegacyRefusal> {
-        if !self.legacy_signed_headers || *error != AuthError::SignatureDoesNotMatch {
+        if !self.signed_headers.legacy || *error != AuthError::SignatureDoesNotMatch {
             return None;
         }
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS names the header a signature
@@ -288,7 +296,21 @@ impl SigV4Authenticator {
     /// switch changes only the list spelling in the string to sign and the words of a refusal.
     #[must_use]
     pub fn read_signed_headers_as_legacy_rustfs(mut self) -> Self {
-        self.legacy_signed_headers = true;
+        self.signed_headers.legacy = true;
+        self
+    }
+
+    /// Lets a SigV4 request, header-signed or presigned, carry an `x-amz-cf-id` header its
+    /// signature does not name: CloudFront stamps that header on every origin request after the
+    /// client has signed, and legacy RustFS serves such a request (rustfs/backlog#2684).
+    ///
+    /// Off by default. Exactly that one name is let through; every other unsigned `x-amz-*`
+    /// header is refused as ever, and a client that names `x-amz-cf-id` in `SignedHeaders` has it
+    /// canonicalised and verified as any other header. Legacy-compat: the intended future
+    /// behaviour is AWS's, which refuses a request with an `x-amz-*` header it did not sign.
+    #[must_use]
+    pub fn accept_unsigned_cloudfront_id_as_legacy_rustfs(mut self) -> Self {
+        self.signed_headers.unsigned_cloudfront_id = true;
         self
     }
 
@@ -590,7 +612,11 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("raw_path_fallback", &self.raw_path)
             .field("verifies_paths_as_legacy_rustfs", &self.legacy_paths)
             .field("verifies_paths_double_encoded_under", &self.double_encoded_prefixes)
-            .field("reads_signed_headers_as_legacy_rustfs", &self.legacy_signed_headers)
+            .field("reads_signed_headers_as_legacy_rustfs", &self.signed_headers.legacy)
+            .field(
+                "accepts_unsigned_cloudfront_id_as_legacy_rustfs",
+                &self.signed_headers.unsigned_cloudfront_id,
+            )
             .field("answers_credential_store_faults_as_unavailable", &self.store_faults_unavailable)
             .finish()
     }

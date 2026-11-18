@@ -521,9 +521,9 @@ pub struct SigV4Authenticator {
     pub(super) legacy_paths: bool,
     /// The path prefixes signed as generic AWS SigV4 signs a non-S3 path (rustfs/gateway#1232).
     pub(super) double_encoded_prefixes: &'static [&'static str],
-    /// Whether `SignedHeaders` is read, and its refusals answered, as legacy RustFS does
-    /// (rustfs/gateway#1130).
-    pub(super) legacy_signed_headers: bool,
+    /// How `SignedHeaders` is read and held to coverage, as legacy RustFS does it
+    /// (rustfs/gateway#1130, rustfs/backlog#2684).
+    pub(super) signed_headers: super::authenticator_switches::SignedHeaderPolicy,
     /// Whether a provider fault is answered [`Unavailable`], not the closed 403 (#1585).
     pub(super) store_faults_unavailable: bool,
 }
@@ -557,7 +557,7 @@ impl SigV4Authenticator {
             raw_path: RawPathFallback::WhenRespelled,
             legacy_paths: false,
             double_encoded_prefixes: &[],
-            legacy_signed_headers: false,
+            signed_headers: super::authenticator_switches::SignedHeaderPolicy::default(),
             store_faults_unavailable: false,
         }
     }

@@ -56,6 +56,9 @@ use crate::verdict::AuthError;
 /// The SigV4 timestamp header; when it is absent, `Date` supplies the timestamp and must be signed.
 const X_AMZ_DATE: HeaderName = HeaderName::from_static("x-amz-date");
 
+/// The one header [`SignedHeaderRules::unsigned_cloudfront_id`] lets a request leave unsigned.
+const CLOUDFRONT_ID: HeaderName = HeaderName::from_static("x-amz-cf-id");
+
 /// The header-name prefix whose semantic members must be signed.
 pub const AMZ_HEADER_PREFIX: &str = "x-amz-";
 
@@ -77,6 +80,25 @@ pub const UNSIGNED_HEADER_EXEMPTIONS: [&str; 6] = [
     "transfer-encoding",
     "user-agent",
 ];
+
+/// The variations of the completeness rules a caller may ask for, all off by default: the plain
+/// [`SignedHeaderSet::parse_and_enforce`] is `SignedHeaderRules::default()`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SignedHeaderRules {
+    /// Header authentication: `x-amz-content-sha256` is covered by HashedPayload and may be left
+    /// out of the list ([`SignedHeaderSet::parse_and_enforce_header`]).
+    pub header_auth: bool,
+    /// A list AWS would call malformed is read verbatim, as legacy RustFS reads it
+    /// ([`SignedHeaderSet::parse_and_enforce_as_legacy_rustfs`]).
+    pub legacy_list: bool,
+    /// `x-amz-cf-id`, and no other header, need not be in the list.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): CloudFront stamps that header on every origin request
+    /// after the client has signed, and legacy RustFS serves such a request, header-signed or
+    /// presigned. Kept: the one name, matched exactly; a client that does name it still has it
+    /// canonicalised and verified. The intended future behaviour is AWS's: refuse it unsigned.
+    pub unsigned_cloudfront_id: bool,
+}
 
 /// The client's `SignedHeaders` allow-list, with every completeness rule already enforced.
 ///
@@ -135,7 +157,7 @@ impl SignedHeaderSet {
     ///   does not cover what it must, which is indistinguishable, to the client, from having signed
     ///   the wrong thing.
     pub fn parse_and_enforce(raw: &str, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<Self, AuthError> {
-        Self::parse(raw, headers, wire_content_length, false)
+        Self::parse_and_enforce_with(raw, headers, wire_content_length, SignedHeaderRules::default())
     }
 
     /// Parses a header-auth list, allowing `x-amz-content-sha256` outside `SignedHeaders`.
@@ -149,14 +171,38 @@ impl SignedHeaderSet {
     ///
     /// As [`Self::parse_and_enforce`], except for the header-auth payload-declaration exception.
     pub fn parse_and_enforce_header(raw: &str, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<Self, AuthError> {
-        Self::parse(raw, headers, wire_content_length, true)
+        let rules = SignedHeaderRules {
+            header_auth: true,
+            ..SignedHeaderRules::default()
+        };
+        Self::parse_and_enforce_with(raw, headers, wire_content_length, rules)
+    }
+
+    /// The list read and held to the completeness rules under `rules`: the one entry the other
+    /// constructors are, each, a fixed choice of.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse_and_enforce`], or as [`Self::parse_and_enforce_as_legacy_rustfs`] when
+    /// `rules.legacy_list` is set.
+    pub fn parse_and_enforce_with(
+        raw: &str,
+        headers: &HeaderMap,
+        wire_content_length: Option<u64>,
+        rules: SignedHeaderRules,
+    ) -> Result<Self, AuthError> {
+        if rules.legacy_list {
+            Self::parse_legacy(raw, headers, wire_content_length, rules)
+        } else {
+            Self::parse(raw, headers, wire_content_length, rules)
+        }
     }
 
     fn parse(
         raw: &str,
         headers: &HeaderMap,
         wire_content_length: Option<u64>,
-        payload_line_covered: bool,
+        rules: SignedHeaderRules,
     ) -> Result<Self, AuthError> {
         if raw.is_empty() {
             return Err(AuthError::SignatureDoesNotMatch);
@@ -182,7 +228,7 @@ impl SignedHeaderSet {
             names,
             reading: ListReading::Aws,
         };
-        set.enforce(headers, wire_content_length, payload_line_covered)?;
+        set.enforce(headers, wire_content_length, rules)?;
         Ok(set)
     }
 
@@ -207,7 +253,11 @@ impl SignedHeaderSet {
         headers: &HeaderMap,
         wire_content_length: Option<u64>,
     ) -> Result<Self, AuthError> {
-        Self::parse_legacy(raw, headers, wire_content_length, false)
+        let rules = SignedHeaderRules {
+            legacy_list: true,
+            ..SignedHeaderRules::default()
+        };
+        Self::parse_and_enforce_with(raw, headers, wire_content_length, rules)
     }
 
     /// [`Self::parse_and_enforce_header`] with the legacy RustFS list spelling.
@@ -224,16 +274,21 @@ impl SignedHeaderSet {
         headers: &HeaderMap,
         wire_content_length: Option<u64>,
     ) -> Result<Self, AuthError> {
-        Self::parse_legacy(raw, headers, wire_content_length, true)
+        let rules = SignedHeaderRules {
+            header_auth: true,
+            legacy_list: true,
+            ..SignedHeaderRules::default()
+        };
+        Self::parse_and_enforce_with(raw, headers, wire_content_length, rules)
     }
 
     fn parse_legacy(
         raw: &str,
         headers: &HeaderMap,
         wire_content_length: Option<u64>,
-        payload_line_covered: bool,
+        rules: SignedHeaderRules,
     ) -> Result<Self, AuthError> {
-        match Self::parse(raw, headers, wire_content_length, payload_line_covered) {
+        match Self::parse(raw, headers, wire_content_length, rules) {
             Err(AuthError::AuthorizationHeaderMalformed) => {}
             read => return read,
         }
@@ -260,17 +315,12 @@ impl SignedHeaderSet {
             names,
             reading: ListReading::LegacyRustfs,
         };
-        set.enforce(headers, wire_content_length, payload_line_covered)?;
+        set.enforce(headers, wire_content_length, rules)?;
         Ok(set)
     }
 
     /// Rules 4 to 6, and the `Date` and `content-length` rules, over the parsed names.
-    fn enforce(
-        &self,
-        headers: &HeaderMap,
-        wire_content_length: Option<u64>,
-        payload_line_covered: bool,
-    ) -> Result<(), AuthError> {
+    fn enforce(&self, headers: &HeaderMap, wire_content_length: Option<u64>, rules: SignedHeaderRules) -> Result<(), AuthError> {
         let set = self;
         if !set.contains(&HOST) {
             return Err(AuthError::SignatureDoesNotMatch);
@@ -288,8 +338,9 @@ impl SignedHeaderSet {
         }
 
         for name in headers.keys() {
-            let covered_as_payload = payload_line_covered && name.as_str() == "x-amz-content-sha256";
-            if name.as_str().starts_with(AMZ_HEADER_PREFIX) && !covered_as_payload && !set.contains(name) {
+            let covered_as_payload = rules.header_auth && name.as_str() == "x-amz-content-sha256";
+            let left_by_cloudfront = rules.unsigned_cloudfront_id && *name == CLOUDFRONT_ID;
+            if name.as_str().starts_with(AMZ_HEADER_PREFIX) && !covered_as_payload && !left_by_cloudfront && !set.contains(name) {
                 return Err(AuthError::SignatureDoesNotMatch);
             }
         }
@@ -550,5 +601,104 @@ mod tests {
         let map = headers(&[("x-amz-date", "20260914T031656Z"), ("date", "Mon, 14 Sep 2026 03:16:56 GMT")]);
         assert!(SignedHeaderSet::parse_and_enforce("host;x-amz-date", &map, None).is_ok());
         assert!(SignedHeaderSet::parse_and_enforce("date;host;x-amz-date", &map, None).is_ok());
+    }
+
+    fn cloudfront_rules(header_auth: bool, legacy_list: bool) -> SignedHeaderRules {
+        SignedHeaderRules {
+            header_auth,
+            legacy_list,
+            unsigned_cloudfront_id: true,
+        }
+    }
+
+    /// Positive — under the rule, an unsigned `x-amz-cf-id` is let through in every reading, and a
+    /// request that signs it is still held to it being sent.
+    #[test]
+    fn the_cloudfront_rule_lets_x_amz_cf_id_stay_unsigned() {
+        let map = headers(&[("x-amz-date", "d"), ("x-amz-cf-id", "abc")]);
+        for (header_auth, legacy_list) in [(false, false), (true, false), (false, true), (true, true)] {
+            let rules = cloudfront_rules(header_auth, legacy_list);
+            assert!(SignedHeaderSet::parse_and_enforce_with("host;x-amz-date", &map, None, rules).is_ok());
+            let signed = SignedHeaderSet::parse_and_enforce_with("host;x-amz-cf-id;x-amz-date", &map, None, rules);
+            assert!(signed.expect("named").contains(&CLOUDFRONT_ID));
+        }
+    }
+
+    /// Negative — without the rule, in every reading, the same request is refused as before.
+    #[test]
+    fn n_without_the_rule_an_unsigned_x_amz_cf_id_is_refused() {
+        let map = headers(&[("x-amz-date", "d"), ("x-amz-cf-id", "abc")]);
+        for (header_auth, legacy_list) in [(false, false), (true, false), (false, true), (true, true)] {
+            let rules = SignedHeaderRules {
+                header_auth,
+                legacy_list,
+                ..SignedHeaderRules::default()
+            };
+            assert_eq!(
+                SignedHeaderSet::parse_and_enforce_with("host;x-amz-date", &map, None, rules),
+                Err(AuthError::SignatureDoesNotMatch)
+            );
+        }
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce("host;x-amz-date", &map, None),
+            Err(AuthError::SignatureDoesNotMatch)
+        );
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce_header("host;x-amz-date", &map, None),
+            Err(AuthError::SignatureDoesNotMatch)
+        );
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce_as_legacy_rustfs("host;x-amz-date", &map, None),
+            Err(AuthError::SignatureDoesNotMatch)
+        );
+    }
+
+    /// Negative — the rule covers exactly one name: lookalikes and neighbours stay refused.
+    #[test]
+    fn n_the_cloudfront_rule_covers_no_other_header() {
+        for other in [
+            "x-amz-tagging",
+            "x-amz-cf-idx",
+            "x-amz-cf",
+            "x-amz-cf-id-2",
+            "x-amz-copy-source",
+        ] {
+            let map = headers(&[("x-amz-date", "d"), (other, "v")]);
+            for (header_auth, legacy_list) in [(false, false), (true, true)] {
+                assert_eq!(
+                    SignedHeaderSet::parse_and_enforce_with(
+                        "host;x-amz-date",
+                        &map,
+                        None,
+                        cloudfront_rules(header_auth, legacy_list)
+                    ),
+                    Err(AuthError::SignatureDoesNotMatch),
+                    "{other}"
+                );
+            }
+        }
+        // Beside an allowed `x-amz-cf-id`, another unsigned header still refuses the request.
+        let map = headers(&[("x-amz-date", "d"), ("x-amz-cf-id", "a"), ("x-amz-tagging", "k=v")]);
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce_with("host;x-amz-date", &map, None, cloudfront_rules(false, false)),
+            Err(AuthError::SignatureDoesNotMatch)
+        );
+    }
+
+    /// Negative — the rule relaxes only coverage of what was sent: a named header must be sent,
+    /// and `x-amz-content-sha256` still needs header authentication to stay unlisted.
+    #[test]
+    fn n_the_cloudfront_rule_relaxes_nothing_else() {
+        let map = headers(&[("x-amz-date", "d")]);
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce_with("host;x-amz-cf-id;x-amz-date", &map, None, cloudfront_rules(false, false)),
+            Err(AuthError::SignatureDoesNotMatch)
+        );
+        let map = headers(&[("x-amz-date", "d"), ("x-amz-content-sha256", "UNSIGNED-PAYLOAD")]);
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce_with("host;x-amz-date", &map, None, cloudfront_rules(false, false)),
+            Err(AuthError::SignatureDoesNotMatch)
+        );
+        assert!(SignedHeaderSet::parse_and_enforce_with("host;x-amz-date", &map, None, cloudfront_rules(true, false)).is_ok());
     }
 }

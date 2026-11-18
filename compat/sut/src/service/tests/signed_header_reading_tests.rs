@@ -129,7 +129,8 @@ async fn n_a_name_the_request_did_not_send_is_named() {
 async fn n_an_unsigned_amz_header_is_access_denied() {
     let root = TestRoot::new();
     let service = with_object(&root).await;
-    for (name, value) in [("x-amz-meta-note", "unsigned"), ("x-amz-cf-id", "cdn")] {
+    // `x-amz-cf-id` is not here: the profile serves it unsigned (rustfs/backlog#2684), below.
+    for (name, value) in [("x-amz-meta-note", "unsigned"), ("x-amz-cf-id-2", "cdn"), ("x-amz-cf", "cdn")] {
         let header = exchange(&service, get().sending(name, value, false).request()).await;
         refused(&header, 403, "AccessDenied", Some(UNSIGNED));
         let presigned = exchange(&service, get().sending(name, value, false).presigned()).await;
@@ -145,6 +146,24 @@ async fn n_an_unsigned_amz_header_is_access_denied() {
     }
     assert_eq!(read(&service, "/listing/absent").await.0, 404);
     assert_eq!(read(&service, "/listing/k").await, (200, "stored".to_owned()));
+}
+
+/// Positive — CloudFront adds `x-amz-cf-id` after the client signed, and legacy RustFS serves the
+/// request, header-signed and presigned (rustfs/backlog#2684); a write carrying it is stored.
+#[tokio::test]
+async fn an_unsigned_cloudfront_id_is_served_by_the_profile() {
+    let root = TestRoot::new();
+    let service = with_object(&root).await;
+    for request in [
+        get().sending("x-amz-cf-id", "cdn", false).request(),
+        get().sending("x-amz-cf-id", "cdn", false).presigned(),
+    ] {
+        let answer = exchange(&service, request).await;
+        assert_eq!((answer.status().as_u16(), body_of(&answer).as_str()), (200, "stored"));
+    }
+    let stored = exchange(&service, put("/listing/cf").sending("x-amz-cf-id", "cdn", false).request()).await;
+    assert_eq!(stored.status(), 200, "{}", body_of(&stored));
+    assert_eq!(read(&service, "/listing/cf").await, (200, "replaced".to_owned()));
 }
 
 /// Positive — AWS covers the payload declaration through HashedPayload, so the RustFS profile
