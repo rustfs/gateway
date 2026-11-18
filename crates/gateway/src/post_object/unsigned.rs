@@ -196,7 +196,6 @@ mod tests {
             RequestNow::from_unix_seconds(0),
             "example-bucket",
         )
-        .ok()
         .expect("the fixture policy admits the form")
     }
 
