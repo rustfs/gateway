@@ -388,3 +388,40 @@ async fn n_every_other_assembly_still_refuses_an_unsigned_policy() {
         }
     }
 }
+
+/// Negative — under the profile a repeated `key` or `bucket` is `400 InvalidPolicyDocument`, the
+/// answer legacy RustFS gives once its policy check reads the last value, and still refused before
+/// either value is acted on.
+#[tokio::test]
+async fn n_a_repeated_key_or_bucket_is_an_invalid_policy_document() {
+    let encoded = live("");
+    let repeated_key = [("key", KEY), ("key", "other-object.txt"), ("policy", encoded.as_str())];
+    let outcome = post(Assembly::Profile, &repeated_key, "hello").await;
+    assert_refused(&outcome, StatusCode::BAD_REQUEST, "InvalidPolicyDocument", "multiple values");
+    let repeated_bucket = fields(&encoded, &[("bucket", "example-bucket"), ("bucket", "anotherbucket")]);
+    let outcome = post(Assembly::Profile, &repeated_bucket, "hello").await;
+    assert_refused(&outcome, StatusCode::BAD_REQUEST, "InvalidPolicyDocument", "multiple values");
+    assert!(!outcome.body.contains("anotherbucket"), "{}", outcome.body);
+}
+
+/// Negative — any other repeated field, and a repeated `key` off the profile, stay the form's own
+/// `400 MalformedPOSTRequest`.
+#[tokio::test]
+async fn n_other_repeated_fields_stay_malformed() {
+    let encoded = live("");
+    let other = fields(&encoded, &[("x-amz-meta-a", "1"), ("x-amz-meta-a", "2")]);
+    let key = [("key", KEY), ("key", "other-object.txt"), ("policy", encoded.as_str())];
+    for (assembly, form) in [
+        (Assembly::Profile, &other[..]),
+        (Assembly::Default, &key[..]),
+        (Assembly::GrammarOnly, &key[..]),
+    ] {
+        let outcome = post(assembly, form, "hello").await;
+        assert_refused(
+            &outcome,
+            StatusCode::BAD_REQUEST,
+            "MalformedPOSTRequest",
+            "the POST form was not accepted",
+        );
+    }
+}

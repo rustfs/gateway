@@ -130,6 +130,7 @@ where
     }
 
     /// Reads the prelude, the form read under `grammar`.
+    #[cfg(test)]
     pub(crate) async fn read_with_grammar(
         body: Option<B>,
         content_type: &str,
@@ -137,7 +138,23 @@ where
         grammar: FormGrammar,
         timeouts: BodyTimeouts,
     ) -> Result<Self, S3Error> {
-        Self::read_form(body, content_type, limits, grammar, timeouts, form_refusal).await
+        Self::read_form(body, content_type, limits, grammar, timeouts, form_refusal, None).await
+    }
+
+    /// Reads one request's prelude as the assembly's `form` reading says: its ceilings, its
+    /// grammar, and whether a policy no signature covers is enforced (`unsigned`).
+    pub(crate) async fn read_request(
+        body: Option<B>,
+        content_type: &str,
+        form: crate::builder::view_policy::post_forms::PostFormRead,
+        timeouts: BodyTimeouts,
+    ) -> Result<Self, S3Error> {
+        let repeated = form
+            .unsigned_policies
+            .then_some(unsigned::repeated_field_refusal as fn(&str) -> Option<S3Error>);
+        Self::read_form(body, content_type, form.limits, form.grammar, timeouts, form_refusal, repeated)
+            .await
+            .map(|prelude| prelude.with_unsigned_policies(form.unsigned_policies))
     }
 
     pub(crate) async fn read_form(
@@ -147,6 +164,7 @@ where
         grammar: FormGrammar,
         timeouts: BodyTimeouts,
         refusal: fn(FormReject) -> S3Error,
+        repeated: Option<fn(&str) -> Option<S3Error>>,
     ) -> Result<Self, S3Error> {
         let Some(body) = body else {
             return Err(refusal(FormReject::MissingFile));
@@ -158,7 +176,14 @@ where
             let Some(frame) = core::future::poll_fn(|context| frames.poll_next(context)).await? else {
                 return Err(refusal(reader.finish()));
             };
-            match reader.push(&frame).map_err(refusal)? {
+            // A repeated field the assembly answers itself (`repeated`) is answered by its name.
+            let pushed = reader.push(&frame).map_err(|reject| match (reject, repeated) {
+                (FormReject::DuplicateField, Some(repeated)) => {
+                    reader.current_field().and_then(repeated).unwrap_or_else(|| refusal(reject))
+                }
+                _ => refusal(reject),
+            });
+            match pushed? {
                 FormStep::NeedMore => {}
                 FormStep::FileReached { consumed } => {
                     let first_file_bytes = (consumed < frame.len()).then(|| frame.slice(consumed..));
@@ -187,7 +212,7 @@ where
 
     /// Enforces a policy no signature covers, as the RustFS profile does, rather than refusing it.
     #[must_use]
-    pub(crate) const fn with_unsigned_policies(mut self, enforced: bool) -> Self {
+    const fn with_unsigned_policies(mut self, enforced: bool) -> Self {
         self.unsigned_policies = enforced;
         self
     }

@@ -138,6 +138,19 @@ impl UnsignedForm {
     }
 }
 
+/// The answer to a repeated `key` or `bucket` field, `None` for any other: legacy RustFS keeps
+/// every value and its policy check reads the last, so the field's condition fails as
+/// `InvalidPolicyDocument`. This gateway still reads neither value: the form is refused, under the
+/// code legacy RustFS answers, and the values are not echoed.
+pub(super) fn repeated_field_refusal(name: &str) -> Option<S3Error> {
+    matches!(name, "key" | "bucket").then(|| {
+        answer(
+            ErrorCode::INVALID_POLICY_DOCUMENT,
+            format!("The form field '{name}' has multiple values").into(),
+        )
+    })
+}
+
 /// A form `bucket` other than the routed one, named as the form sent it.
 fn bucket_mismatch(form_bucket: Option<&str>, routed: &str) -> Option<S3Error> {
     let sent = form_bucket.filter(|sent| *sent != routed)?;

@@ -476,7 +476,9 @@ impl FormReader {
         // Under both grammars. Legacy RustFS keeps both values of a repeated field and reads the
         // last; the RustFS profile still fails closed here, because the policy check and the POST
         // bridge would have to read the same one and neither does yet (an open item on
-        // rustfs/backlog#1677, like the control-byte refusal in `step_value`).
+        // rustfs/backlog#1677, like the control-byte refusal in `step_value`). The RustFS profile
+        // answers a repeated `key` or `bucket` with legacy RustFS's code (the gateway's
+        // `post_object::unsigned`), still without reading either value.
         if duplicate {
             return Err(FormReject::DuplicateField);
         }
