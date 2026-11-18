@@ -110,11 +110,12 @@ impl ServiceBuilder {
     /// Off by default: a form with a `policy` and neither `x-amz-signature` nor `signature` is
     /// `400 MalformedPOSTRequest`, since no signature binds the policy to anyone. Under this switch
     /// the policy is read with the legacy SigV2-form reading
-    /// ([`rustfs_gateway_sig::UnsignedPostPolicy`]) and every condition is enforced; the request
-    /// stays anonymous whatever credential fields the form names, so the authorizer decides it as
-    /// any anonymous request. A failed `eq` or `starts-with` condition, and a form `bucket` other
-    /// than the routed one, are `400 InvalidPolicyDocument`; a field no condition names `403
-    /// AccessDenied`; a file outside `content-length-range` `400 EntityTooLarge` or
+    /// ([`rustfs_gateway_sig::UnsignedPostPolicy`]) and every condition is enforced; no credential
+    /// field the form names authenticates anyone, so a form sent without a signed `Authorization`
+    /// header reaches the authorizer as any anonymous request. A request whose `Authorization`
+    /// header verifies keeps that principal: the header is checked before the form is read. A
+    /// failed `eq` or `starts-with` condition, and a form `bucket` other than the routed one, are
+    /// `400 InvalidPolicyDocument`; a field no condition names `403 AccessDenied`; a file outside `content-length-range` `400 EntityTooLarge` or
     /// `EntityTooSmall`; an expired policy `403 AccessDenied`; an unreadable one `400
     /// InvalidPolicyDocument`; a repeated `key` or `bucket` field `400 InvalidPolicyDocument`.
     ///

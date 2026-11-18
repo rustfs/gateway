@@ -118,6 +118,10 @@ fn service(assembly: Assembly, backend: &Arc<Backend>, authenticated: &Arc<Mutex
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials")));
     let authenticator = SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty"));
     let builder = ServiceBuilder::new()
+        .clock_with_skew_ack(
+            crate::support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<PostObject, _>(Arc::clone(backend))
         .authorizer(allow_when(move |request| {
             seen.lock().expect("observation lock").push(request.identity.is_some());
@@ -153,9 +157,6 @@ fn form(fields: &[(&str, &str)], file: &str) -> String {
 }
 
 async fn post_with(assembly: Assembly, fields: &[(&str, &str)], file: &str, declared_length: bool) -> Outcome {
-    let backend = Arc::new(Backend::default());
-    let authenticated = Arc::new(Mutex::new(Vec::new()));
-    let service = service(assembly, &backend, &authenticated);
     let body = form(fields, file);
     let mut request = Request::builder()
         .method("POST")
@@ -165,9 +166,14 @@ async fn post_with(assembly: Assembly, fields: &[(&str, &str)], file: &str, decl
     if declared_length {
         request = request.header("content-length", body.len());
     }
-    let response = service
-        .call_bytes(request.body(Bytes::from(body)).expect("valid request"))
-        .await;
+    exchange(assembly, request.body(Bytes::from(body)).expect("valid request")).await
+}
+
+async fn exchange(assembly: Assembly, request: Request<Bytes>) -> Outcome {
+    let backend = Arc::new(Backend::default());
+    let authenticated = Arc::new(Mutex::new(Vec::new()));
+    let service = service(assembly, &backend, &authenticated);
+    let response = service.call_bytes(request).await;
     let status = response.status();
     let body = response.into_body().collect().await.expect("response body").to_bytes();
     let stored = backend.stored.lock().expect("observation lock").clone();
@@ -203,6 +209,12 @@ fn assert_refused(outcome: &Outcome, status: StatusCode, code: &str, mention: &s
 /// Every authorization stage the request reached, and it reached at least one, saw nobody.
 fn assert_anonymous(authenticated: &[bool]) {
     assert!(!authenticated.is_empty() && authenticated.iter().all(|seen| !seen), "{authenticated:?}");
+}
+
+/// The opposite control: every authorization stage the request reached, and it reached at least
+/// one, saw an authenticated identity.
+fn assert_authenticated(authenticated: &[bool]) {
+    assert!(!authenticated.is_empty() && authenticated.iter().all(|seen| *seen), "{authenticated:?}");
 }
 
 /// Positive — under the profile an anonymous form whose policy admits it is stored, and the
@@ -246,13 +258,16 @@ async fn n_credential_fields_without_a_signature_authenticate_nobody() {
     }
 }
 
+/// A named form, its fields, and the status and code its refusal carries.
+type Case<'a> = (&'a str, Vec<(&'a str, &'a str)>, StatusCode, &'a str);
+
 /// Negative — a signature field the form names, even an empty one, or a SigV2 `signature` with no
 /// access key, is a signed form that fails, not an unsigned policy: it is refused and nothing is
 /// stored, where a policy with neither field would have been enforced and stored.
 #[tokio::test]
 async fn n_a_named_signature_field_makes_the_form_a_signed_one() {
     let encoded = live("");
-    let cases: [(&str, Vec<(&str, &str)>, StatusCode, &str); 3] = [
+    let cases: [Case; 3] = [
         (
             "empty x-amz-signature",
             fields(&encoded, &[("x-amz-signature", "")]),
@@ -277,6 +292,87 @@ async fn n_a_named_signature_field_makes_the_form_a_signed_one() {
         assert_refused(&outcome, status, code, "<Message>");
         assert!(!outcome.body.contains("Policy condition"), "{case}: {}", outcome.body);
     }
+}
+
+fn hmac(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest as _, Sha256};
+    let mut block = [0_u8; 64];
+    block[..key.len()].copy_from_slice(key);
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    inner.update(data);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+/// Positive — the control for the anonymity cases above: a form whose SigV4 signature verifies
+/// reaches authorization as the access key's principal, so an observer stuck on "anonymous"
+/// would fail here.
+#[tokio::test]
+async fn a_correctly_signed_form_reaches_authorization_authenticated() {
+    let encoded = policy(
+        LIVE,
+        &format!(
+            r#"{BASE},{{"x-amz-algorithm":"AWS4-HMAC-SHA256"}},{{"x-amz-credential":"AKIDEXAMPLE/20260102/us-east-1/s3/aws4_request"}},{{"x-amz-date":"20260102T030405Z"}}"#
+        ),
+    );
+    let mut signing_key = hmac(b"AWS4secret", b"20260102");
+    for part in ["us-east-1", "s3", "aws4_request"] {
+        signing_key = hmac(&signing_key, part.as_bytes());
+    }
+    let signature: String = hmac(&signing_key, encoded.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let form_fields = fields(
+        &encoded,
+        &[
+            ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
+            ("x-amz-credential", "AKIDEXAMPLE/20260102/us-east-1/s3/aws4_request"),
+            ("x-amz-date", "20260102T030405Z"),
+            ("x-amz-signature", signature.as_str()),
+        ],
+    );
+    let outcome = post(Assembly::Profile, &form_fields, "hello").await;
+    assert_eq!(outcome.status, StatusCode::NO_CONTENT, "{}", outcome.body);
+    assert_eq!(outcome.stored, Some((KEY.to_owned(), b"hello".to_vec())));
+    assert_authenticated(&outcome.authenticated);
+}
+
+/// A request whose `Authorization` header is signed, carrying `form_fields`.
+fn header_signed(form_fields: &[(&str, &str)]) -> Request<Bytes> {
+    let content_type = format!("multipart/form-data; boundary={BOUNDARY}");
+    crate::support::signed_target_with_body_and_headers(
+        http::Method::POST,
+        "/example-bucket",
+        &[("content-type", content_type.as_str())],
+        Bytes::from(form(form_fields, "hello")),
+    )
+}
+
+/// Positive and negative — a signed `Authorization` header is verified before the form is read, and
+/// a policy without signature fields does not take that identity away: the authorizer sees the
+/// header's principal, and the policy is still enforced.
+#[tokio::test]
+async fn a_header_signed_request_keeps_its_principal_under_an_unsigned_policy() {
+    let encoded = live(r#"{"x-amz-meta-project":"alpha-demo"}"#);
+    let outcome = exchange(
+        Assembly::Profile,
+        header_signed(&fields(&encoded, &[("x-amz-meta-project", "alpha-demo")])),
+    )
+    .await;
+    assert_eq!(outcome.status, StatusCode::NO_CONTENT, "{}", outcome.body);
+    assert_eq!(outcome.stored, Some((KEY.to_owned(), b"hello".to_vec())));
+    assert_authenticated(&outcome.authenticated);
+
+    let outcome = exchange(
+        Assembly::Profile,
+        header_signed(&fields(&encoded, &[("x-amz-meta-project", "beta-demo")])),
+    )
+    .await;
+    assert_refused(&outcome, StatusCode::BAD_REQUEST, "InvalidPolicyDocument", "x-amz-meta-project");
 }
 
 /// Positive — an `x-ignore-*` field needs no condition.
