@@ -445,10 +445,6 @@ where
     }
 }
 
-/// Legacy RustFS's sentence for an empty form file: the legacy stack's text for
-/// `UnexpectedContent`.
-const LEGACY_EMPTY_FILE: &str = "This request does not support content.";
-
 #[derive(Debug)]
 struct PostBodyError(&'static str, Option<Box<S3Error>>);
 
@@ -480,54 +476,6 @@ struct PostFileBody<B: Body> {
     // The parser may emit a copied boundary carry followed by a borrowed input run. Keep them
     // separate and in order, and drain them before polling the transport again.
     pending: VecDeque<Bytes>,
-}
-
-/// Legacy RustFS's answer to an empty form file: `400 UnexpectedContent`.
-fn legacy_empty_file_refusal() -> S3Error {
-    from_handler(
-        HandlerError::new(ErrorCode::UNEXPECTED_CONTENT, LEGACY_EMPTY_FILE),
-        ResponseKind::Other,
-        ConnectionIntent::MayKeepAlive,
-    )
-}
-
-/// AWS's answer to a form its POST policy does not admit, under the RustFS profile: `403
-/// AccessDenied` "Invalid according to Policy", for a field failing its condition (a named field
-/// the form lacks and a policy for another bucket included) and for a field no condition names.
-/// `None` for every other refusal.
-///
-/// Legacy-compat (rustfs/backlog#2684): legacy RustFS answers a failed condition `400
-/// InvalidPolicyDocument`; the decision on rustfs/gateway#1444 follows AWS instead. The messages
-/// are fixed and never echo the condition or the value.
-fn aws_policy_violation(error: PostPolicyError) -> Option<S3Error> {
-    let message = match error {
-        PostPolicyError::ConditionFailed => "Invalid according to Policy: Policy Condition failed",
-        PostPolicyError::FieldNotInPolicy => "Invalid according to Policy: Extra input fields",
-        _ => return None,
-    };
-    Some(from_handler(
-        HandlerError::new(ErrorCode::ACCESS_DENIED, message),
-        ResponseKind::Other,
-        ConnectionIntent::MayKeepAlive,
-    ))
-}
-
-/// The RustFS profile's answer to a file its POST policy refuses: a policy violation as AWS answers
-/// it (`aws_policy_violation`), the size range's own code, `AccessDenied` otherwise.
-fn legacy_file_policy_refusal(error: PostPolicyError) -> S3Error {
-    if let Some(refusal) = aws_policy_violation(error) {
-        return refusal;
-    }
-    let code = match error {
-        PostPolicyError::EntityTooSmall => ErrorCode::ENTITY_TOO_SMALL,
-        PostPolicyError::EntityTooLarge => ErrorCode::ENTITY_TOO_LARGE,
-        _ => ErrorCode::ACCESS_DENIED,
-    };
-    from_handler(
-        HandlerError::new(code, "the POST file did not satisfy its policy"),
-        ResponseKind::Other,
-        ConnectionIntent::MayKeepAlive,
-    )
 }
 
 /// Retains input subslices without copying; only the parser's bounded carry needs new ownership.
@@ -655,36 +603,9 @@ where
     }
 }
 
-fn form_refusal(reject: FormReject) -> S3Error {
-    let code = match reject {
-        FormReject::FileTooLarge | FormReject::WholeStreamTooLarge => ErrorCode::ENTITY_TOO_LARGE,
-        FormReject::IncompleteStream => ErrorCode::INCOMPLETE_BODY,
-        _ => ErrorCode::MALFORMED_POST_REQUEST,
-    };
-    from_handler(
-        HandlerError::new(code, "the POST form was not accepted"),
-        ResponseKind::Other,
-        ConnectionIntent::MayKeepAlive,
-    )
-}
-
-fn policy_refusal(reject: PostPolicyError) -> S3Error {
-    let code = match reject {
-        PostPolicyError::EntityTooLarge => ErrorCode::ENTITY_TOO_LARGE,
-        PostPolicyError::EntityTooSmall => ErrorCode::ENTITY_TOO_SMALL,
-        PostPolicyError::Malformed => ErrorCode::MALFORMED_POST_REQUEST,
-        PostPolicyError::Expired | PostPolicyError::ConditionFailed | PostPolicyError::SignatureMismatch => {
-            ErrorCode::ACCESS_DENIED
-        }
-        _ => ErrorCode::ACCESS_DENIED,
-    };
-    from_handler(
-        HandlerError::new(code, "the POST policy was not accepted"),
-        ResponseKind::Other,
-        ConnectionIntent::MayKeepAlive,
-    )
-}
-
+#[path = "post_object/refusals.rs"]
+mod refusals;
+use refusals::{aws_policy_violation, form_refusal, legacy_empty_file_refusal, legacy_file_policy_refusal, policy_refusal};
 #[path = "post_object/fields.rs"]
 mod fields;
 #[path = "post_object/legacy.rs"]
