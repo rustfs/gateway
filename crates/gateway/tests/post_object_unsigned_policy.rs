@@ -246,6 +246,39 @@ async fn n_credential_fields_without_a_signature_authenticate_nobody() {
     }
 }
 
+/// Negative — a signature field the form names, even an empty one, or a SigV2 `signature` with no
+/// access key, is a signed form that fails, not an unsigned policy: it is refused and nothing is
+/// stored, where a policy with neither field would have been enforced and stored.
+#[tokio::test]
+async fn n_a_named_signature_field_makes_the_form_a_signed_one() {
+    let encoded = live("");
+    let cases: [(&str, Vec<(&str, &str)>, StatusCode, &str); 3] = [
+        (
+            "empty x-amz-signature",
+            fields(&encoded, &[("x-amz-signature", "")]),
+            StatusCode::FORBIDDEN,
+            "AccessDenied",
+        ),
+        (
+            "empty signature",
+            fields(&encoded, &[("signature", ""), ("AWSAccessKeyId", "AKIDEXAMPLE")]),
+            StatusCode::FORBIDDEN,
+            "SignatureDoesNotMatch",
+        ),
+        (
+            "signature without an access key",
+            fields(&encoded, &[("signature", "c2lnbmF0dXJl")]),
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+        ),
+    ];
+    for (case, form, status, code) in cases {
+        let outcome = post(Assembly::Profile, &form, "hello").await;
+        assert_refused(&outcome, status, code, "<Message>");
+        assert!(!outcome.body.contains("Policy condition"), "{case}: {}", outcome.body);
+    }
+}
+
 /// Positive — an `x-ignore-*` field needs no condition.
 #[tokio::test]
 async fn an_ignored_field_needs_no_condition() {

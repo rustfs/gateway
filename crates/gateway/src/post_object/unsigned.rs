@@ -200,6 +200,24 @@ mod tests {
         .expect("the fixture policy admits the form")
     }
 
+    /// Negative — a form naming a signature field, even with an empty value, is not an unsigned
+    /// policy; only a policy with neither field is. The signature recognition ahead of this module
+    /// refuses the others today, so the unit is pinned here, where that refusal cannot mask it.
+    #[test]
+    fn n_only_a_policy_with_no_signature_field_is_unsigned() {
+        assert!(applies(&[("key", "k"), ("policy", "p")]));
+        assert!(applies(&[("policy", "p"), ("AWSAccessKeyId", "AKIDEXAMPLE")]));
+        for named in [
+            &[("policy", "p"), ("x-amz-signature", "")][..],
+            &[("policy", "p"), ("signature", "")],
+            &[("policy", "p"), ("signature", "c2ln")],
+            &[("policy", "p"), ("x-amz-signature", "00")],
+        ] {
+            assert!(!applies(named), "{named:?}");
+        }
+        assert!(!applies(&[("key", "k")]), "no policy, nothing to enforce");
+    }
+
     /// Negative — a final-check failure names the field that failed: the key when the key differs,
     /// the bucket when the key is the policy's own, and neither echoes a value.
     #[test]
