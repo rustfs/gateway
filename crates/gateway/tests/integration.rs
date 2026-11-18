@@ -137,6 +137,8 @@ mod host_resolve_replay;
 mod ingest_assembly;
 #[path = "legacy_chunk_limits.rs"]
 mod legacy_chunk_limits;
+#[path = "legacy_completion_checksum.rs"]
+mod legacy_completion_checksum;
 #[path = "legacy_cors.rs"]
 mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]

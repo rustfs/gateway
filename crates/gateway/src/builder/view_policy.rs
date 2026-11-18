@@ -382,7 +382,7 @@ impl ViewPolicy {
         } else {
             meta
         };
-        let meta = if self.legacy_checksums && legacy_checksums::covers(operation) {
+        let meta = if self.legacy_checksums {
             meta.with_legacy_rustfs_checksums(legacy_checksums::reads_algorithm_header(operation))
         } else {
             meta

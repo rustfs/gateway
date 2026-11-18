@@ -15,24 +15,17 @@
 //! The RustFS-profile switch that reads a request's checksum declarations as legacy RustFS does
 //! (rustfs/gateway#1349).
 //!
-//! Responsible for: [`ServiceBuilder::read_checksums_as_legacy_rustfs`], which operations it
-//! covers, and which of them read `x-amz-checksum-algorithm`.
+//! Responsible for: [`ServiceBuilder::read_checksums_as_legacy_rustfs`], which covers every
+//! operation, and which of them read `x-amz-checksum-algorithm`.
 //! NOT responsible for: the reading itself (`rustfs_gateway_types::legacy_rustfs_request_checksum`),
 //! the body verification (`rustfs-gateway-http`), or the binder (`rustfs-gateway-core`).
 //! Upstream: `crate::builder::ServiceBuilder`. Downstream: `super::ViewPolicy`, which marks the view
-//! of every covered operation, and `crate::integrity`, which reads the mark.
+//! of every operation, and `crate::integrity`, which reads the mark.
 
 use crate::builder::ServiceBuilder;
 
 /// The upload operations whose legacy storage reader reads `x-amz-checksum-algorithm`.
 const ALGORITHM_HEADER_OPERATIONS: [&str; 2] = ["PutObject", "UploadPart"];
-
-/// Whether `operation`'s checksum claims are read as legacy RustFS reads them: every operation
-/// whose `x-amz-checksum-*` header describes the request body. `CompleteMultipartUpload`'s describes
-/// the assembled object and keeps its own reading.
-pub(super) fn covers(operation: &str) -> bool {
-    operation != "CompleteMultipartUpload"
-}
 
 /// Whether `operation`'s legacy storage reader reads `x-amz-checksum-algorithm`.
 pub(super) fn reads_algorithm_header(operation: &str) -> bool {
@@ -66,16 +59,21 @@ impl ServiceBuilder {
 mod tests {
     use super::*;
 
-    /// Negative — the completion's checksum describes the assembled object and is not read here;
-    /// only the two uploads read the algorithm header.
+    /// Negative — only the two uploads read the algorithm header; the completion, whose checksum
+    /// describes the assembled object, is read as legacy RustFS reads it without one.
     #[test]
-    fn n_only_the_uploads_read_the_algorithm_header_and_the_completion_is_not_covered() {
-        assert!(!covers("CompleteMultipartUpload"));
+    fn n_only_the_uploads_read_the_algorithm_header() {
         for operation in ["PutObject", "UploadPart"] {
-            assert!(covers(operation) && reads_algorithm_header(operation), "{operation}");
+            assert!(reads_algorithm_header(operation), "{operation}");
         }
-        for operation in ["PutObjectTagging", "DeleteObjects", "CopyObject", "PutBucketCors"] {
-            assert!(covers(operation) && !reads_algorithm_header(operation), "{operation}");
+        for operation in [
+            "CompleteMultipartUpload",
+            "PutObjectTagging",
+            "DeleteObjects",
+            "CopyObject",
+            "PutBucketCors",
+        ] {
+            assert!(!reads_algorithm_header(operation), "{operation}");
         }
     }
 }
