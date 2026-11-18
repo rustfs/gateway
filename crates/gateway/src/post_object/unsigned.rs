@@ -82,8 +82,9 @@ impl UnsignedForm {
         &self.policy
     }
 
-    /// The answer to a file the policy refuses: its size, the routed bucket, or an unnamed field.
-    pub(super) fn file_refusal(&self, error: PostPolicyError) -> S3Error {
+    /// The answer to a file the policy refuses: its size, the key, the routed bucket, or an unnamed
+    /// field. `key` is the one the final check judged.
+    pub(super) fn file_refusal(&self, error: PostPolicyError, key: &str) -> S3Error {
         match error {
             PostPolicyError::EntityTooLarge => answer(
                 ErrorCode::ENTITY_TOO_LARGE,
@@ -104,6 +105,9 @@ impl UnsignedForm {
                     format!("Each form field that you specify in a form must appear in the list of policy conditions.{named}")
                         .into(),
                 )
+            }
+            PostPolicyError::ConditionFailed if key != self.policy.final_key() => {
+                answer(ErrorCode::INVALID_POLICY_DOCUMENT, "Policy condition for field 'key' failed".into())
             }
             PostPolicyError::ConditionFailed => {
                 bucket_mismatch(self.form_bucket.as_deref(), &self.routed_bucket).unwrap_or_else(|| {
@@ -171,4 +175,42 @@ fn answer(code: ErrorCode, message: Cow<'static, str>) -> S3Error {
     let mut refusal = from_handler(HandlerError::new(code, message), ResponseKind::Other, ConnectionIntent::MayKeepAlive);
     refusal.keeps_its_sentence = true;
     refusal
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    /// A policy over the routed bucket and one exact key.
+    const POLICY: &[u8; 113] =
+        br#"{"expiration":"2099-01-01T00:00:00.000Z","conditions":[{"bucket":"example-bucket"},{"key":"uploads/report.txt"}]}"#;
+
+    fn form() -> UnsignedForm {
+        let encoded = rustfs_gateway_sig::codec::encode_base64_exact(POLICY);
+        let fields = [("key", "uploads/report.txt"), ("policy", encoded.as_str())];
+        UnsignedForm::parse(
+            &fields,
+            "",
+            PostPolicyLimits::default(),
+            RequestNow::from_unix_seconds(0),
+            "example-bucket",
+        )
+        .ok()
+        .expect("the fixture policy admits the form")
+    }
+
+    /// Negative — a final-check failure names the field that failed: the key when the key differs,
+    /// the bucket when the key is the policy's own, and neither echoes a value.
+    #[test]
+    fn n_a_failed_final_check_names_the_key_or_the_bucket_that_failed() {
+        let form = form();
+        let message = |key: &str| {
+            form.file_refusal(PostPolicyError::ConditionFailed, key)
+                .message
+                .expect("a refusal carries its sentence")
+        };
+        assert_eq!(message("other/object.txt"), "Policy condition for field 'key' failed");
+        assert_eq!(message("uploads/report.txt"), "Policy condition for field 'bucket' failed");
+    }
 }

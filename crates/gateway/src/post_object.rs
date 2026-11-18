@@ -85,9 +85,9 @@ impl AcceptedPolicy {
     }
 
     /// The answer to a file this policy refuses, when the RustFS profile answers it itself.
-    fn file_refusal(&self, error: PostPolicyError) -> S3Error {
+    fn file_refusal(&self, error: PostPolicyError, key: &str) -> S3Error {
         match self {
-            Self::Unsigned(form) => form.file_refusal(error),
+            Self::Unsigned(form) => form.file_refusal(error, key),
             _ => legacy_file_policy_refusal(error),
         }
     }
@@ -457,7 +457,10 @@ where
         if let Some(length) = self.file_length {
             self.policy
                 .enforce_final(self.bucket.as_str(), self.key.as_str(), length)
-                .map_err(|error| self.frames.mark_refusal_if_unfinished(self.policy.file_refusal(error)))?;
+                .map_err(|error| {
+                    self.frames
+                        .mark_refusal_if_unfinished(self.policy.file_refusal(error, self.key.as_str()))
+                })?;
             // An empty file is refused here too, before the handler, as legacy RustFS refuses the
             // upload it derived no length for (see `PostFileBody::complete`).
             if length == 0 {
@@ -548,7 +551,7 @@ impl<B: Body> PostFileBody<B> {
     fn policy_error(&self, message: &'static str, error: PostPolicyError) -> PostBodyError {
         let answered = self.legacy_policy_errors || matches!(self.policy, AcceptedPolicy::Unsigned(_));
         let refusal = answered.then(|| {
-            let refusal = self.policy.file_refusal(error);
+            let refusal = self.policy.file_refusal(error, &self.key);
             Box::new(self.frames.mark_refusal_if_unfinished(refusal))
         });
         PostBodyError(message, refusal)
