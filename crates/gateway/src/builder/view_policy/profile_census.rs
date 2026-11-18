@@ -49,7 +49,7 @@ use crate::trace::Identification;
 impl ViewPolicy {
     /// Adds the name of every legacy reading this policy's state selects to `into`.
     pub(crate) fn legacy_switches(&self, into: &mut BTreeSet<&'static str>) {
-        let readings: [(bool, &'static str); 42] = [
+        let readings: [(bool, &'static str); 43] = [
             (self.checksum_waiver.waives_every_operation(), "accept_all_checksum_omissions"),
             (
                 self.chunk_reading.empty_line_before_trailers,
@@ -111,6 +111,7 @@ impl ViewPolicy {
                 "enforce_unsigned_post_policies_as_legacy_rustfs",
             ),
             (self.identification == Identification::LegacyRustfs, "identify_requests_as_legacy_rustfs"),
+            (self.sse_refusals.deferred_to_handlers(), "defer_encryption_header_refusals_to_handlers"),
             (self.unknown_checksum_algorithms_ignored, "ignore_unknown_checksum_algorithms"),
             (
                 self.bodyless_bodies == BodylessBodies::Unread,

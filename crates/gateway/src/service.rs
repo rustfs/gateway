@@ -146,9 +146,7 @@ use crate::panic_boundary::catch_boxed_future;
 use crate::payload_header::signed_payload;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
-use crate::render::{
-    from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
-};
+use crate::render::{from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth};
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
@@ -1331,7 +1329,7 @@ impl S3Service {
                     AcceptedBody::PostObject(post) => post.sse_proof(proof, connection, &body_service.inner.sse),
                     AcceptedBody::Ordinary(_) => Ok(proof),
                 })
-                .map_err(|rejection| from_sse(&rejection, response_kind, view_policy.sse_refusals))?;
+                .or_else(|no| view_policy.sse_refusals.settle(no, !accepted_body.is_post(), response_kind))?;
             if let Some(refusal) = view_policy.refusal_before_decode(operation, &body_wire.headers()) {
                 return Err(from_handler(refusal, response_kind, ConnectionIntent::MayKeepAlive));
             }

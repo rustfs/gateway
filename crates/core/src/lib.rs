@@ -171,8 +171,8 @@ pub use crate::route::{
     TargetKind,
 };
 pub use crate::sse::{
-    KeyFingerprint, KeyRejection, KeySide, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection,
-    TransportSecurity,
+    DeferredSseRefusal, KeyFingerprint, KeyRejection, KeySide, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced,
+    SseRejection, TransportSecurity,
 };
 pub use crate::static_dispatch::{
     StaticCommittedError, StaticCommittedResponse, StaticDispatchError, StaticDispatchOutcome, StaticOperation,

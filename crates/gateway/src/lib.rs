@@ -369,8 +369,8 @@ pub use rustfs_gateway_core::ops::shared::encryption::{
 // the framework has already validated. `SseEnforced` carries digests and an algorithm — never a
 // key; there is no accessor for one, on purpose.
 pub use rustfs_gateway_core::sse::{
-    KeyFingerprint, KeyRejection, KeySide, ManagedRejection, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced,
-    SseRejection, TransportSecurity, check_part, enforce as enforce_sse, presented_customer_key,
+    DeferredSseRefusal, KeyFingerprint, KeyRejection, KeySide, ManagedRejection, PartRejection, PlaintextCustomerKeyAck,
+    SseConfig, SseEnforced, SseRejection, TransportSecurity, check_part, enforce as enforce_sse, presented_customer_key,
 };
 
 // The object-lock document contracts, exported for the same reason as the three above — with

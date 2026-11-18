@@ -17,7 +17,9 @@
 //!
 //! Responsible for: the status, code and sentence a signed `PutObject` over TLS is answered with
 //! for each customer-key malformation, under the profile and under the default, and that the
-//! handler is reached by neither.
+//! handler is reached by neither; and, for a host that authorizes inside its handler
+//! (`ServiceBuilder::defer_encryption_header_refusals_to_handlers`), that the handler's authorization
+//! answers before the deferred refusal, which is still answered once it allows.
 //! NOT responsible for: the rules (`rustfs_gateway_core::sse`), the renderer's own table
 //! (`builder/sse_refusals.rs`), or the cleartext gate (`sse_runtime.rs`).
 //! Upstream: `rustfs-gateway`, `support`. Downstream: nothing.
@@ -26,7 +28,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use rustfs_gateway::{Handler, HandlerResult, Req, Resp, S3Service, ServiceBuilder, TransportSecurity, dto};
+use rustfs_gateway::{Handler, HandlerError, HandlerResult, Req, Resp, S3Service, ServiceBuilder, TransportSecurity, dto};
+use rustfs_gateway_types::ErrorCode;
 
 use crate::support::{element_text, exchange, signed_target_with_body_and_headers, wired_at_signed_time};
 
@@ -158,4 +161,135 @@ async fn a_well_formed_key_is_served_under_both() {
         let (status, _, message, handled) = put(select, &trio).await;
         assert_eq!((status, handled), (200, 1), "{message}");
     }
+}
+
+// ── a host that authorizes inside its handler (`defer_encryption_header_refusals_to_handlers`) ──
+
+/// What reached the handler, and what it stored.
+#[derive(Default)]
+struct Reached {
+    entered: AtomicUsize,
+    stored: AtomicUsize,
+}
+
+/// A handler shaped as the RustFS bridge's: its own authorization first (the object `denied` is
+/// refused by policy), then the deferred refusal, then the write.
+struct AuthorizingInside(Arc<Reached>);
+
+impl Handler<dto::PutObject> for AuthorizingInside {
+    async fn call(&self, request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
+        self.0.entered.fetch_add(1, Ordering::SeqCst);
+        if request.input().key.as_str() == "denied" {
+            return Err(HandlerError::new(ErrorCode::ACCESS_DENIED, "Access Denied."));
+        }
+        if let Some(deferred) = request.sse().deferred_refusal() {
+            return Err(deferred.error().clone());
+        }
+        self.0.stored.fetch_add(1, Ordering::SeqCst);
+        Ok(Resp::new(dto::PutObjectOutput::default()))
+    }
+}
+
+fn deferring(builder: ServiceBuilder) -> ServiceBuilder {
+    builder.rustfs_profile().defer_encryption_header_refusals_to_handlers()
+}
+
+/// One signed, empty `PutObject` of `/bucket/{object}` on `transport`: status, code, message,
+/// handler entries and stores.
+async fn put_inside(
+    select: fn(ServiceBuilder) -> ServiceBuilder,
+    object: &str,
+    headers: &[(&str, &str)],
+    transport: TransportSecurity,
+) -> (u16, String, String, [usize; 2]) {
+    let reached = Arc::new(Reached::default());
+    let service = select(wired_at_signed_time())
+        .register::<dto::PutObject, _>(Arc::new(AuthorizingInside(Arc::clone(&reached))))
+        .build()
+        .expect("a complete assembly");
+    let mut signed = vec![("content-length", "0")];
+    signed.extend_from_slice(headers);
+    let target = format!("/bucket/{object}");
+    let mut request = signed_target_with_body_and_headers(http::Method::PUT, &target, &signed, Bytes::new());
+    request.extensions_mut().insert(transport);
+    let (status, body) = exchange(&service, request).await;
+    let code = element_text(&body, "Code").unwrap_or_default().to_owned();
+    let message = element_text(&body, "Message").unwrap_or_default().to_owned();
+    let counts = [reached.entered.load(Ordering::SeqCst), reached.stored.load(Ordering::SeqCst)];
+    (status.as_u16(), code, message, counts)
+}
+
+/// The two ceph s3-tests bodies: a managed algorithm and a lone customer algorithm a policy denies.
+const POLICY_DENIED: [(&str, &str); 2] = [
+    ("x-amz-server-side-encryption", "AES192"),
+    ("x-amz-server-side-encryption-customer-algorithm", "AES192"),
+];
+
+/// Negative — under the deferral the handler's own authorization answers first: a request whose
+/// SSE header a policy denies is `403`, as shipped RustFS answers it, and nothing is stored.
+#[tokio::test]
+async fn n_under_the_deferral_the_handler_authorization_answers_first() {
+    for header in POLICY_DENIED {
+        let answer = put_inside(deferring, "denied", &[header], TransportSecurity::Encrypted).await;
+        assert_eq!(answer.0, 403, "{header:?}: {answer:?}");
+        assert_eq!(answer.1, "AccessDenied", "{header:?}");
+        assert_eq!(answer.3, [1, 0], "{header:?}: entered, stored");
+    }
+}
+
+/// Negative — without the deferral the profile answers the same requests `400` before the handler,
+/// as it did.
+#[tokio::test]
+async fn n_without_the_deferral_the_gate_answers_before_the_handler() {
+    let expected = [("InvalidArgument", 400), ("InvalidRequest", 400)];
+    for (header, (code, status)) in POLICY_DENIED.into_iter().zip(expected) {
+        let answer = put_inside(ServiceBuilder::rustfs_profile, "denied", &[header], TransportSecurity::Encrypted).await;
+        assert_eq!((answer.0, answer.1.as_str(), answer.3), (status, code, [0, 0]), "{header:?}: {answer:?}");
+    }
+}
+
+/// Negative — a request authorization allows is still refused, with the gate's answer in the
+/// profile's words, and nothing is stored.
+#[tokio::test]
+async fn n_a_deferred_refusal_is_still_answered_once_authorized() {
+    let cases = [
+        (
+            vec![POLICY_DENIED[0]],
+            "InvalidArgument",
+            "x-amz-server-side-encryption must be one of AES256, aws:fsx, aws:kms or aws:kms:dsse",
+        ),
+        (
+            vec![POLICY_DENIED[1]],
+            "InvalidRequest",
+            "Missing SSE-C parameters. Algorithm, customer key and customer key MD5 are all required.",
+        ),
+        (
+            vec![(ALGORITHM, "AES256"), (KEY, SHORT_KEY), (KEY_MD5, SHORT_MD5)],
+            "InvalidRequest",
+            "SSE-C key must be 32 bytes (256 bits), got 5 bytes.",
+        ),
+    ];
+    for (headers, code, sentence) in cases {
+        let answer = put_inside(deferring, "allowed", &headers, TransportSecurity::Encrypted).await;
+        assert_eq!(answer, (400, code.to_owned(), sentence.to_owned(), [1, 0]), "{headers:?}");
+    }
+}
+
+/// Negative — the cleartext refusal is not deferred: a customer key over cleartext is refused
+/// before routing under the deferral, whatever the handler would have decided.
+#[tokio::test]
+async fn n_the_cleartext_refusal_is_not_deferred() {
+    let trio = [(ALGORITHM, "AES256"), (KEY, KEY_32), (KEY_MD5, KEY_32_MD5)];
+    for object in ["denied", "allowed"] {
+        let answer = put_inside(deferring, object, &trio, TransportSecurity::Plaintext).await;
+        assert_eq!((answer.0, answer.1.as_str(), answer.3), (400, "InvalidRequest", [0, 0]), "{object}");
+    }
+}
+
+/// Positive — a well-formed request is stored under the deferral, carrying no deferred refusal.
+#[tokio::test]
+async fn a_well_formed_request_is_stored_under_the_deferral() {
+    let trio = [(ALGORITHM, "AES256"), (KEY, KEY_32), (KEY_MD5, KEY_32_MD5)];
+    let answer = put_inside(deferring, "allowed", &trio, TransportSecurity::Encrypted).await;
+    assert_eq!((answer.0, answer.3), (200, [1, 1]), "{answer:?}");
 }

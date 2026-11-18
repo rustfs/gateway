@@ -33,6 +33,19 @@ with the assembly that calls it, before or after the call:
 - `sse_config`: whether a customer key over cleartext is refused at all is
   `RUSTFS_SSE_C_REQUIRE_TLS`'s decision; the profile only fixes where and how the refusal is
   answered;
+- `defer_encryption_header_refusals_to_handlers`: whether a value refusal of the SSE headers is
+  handed to the handler instead of answered before it. Legacy RustFS asks its bucket policy before
+  it judges an SSE header, and the RustFS bridge authorizes inside its handlers, so the bridge sets
+  it; the reference launcher's authorizer decides before the body is read and does not. A host that
+  sets it owes the call below in every handler, after its own authorization and before any effect;
+  `PROFILE_POSTURE` names the switch when it is set. The cleartext refusal and a POST Object form's
+  fields are never deferred:
+
+  ```rust
+  if let Some(refusal) = request.sse().deferred_refusal() {
+      return Err(refusal.error().clone());
+  }
+  ```
 - the CORS cache lifetime, the limits and the deadlines (`ServiceConfig`), which the bridge takes
   from RustFS configuration;
 - the fallback CORS origins, the unread-body drain and the governor rates: the preset installs

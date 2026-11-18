@@ -542,6 +542,21 @@ mod tests {
 
     /// The preset turns on exactly the documented builder-held readings — every entry of
     /// [`SWITCHES`], and nothing the table does not name.
+    /// Negative — the host-held deferral is named on the posture line when a host sets it, and the
+    /// preset never sets it: a handler that does not read the deferred refusal would serve what
+    /// the gate refused.
+    #[test]
+    fn n_the_host_held_deferral_is_named_but_never_applied_by_the_preset() {
+        let named: Vec<&'static str> = ServiceBuilder::new()
+            .defer_encryption_header_refusals_to_handlers()
+            .legacy_switches()
+            .into_iter()
+            .collect();
+        assert_eq!(named, vec!["defer_encryption_header_refusals_to_handlers"]);
+        let preset = ServiceBuilder::new().rustfs_profile().legacy_switches();
+        assert!(!preset.contains("defer_encryption_header_refusals_to_handlers"));
+    }
+
     #[test]
     fn the_preset_turns_on_exactly_the_documented_switches() {
         let expected: Vec<&'static str> = SWITCHES.iter().map(|(name, _)| *name).collect();

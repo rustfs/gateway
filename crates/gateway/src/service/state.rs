@@ -112,6 +112,11 @@ pub(super) enum AcceptedBody<B: http_body::Body> {
 }
 
 impl<B: http_body::Body> AcceptedBody<B> {
+    /// Whether this is a POST Object form, whose SSE members may be form fields.
+    pub(super) const fn is_post(&self) -> bool {
+        matches!(self, Self::PostObject(_))
+    }
+
     pub(super) fn post_key_constraints(
         &self,
         verdict: &rustfs_gateway_sig::Verdict,

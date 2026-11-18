@@ -17,7 +17,8 @@
 //!
 //! Responsible for: [`ServiceBuilder::answer_customer_key_refusals_as_legacy_rustfs`] and
 //! [`SseRefusals::error`], the one renderer of an [`SseRejection`] into the error a client is
-//! answered with.
+//! answered with; and [`ServiceBuilder::defer_encryption_header_refusals_to_handlers`] with
+//! [`SseRefusals::settle`], which decides whether that error is answered now or by the handler.
 //! NOT responsible for: the rules or their order (`rustfs_gateway_core::sse`, which this module
 //! reads the verdict of and never re-judges), the cleartext gate before routing
 //! (`super::plaintext_customer_keys`), or the managed channel's sentences, which stay the core's.
@@ -40,10 +41,11 @@
 
 use std::borrow::Cow;
 
-use rustfs_gateway_core::{HandlerError, KeyRejection, SseRejection};
+use rustfs_gateway_core::{HandlerError, KeyRejection, ResponseKind, SseEnforced, SseRejection};
 use rustfs_gateway_types::ErrorCode;
 
 use super::ServiceBuilder;
+use crate::render::{S3Error, from_sse};
 
 /// Legacy RustFS's sentence for one or two of a customer-key trio's three headers.
 const MISSING_PARAMETERS: &str = "Missing SSE-C parameters. Algorithm, customer key and customer key MD5 are all required.";
@@ -59,12 +61,37 @@ const DIGEST_DISAGREES: &str = "The calculated MD5 hash of the key did not match
 pub(crate) struct SseRefusals {
     /// Whether a customer-key refusal is answered as legacy RustFS answered it.
     legacy_customer_keys: bool,
+    /// Whether a value refusal of a header-carried request is handed to the handler.
+    deferred_to_handlers: bool,
 }
 
 impl SseRefusals {
     /// Whether customer-key refusals are answered in legacy RustFS's code and words.
     pub(crate) const fn legacy_customer_keys(self) -> bool {
         self.legacy_customer_keys
+    }
+
+    /// Whether value refusals are handed to the handler
+    /// ([`ServiceBuilder::defer_encryption_header_refusals_to_handlers`]).
+    pub(crate) const fn deferred_to_handlers(self) -> bool {
+        self.deferred_to_handlers
+    }
+
+    /// Settles the gate's refusal of a request: answered now, or — under
+    /// [`ServiceBuilder::defer_encryption_header_refusals_to_handlers`], for a request whose SSE
+    /// members are all headers (`headers_only`) — handed to the handler as a proof carrying it, in
+    /// this assembly's words. The cleartext refusal is always answered now.
+    pub(crate) fn settle(
+        self,
+        rejection: SseRejection,
+        headers_only: bool,
+        response: ResponseKind,
+    ) -> Result<SseEnforced, S3Error> {
+        if !(self.deferred_to_handlers && headers_only) {
+            return Err(from_sse(&rejection, response, self));
+        }
+        let error = self.error(&rejection);
+        rejection.defer(error).map_err(|kept| from_sse(&kept, response, self))
     }
 
     /// The error `rejection` is answered with: legacy RustFS's code and sentence for a customer-key
@@ -110,6 +137,25 @@ impl ServiceBuilder {
         self.view_policy.sse_refusals.legacy_customer_keys = true;
         self
     }
+
+    /// Hands a value refusal of the SSE headers to the handler instead of answering it before the
+    /// handler runs: the handler receives a proof whose
+    /// [`rustfs_gateway_core::SseEnforced::deferred_refusal`] carries the rule and the error this
+    /// assembly answers it with, and owes that error once it has authorized the request.
+    ///
+    /// For a host that authorizes inside its handler, as the RustFS bridge does: legacy RustFS asks
+    /// its bucket policy before it judges an SSE header, so a policy that denies the header's value
+    /// is answered `403` there and `400` by a gate in front of the handler. Not part of
+    /// [`ServiceBuilder::rustfs_profile`]: a host whose authorizer decides before the body is read,
+    /// as the reference launcher's does, already authorizes first, and a handler that does not read
+    /// the deferred refusal would serve a request the gate refused. The cleartext refusal
+    /// (`refuse_plaintext_customer_keys_before_routing`, and the gate's own) is never deferred, and
+    /// a POST Object form's fields are judged before the handler as before. Off by default.
+    #[must_use]
+    pub fn defer_encryption_header_refusals_to_handlers(mut self) -> Self {
+        self.view_policy.sse_refusals.deferred_to_handlers = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -123,7 +169,59 @@ mod tests {
 
     const LEGACY: SseRefusals = SseRefusals {
         legacy_customer_keys: true,
+        deferred_to_handlers: false,
     };
+    const DEFERRING: SseRefusals = SseRefusals {
+        legacy_customer_keys: true,
+        deferred_to_handlers: true,
+    };
+
+    /// Negative — without the deferral every refusal is answered now, in this assembly's words.
+    #[test]
+    fn n_without_the_deferral_every_refusal_is_answered_now() {
+        for headers_only in [true, false] {
+            let Err(refusal) =
+                LEGACY.settle(SseRejection::CustomerTrioIncomplete(KeySide::Target), headers_only, ResponseKind::Other)
+            else {
+                panic!("deferred without the switch");
+            };
+            assert_eq!(refusal.message(), Some(MISSING_PARAMETERS));
+        }
+    }
+
+    /// Negative — under the deferral the cleartext refusal and a form-carried refusal are still
+    /// answered now.
+    #[test]
+    fn n_the_deferral_never_takes_the_cleartext_refusal_or_a_form() {
+        let Err(cleartext) = DEFERRING.settle(SseRejection::PlaintextCustomerKey, true, ResponseKind::Other) else {
+            panic!("the cleartext refusal was deferred");
+        };
+        assert_eq!(cleartext.code(), Some(&ErrorCode::INVALID_REQUEST));
+        assert!(
+            DEFERRING
+                .settle(SseRejection::ChannelsContradict, false, ResponseKind::Other)
+                .is_err(),
+            "a form-carried refusal was deferred"
+        );
+    }
+
+    /// Negative — under the deferral a header refusal reaches the handler carrying the error this
+    /// assembly answers it with.
+    #[test]
+    fn n_a_deferred_refusal_carries_the_assembly_words() {
+        let rejection = SseRejection::CustomerKeyMalformed(KeySide::Target, KeyRejection::KeyWidth(5));
+        let Ok(proof) = DEFERRING.settle(rejection.clone(), true, ResponseKind::Other) else {
+            panic!("not deferred");
+        };
+        let Some(deferred) = proof.deferred_refusal() else {
+            panic!("the proof lost the refusal");
+        };
+        assert_eq!(deferred.rejection(), &rejection);
+        assert_eq!(
+            answered(LEGACY, &rejection),
+            (deferred.error().code().clone(), deferred.error().message().to_owned())
+        );
+    }
 
     fn answered(refusals: SseRefusals, rejection: &SseRejection) -> (ErrorCode, String) {
         let error = refusals.error(rejection);

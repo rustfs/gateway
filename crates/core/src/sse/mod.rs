@@ -72,6 +72,7 @@
 pub mod base64;
 pub mod consistency;
 mod context;
+mod deferred;
 pub mod headers;
 pub mod key;
 
@@ -81,6 +82,7 @@ use rustfs_gateway_types::dto::SseAlgorithm;
 use crate::codec::MetaView;
 
 pub use consistency::{PartRejection, check_part};
+pub use deferred::DeferredSseRefusal;
 pub use headers::{
     COPY_SSEC_ALGORITHM, COPY_SSEC_KEY, COPY_SSEC_KEY_MD5, CUSTOMER_ALGORITHM, ManagedRejection, NEVER_IN_A_RESPONSE,
     SSE_ALGORITHM, SSE_BUCKET_KEY_ENABLED, SSE_CONTEXT, SSE_KMS_KEY_ID, SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5, SseHeaders,
@@ -341,7 +343,20 @@ const fn managed_reason(managed: &ManagedRejection) -> &'static str {
 pub struct SseEnforced {
     customer: Option<KeyFingerprint>,
     copy_source: Option<KeyFingerprint>,
-    managed: Option<SseAlgorithm>,
+    managed: Managed,
+}
+
+/// The managed half of a proof, or the refusal it was deferred with. One slot rather than two
+/// fields: a deferred proof carries no algorithm, and the request carrier's size is ratcheted
+/// (`tests/dto_cold_split.rs`).
+#[derive(Clone)]
+enum Managed {
+    /// The request named no managed algorithm.
+    Absent,
+    /// The algorithm the request named.
+    Named(SseAlgorithm),
+    /// The gate's refusal, handed to the handler ([`SseRejection::defer`]).
+    Deferred(Box<DeferredSseRefusal>),
 }
 
 impl SseEnforced {
@@ -350,7 +365,19 @@ impl SseEnforced {
         Self {
             customer: None,
             copy_source: None,
-            managed: None,
+            managed: Managed::Absent,
+        }
+    }
+
+    /// The refusal the assembly handed to the handler instead of answering it first
+    /// ([`SseRejection::defer`]); `None` when the headers passed. A handler that receives one
+    /// returns its [`DeferredSseRefusal::error`] once it has authorized the request, and reads
+    /// nothing else from this proof, which then carries no fingerprint and no managed algorithm.
+    #[must_use]
+    pub fn deferred_refusal(&self) -> Option<&DeferredSseRefusal> {
+        match &self.managed {
+            Managed::Deferred(refusal) => Some(refusal),
+            Managed::Absent | Managed::Named(_) => None,
         }
     }
 
@@ -375,8 +402,11 @@ impl SseEnforced {
     /// stored document, and which of the two wins is the backend's decision — see the module
     /// documentation's scope fence.
     #[must_use]
-    pub const fn managed_algorithm(&self) -> Option<&SseAlgorithm> {
-        self.managed.as_ref()
+    pub fn managed_algorithm(&self) -> Option<&SseAlgorithm> {
+        match &self.managed {
+            Managed::Named(algorithm) => Some(algorithm),
+            Managed::Absent | Managed::Deferred(_) => None,
+        }
     }
 }
 
@@ -455,7 +485,7 @@ fn enforce_read(headers: &SseHeaders<'_>, transport: TransportSecurity, config: 
     Ok(SseEnforced {
         customer,
         copy_source,
-        managed,
+        managed: managed.map_or(Managed::Absent, Managed::Named),
     })
 }
 
