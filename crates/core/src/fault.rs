@@ -273,6 +273,32 @@ impl std::fmt::Display for InvalidWireLabel {
 
 impl std::error::Error for InvalidWireLabel {}
 
+/// Why a `503 ServiceUnavailable` was answered, as RustFS names it in `x-rustfs-error-cause`.
+///
+/// A closed set, so the header's value is one of this type's literals and never a string a handler
+/// chose. A RustFS-specific cause is a fact only the backend knows; the spelling is this module's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RustfsErrorCause {
+    /// A namespace lock could not be acquired in time (`namespace_lock_timeout`).
+    NamespaceLockTimeout,
+    /// Too few lock holders answered for a namespace lock (`namespace_lock_unavailable`).
+    NamespaceLockUnavailable,
+    /// A write could not reach its erasure quorum (`storage_write_quorum`).
+    StorageWriteQuorum,
+}
+
+impl RustfsErrorCause {
+    /// The header value, exactly as it goes on the wire.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NamespaceLockTimeout => "namespace_lock_timeout",
+            Self::NamespaceLockUnavailable => "namespace_lock_unavailable",
+            Self::StorageWriteQuorum => "storage_write_quorum",
+        }
+    }
+}
+
 /// A fact a backend may add to the head of its own refusal.
 ///
 /// A closed set, and every variant names a fact rather than a header: the wire spelling is this
@@ -302,6 +328,15 @@ pub enum ErrorHeader {
     RetryAfter {
         /// How long the client should wait, in whole seconds.
         seconds: u32,
+    },
+    /// `x-rustfs-error-cause: <cause>` — why RustFS answered `503 ServiceUnavailable`.
+    ///
+    /// A RustFS extension, not an AWS header: SDK retry logic and operators read it to tell lock
+    /// contention from lost write quorum. It rides beside [`Self::RetryAfter`] (a lock timeout
+    /// states both) and only on `ServiceUnavailable`; [`RustfsErrorCause`] fixes every value.
+    RustfsErrorCause {
+        /// The cause RustFS states.
+        cause: RustfsErrorCause,
     },
     /// `x-amz-bucket-region: <region>` — where the bucket actually lives.
     ///
@@ -385,6 +420,7 @@ impl ErrorHeader {
         match self {
             Self::UnsatisfiedRange { .. } => HeaderName::from_static("content-range"),
             Self::RetryAfter { .. } => HeaderName::from_static("retry-after"),
+            Self::RustfsErrorCause { .. } => HeaderName::from_static("x-rustfs-error-cause"),
             Self::BucketRegion { .. } => HeaderName::from_static("x-amz-bucket-region"),
             Self::RedirectLocation { .. } => HeaderName::from_static("location"),
             Self::DeleteMarker => HeaderName::from_static("x-amz-delete-marker"),
@@ -409,6 +445,7 @@ impl ErrorHeader {
         match self {
             Self::UnsatisfiedRange { complete_length } => format!("bytes */{complete_length}"),
             Self::RetryAfter { seconds } => seconds.to_string(),
+            Self::RustfsErrorCause { cause } => cause.as_str().to_owned(),
             Self::BucketRegion { region } => region.as_str().to_owned(),
             Self::RedirectLocation { target } => target.as_str().to_owned(),
             Self::DeleteMarker => "true".to_owned(),
@@ -520,6 +557,9 @@ mod tests {
         let all = vec![
             ErrorHeader::UnsatisfiedRange { complete_length: 10 },
             ErrorHeader::RetryAfter { seconds: 3 },
+            ErrorHeader::RustfsErrorCause {
+                cause: RustfsErrorCause::NamespaceLockTimeout,
+            },
             ErrorHeader::BucketRegion {
                 region: RegionLabel::new("eu-west-1").expect("a valid region"),
             },
@@ -550,6 +590,7 @@ mod tests {
             match header {
                 ErrorHeader::UnsatisfiedRange { .. }
                 | ErrorHeader::RetryAfter { .. }
+                | ErrorHeader::RustfsErrorCause { .. }
                 | ErrorHeader::BucketRegion { .. }
                 | ErrorHeader::RedirectLocation { .. }
                 | ErrorHeader::DeleteMarker
@@ -649,6 +690,20 @@ mod tests {
         assert_eq!(ErrorHeader::UnsatisfiedRange { complete_length: 10 }.value(), "bytes */10");
         assert_eq!(ErrorHeader::UnsatisfiedRange { complete_length: 0 }.value(), "bytes */0");
         assert_eq!(ErrorHeader::UnsatisfiedRange { complete_length: 10 }.name().as_str(), "content-range");
+    }
+
+    /// Positive — each cause renders the exact bytes RustFS writes today, under the one header name.
+    #[test]
+    fn each_error_cause_renders_the_bytes_rustfs_writes() {
+        for (cause, wire) in [
+            (RustfsErrorCause::NamespaceLockTimeout, "namespace_lock_timeout"),
+            (RustfsErrorCause::NamespaceLockUnavailable, "namespace_lock_unavailable"),
+            (RustfsErrorCause::StorageWriteQuorum, "storage_write_quorum"),
+        ] {
+            let header = ErrorHeader::RustfsErrorCause { cause };
+            assert_eq!(header.value(), wire);
+            assert_eq!(header.name().as_str(), "x-rustfs-error-cause");
+        }
     }
 
     /// Negative — the declared order and the positions agree. Two sources of truth for the element

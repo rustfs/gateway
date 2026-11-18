@@ -212,6 +212,9 @@ mod tests {
         for header in [
             rustfs_gateway_core::ErrorHeader::UnsatisfiedRange { complete_length: 1 },
             rustfs_gateway_core::ErrorHeader::RetryAfter { seconds: 1 },
+            rustfs_gateway_core::ErrorHeader::RustfsErrorCause {
+                cause: rustfs_gateway_core::RustfsErrorCause::StorageWriteQuorum,
+            },
             rustfs_gateway_core::ErrorHeader::CacheControl { value: stored() },
             rustfs_gateway_core::ErrorHeader::ContentLocation { value: stored() },
             rustfs_gateway_core::ErrorHeader::Expires { value: stored() },

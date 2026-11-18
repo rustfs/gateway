@@ -100,6 +100,11 @@ pub(super) fn validate_extras(error: &HandlerError) -> Result<(), InvalidErrorCo
                     return Err(InvalidErrorContext::InvalidDetail);
                 }
             }
+            ErrorHeader::RustfsErrorCause { .. } => {
+                if code != &ErrorCode::SERVICE_UNAVAILABLE {
+                    return Err(InvalidErrorContext::InvalidDetail);
+                }
+            }
             // Facts only resolution may state. A backend that could attach them could announce a
             // bucket lives elsewhere, announce a deletion, or hand caches directives, on any
             // refusal it liked.
