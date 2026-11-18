@@ -100,6 +100,53 @@ fn n_a_current_delete_marker_is_a_not_found_that_still_says_it_is_a_marker() {
     assert_eq!(header_values(&resolution), marker_headers());
 }
 
+/// RustFS answers KMS failures with AWS's own KMS-through-S3 code shape, a dotted code.
+#[test]
+fn a_custom_code_may_carry_interior_dots_and_keeps_its_status() {
+    for (code, status) in [
+        ("KMS.NotFoundException", StatusCode::BAD_REQUEST),
+        ("A.B.C", StatusCode::CONFLICT),
+    ] {
+        let vendor = ErrorCode::custom(code.to_owned(), status);
+        let context = ErrorContext::ordinary(HandlerError::new(vendor.clone(), "kms")).expect("an interior dot is admitted");
+        let resolution = resolve(context, ResponseKind::Other);
+        assert_eq!(resolution.status(), status, "{code}");
+        assert_eq!(resolution.code(), Some(&vendor), "{code}");
+    }
+}
+
+/// Negative — only an interior dot is admitted; every other byte a code refused before still is.
+#[test]
+fn n_a_dotted_custom_code_is_refused_unless_every_dot_is_interior() {
+    for code in [
+        ".Foo",
+        "Foo.",
+        ".",
+        "Foo..Bar",
+        "Foo.Bar.",
+        "Foo.Bar/Baz",
+        "Foo Bar",
+        "Foo.Bar Baz",
+        "Foo<Bar",
+        "Foo.<Bar",
+        "Foo.Bar\n",
+        "1Foo.Bar",
+        "Foo-Bar.Baz",
+        "Foo_Bar.Baz",
+        "Foo.B\u{e4}r",
+        "",
+    ] {
+        let vendor = ErrorCode::custom(code.to_owned(), StatusCode::BAD_REQUEST);
+        assert!(
+            matches!(
+                ErrorContext::ordinary(HandlerError::new(vendor, "x")),
+                Err(InvalidErrorContext::InvalidCode)
+            ),
+            "{code:?}"
+        );
+    }
+}
+
 /// c-err-1006 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 ///
 /// The delete-marker arm of it. A caller who may not list the bucket is told nothing, not even

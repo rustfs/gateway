@@ -26,11 +26,26 @@ use super::{InvalidErrorContext, MAX_BUCKET_BYTES, MAX_CODE_BYTES, MAX_KEY_BYTES
 use crate::{ErrorDetail, ErrorHeader, HandlerError};
 
 pub(super) fn validate_code(code: &ErrorCode) -> Result<(), InvalidErrorContext> {
-    if code.is_known() || valid_identifier(code.as_str(), MAX_CODE_BYTES, None) {
+    if code.is_known() || valid_code(code.as_str()) {
         Ok(())
     } else {
         Err(InvalidErrorContext::InvalidCode)
     }
+}
+
+/// An error code: [`valid_identifier`] segments joined by single interior dots.
+///
+/// The dot is AWS's own shape for a KMS failure answered through S3 (`KMS.NotFoundException`).
+/// Nothing else widens: the first byte is a letter, no segment is empty (so no leading, trailing
+/// or doubled dot), and every byte stays ASCII alphanumeric, so the code is still well-formed
+/// element text. Only a code gets this; a codec member name keeps [`valid_identifier`] alone.
+fn valid_code(value: &str) -> bool {
+    value.len() <= MAX_CODE_BYTES
+        && is_xml_representable(value)
+        && value.bytes().next().is_some_and(|first| first.is_ascii_alphabetic())
+        && value
+            .split('.')
+            .all(|segment| !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_alphanumeric()))
 }
 
 /// A letter, then letters, digits and `also`: an error code admits nothing more, and a codec
