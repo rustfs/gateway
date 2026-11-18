@@ -185,6 +185,106 @@ mod tests {
         UnsignedPostPolicy::parse_as_legacy_rustfs(&fields, "", PostPolicyLimits::default(), RequestNow::from_unix_seconds(0))
     }
 
+    /// Standard padded base64, for policies whose length varies.
+    fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+            for i in 0..4 {
+                if i <= chunk.len() {
+                    out.push(char::from(ALPHABET[(n >> (18 - 6 * i) & 63) as usize]));
+                } else {
+                    out.push('=');
+                }
+            }
+        }
+        out
+    }
+
+    /// Runs `conditions` over a form with `extra` fields, read as `reading`; the failed condition, if any.
+    fn verdict(reading: PolicyReading, condition: &str, extra: &[(&str, &str)]) -> Result<(), (&'static str, String)> {
+        let json = format!(
+            r#"{{"expiration":"2030-01-01T00:00:00.000Z","conditions":[{{"bucket":"b"}},["starts-with","$key",""],{condition}]}}"#
+        );
+        let encoded = base64(json.as_bytes());
+        let mut list = vec![("key", "k"), ("policy", encoded.as_str())];
+        list.extend_from_slice(extra);
+        let fields = FieldSet::parse(&list).expect("fields");
+        let limits = PostPolicyLimits::default();
+        let (encoded, conditions) =
+            parse_policy_document(&fields, limits, RequestNow::from_unix_seconds(0), reading).expect("policy");
+        enforce_policy_fields(&fields, "", limits, encoded, &conditions, reading)
+            .map(|_| ())
+            .map_err(|refusal| {
+                refusal
+                    .failed_condition()
+                    .map_or(("other", String::new()), |(op, name)| (op, name.to_owned()))
+            })
+    }
+
+    const SSE: &str = "x-amz-server-side-encryption";
+    const LEGACY_READINGS: [PolicyReading; 2] = [PolicyReading::LegacyRustfs, PolicyReading::LegacyRustfsSigV2Form];
+    const OTHER_READINGS: [PolicyReading; 2] = [PolicyReading::Strict, PolicyReading::CaseInsensitiveOperators];
+
+    /// Positive — legacy RustFS reads a field the form lacks as the empty string under `starts-with`,
+    /// so an empty prefix passes (the Ceph default-encryption POST cases).
+    #[test]
+    fn an_empty_prefix_over_an_absent_field_passes_as_legacy() {
+        for reading in LEGACY_READINGS {
+            assert_eq!(verdict(reading, r#"["starts-with","$x-amz-server-side-encryption",""]"#, &[]), Ok(()));
+        }
+    }
+
+    /// Negative — a non-empty prefix over an absent field still fails, named.
+    #[test]
+    fn n_a_non_empty_prefix_over_an_absent_field_fails_as_legacy() {
+        for reading in LEGACY_READINGS {
+            let verdict = verdict(reading, r#"["starts-with","$x-amz-server-side-encryption","a"]"#, &[]);
+            assert_eq!(verdict, Err(("starts-with", SSE.to_owned())));
+        }
+    }
+
+    /// Negative — `eq` over an absent field fails, even against the empty string.
+    #[test]
+    fn n_an_exact_condition_over_an_absent_field_fails_as_legacy() {
+        for reading in LEGACY_READINGS {
+            for condition in [
+                r#"["eq","$x-amz-server-side-encryption",""]"#,
+                r#"{"x-amz-server-side-encryption":""}"#,
+            ] {
+                assert_eq!(verdict(reading, condition, &[]), Err(("eq", SSE.to_owned())), "{condition}");
+            }
+        }
+    }
+
+    /// Negative — the generic and operator-only readings refuse an absent field, even for an empty prefix.
+    #[test]
+    fn n_the_other_readings_refuse_an_absent_field() {
+        for reading in OTHER_READINGS {
+            for prefix in ["", "a"] {
+                let condition = format!(r#"["starts-with","$x-amz-server-side-encryption","{prefix}"]"#);
+                assert_eq!(verdict(reading, &condition, &[]), Err(("starts-with", SSE.to_owned())), "{prefix:?}");
+            }
+        }
+    }
+
+    /// Positive and negative — a present field is judged by its value under every reading, as before.
+    #[test]
+    fn a_present_field_is_judged_by_its_value() {
+        let condition = r#"["starts-with","$x-amz-meta-a","p"]"#;
+        for reading in LEGACY_READINGS.into_iter().chain(OTHER_READINGS) {
+            assert_eq!(verdict(reading, condition, &[("x-amz-meta-a", "pq")]), Ok(()));
+            assert_eq!(
+                verdict(reading, condition, &[("x-amz-meta-a", "q")]),
+                Err(("starts-with", "x-amz-meta-a".to_owned()))
+            );
+        }
+    }
+
     /// Positive — a form with a policy and no signature field is read and enforced: the key, the
     /// routed bucket and a size inside the range are admitted.
     #[test]

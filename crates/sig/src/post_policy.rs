@@ -550,8 +550,11 @@ fn enforce_policy_fields(
             }
             Condition::StartsWith(name, prefix) => {
                 mentioned.insert(name.clone());
-                let value = condition_value(fields, name, &final_key)
-                    .map_err(|_| PostPolicyRefusal::condition("starts-with", name.clone()))?;
+                let value = match condition_value(fields, name, &final_key) {
+                    Ok(value) => value,
+                    Err(_) if reading.reads_absent_field_as_empty() => "",
+                    Err(_) => return Err(PostPolicyRefusal::condition("starts-with", name.clone())),
+                };
                 let matches = if name == "content-type" {
                     value.split(',').all(|item| item.starts_with(prefix))
                 } else {

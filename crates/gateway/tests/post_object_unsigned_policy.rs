@@ -408,6 +408,23 @@ async fn n_a_condition_over_an_absent_field_is_not_named() {
     assert!(!outcome.body.contains("hidden-name"), "{}", outcome.body);
 }
 
+/// Positive and negative — legacy RustFS reads a field the form lacks as the empty string under
+/// `starts-with`: an empty prefix admits the form, a non-empty one and an exact match do not.
+#[tokio::test]
+async fn an_empty_prefix_over_an_absent_field_admits_the_form() {
+    let encoded = live(r#"["starts-with","$x-amz-server-side-encryption",""]"#);
+    let outcome = post(Assembly::Profile, &fields(&encoded, &[]), "hello").await;
+    assert_eq!(outcome.status, StatusCode::NO_CONTENT, "{}", outcome.body);
+    for condition in [
+        r#"["starts-with","$x-amz-meta-absent","a"]"#,
+        r#"["eq","$x-amz-meta-absent",""]"#,
+    ] {
+        let encoded = live(condition);
+        let outcome = post(Assembly::Profile, &fields(&encoded, &[]), "hello").await;
+        assert_refused(&outcome, StatusCode::BAD_REQUEST, "InvalidPolicyDocument", "Policy condition");
+    }
+}
+
 /// Negative — a failed prefix condition names its operator.
 #[tokio::test]
 async fn n_a_failed_prefix_condition_names_starts_with() {

@@ -69,6 +69,13 @@ impl PolicyReading {
         }
     }
 
+    /// Whether a `starts-with` condition over a form field the form does not carry is judged against
+    /// the empty string, as legacy RustFS does: an empty prefix passes, any other fails. `eq` over an
+    /// absent field fails under every reading, and the other readings refuse it under both.
+    pub(super) const fn reads_absent_field_as_empty(self) -> bool {
+        matches!(self, Self::LegacyRustfs | Self::LegacyRustfsSigV2Form)
+    }
+
     pub(super) fn expiry(self, value: &str) -> Result<i64, PostPolicyError> {
         match self {
             Self::LegacyRustfs => parse_legacy(value),
