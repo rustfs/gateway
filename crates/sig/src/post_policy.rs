@@ -26,6 +26,10 @@ pub use unrouted::{UnroutedPostPolicy, UnroutedPostPolicyError};
 mod reading;
 use reading::PolicyReading;
 
+#[path = "post_policy_unsigned.rs"]
+mod unsigned;
+pub use unsigned::{PostPolicyRefusal, UnsignedPostPolicy};
+
 #[path = "post_policy_conditions.rs"]
 mod conditions;
 pub use conditions::PostKeyConstraints;
@@ -403,7 +407,7 @@ impl SigV2PostPolicy {
             key_constraints: common.key_constraints,
             minimum_file_bytes: common.minimum_file_bytes,
             maximum_file_bytes: common.maximum_file_bytes,
-            unlisted_field: common.unlisted_field,
+            unlisted_field: common.unlisted_field.is_some(),
         })
     }
 
@@ -453,7 +457,8 @@ struct CommonPolicy {
     key_constraints: PostKeyConstraints,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
-    unlisted_field: bool,
+    /// The first field, in name order, no condition names.
+    unlisted_field: Option<String>,
 }
 
 struct FieldSet<'a>(BTreeMap<String, &'a str>);
@@ -512,7 +517,7 @@ fn enforce_policy_fields(
     encoded: String,
     conditions: &[Condition],
     reading: PolicyReading,
-) -> Result<CommonPolicy, PostPolicyError> {
+) -> Result<CommonPolicy, PostPolicyRefusal> {
     let filename = if raw_filename.is_empty() {
         None
     } else {
@@ -538,25 +543,27 @@ fn enforce_policy_fields(
             }
             Condition::Exact(name, expected) => {
                 mentioned.insert(name.clone());
-                if condition_value(fields, name, &final_key)? != expected {
-                    return Err(PostPolicyError::ConditionFailed);
+                // A field the form lacks fails the condition as a wrong value does, named alike.
+                if condition_value(fields, name, &final_key).ok() != Some(expected.as_str()) {
+                    return Err(PostPolicyRefusal::condition("eq", name.clone()));
                 }
             }
             Condition::StartsWith(name, prefix) => {
                 mentioned.insert(name.clone());
-                let value = condition_value(fields, name, &final_key)?;
+                let value = condition_value(fields, name, &final_key)
+                    .map_err(|_| PostPolicyRefusal::condition("starts-with", name.clone()))?;
                 let matches = if name == "content-type" {
                     value.split(',').all(|item| item.starts_with(prefix))
                 } else {
                     value.starts_with(prefix)
                 };
                 if !matches {
-                    return Err(PostPolicyError::ConditionFailed);
+                    return Err(PostPolicyRefusal::condition("starts-with", name.clone()));
                 }
             }
             Condition::ContentLengthRange(minimum, maximum) => {
                 if minimum > maximum {
-                    return Err(PostPolicyError::Malformed);
+                    return Err(PostPolicyError::Malformed.into());
                 }
                 minimum_file_bytes = minimum_file_bytes.max(*minimum);
                 maximum_file_bytes = maximum_file_bytes.min(*maximum);
@@ -564,18 +571,18 @@ fn enforce_policy_fields(
         }
     }
     if minimum_file_bytes > maximum_file_bytes {
-        return Err(PostPolicyError::ConditionFailed);
+        return Err(PostPolicyError::ConditionFailed.into());
     }
-    let mut unlisted_field = false;
+    let mut unlisted_field = None;
     for name in fields.names() {
         if !reading.exempts(name) && !mentioned.contains(name) {
             reading.defer_unlisted_field()?;
-            unlisted_field = true;
+            unlisted_field.get_or_insert_with(|| name.clone());
         }
     }
 
     if bucket_field.is_none() && bucket_rules.is_empty() {
-        return Err(PostPolicyError::ConditionFailed);
+        return Err(PostPolicyError::ConditionFailed.into());
     }
 
     Ok(CommonPolicy {

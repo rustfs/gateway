@@ -443,6 +443,7 @@ fn ignored_fields_still_obey_explicit_conditions() {
                 &conditions,
                 PolicyReading::Strict
             )
+            .map_err(PostPolicyError::from)
             .err(),
             Some(PostPolicyError::ConditionFailed)
         );
