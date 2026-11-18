@@ -51,6 +51,8 @@ use response::PostObjectResponsePlan;
 enum AcceptedPolicy {
     SigV4(Box<PostPolicy>),
     SigV2(SigV2PostPolicy),
+    /// A policy no signature covers, enforced under the RustFS profile: the request is anonymous.
+    Unsigned(Box<unsigned::UnsignedForm>),
     Anonymous,
 }
 
@@ -59,6 +61,7 @@ impl AcceptedPolicy {
         match self {
             Self::SigV4(policy) => policy.final_key(),
             Self::SigV2(policy) => policy.final_key(),
+            Self::Unsigned(form) => form.policy().final_key(),
             Self::Anonymous => anonymous_key,
         }
     }
@@ -67,6 +70,7 @@ impl AcceptedPolicy {
         match self {
             Self::SigV4(policy) => policy.read_ceiling(),
             Self::SigV2(policy) => policy.read_ceiling(),
+            Self::Unsigned(form) => form.policy().read_ceiling(),
             Self::Anonymous => limits.max_file_bytes(),
         }
     }
@@ -75,7 +79,16 @@ impl AcceptedPolicy {
         match self {
             Self::SigV4(policy) => policy.enforce_final(bucket, key, file_bytes).map(|_| ()),
             Self::SigV2(policy) => policy.enforce_final(bucket, key, file_bytes).map(|_| ()),
+            Self::Unsigned(form) => form.policy().enforce_final(bucket, key, file_bytes).map(|_| ()),
             Self::Anonymous => Ok(()),
+        }
+    }
+
+    /// The answer to a file this policy refuses, when the RustFS profile answers it itself.
+    fn file_refusal(&self, error: PostPolicyError) -> S3Error {
+        match self {
+            Self::Unsigned(form) => form.file_refusal(error),
+            _ => legacy_file_policy_refusal(error),
         }
     }
 }
@@ -89,6 +102,8 @@ pub(crate) struct PostObjectPrelude<B: Body> {
     timeouts: BodyTimeouts,
     /// The request's declared body length, from which the legacy grammar fixes the file's.
     declared_length: Option<u64>,
+    /// Whether a policy no signature covers is enforced (`unsigned`) rather than refused.
+    unsigned_policies: bool,
 }
 
 impl<B: Body> PostObjectPrelude<B> {
@@ -154,6 +169,7 @@ where
                         limits,
                         timeouts,
                         declared_length: None,
+                        unsigned_policies: false,
                     });
                 }
             }
@@ -166,6 +182,13 @@ where
     #[must_use]
     pub(crate) fn with_declared_length(mut self, declared_length: Option<u64>) -> Self {
         self.declared_length = declared_length;
+        self
+    }
+
+    /// Enforces a policy no signature covers, as the RustFS profile does, rather than refusing it.
+    #[must_use]
+    pub(crate) const fn with_unsigned_policies(mut self, enforced: bool) -> Self {
+        self.unsigned_policies = enforced;
         self
     }
 
@@ -211,7 +234,15 @@ where
         // grammar the file part's own name when it carried none (`FormReader::file_name`).
         let filename = self.reader.file_name().unwrap_or_default();
         let has_policy = fields.iter().any(|(name, _)| *name == "policy");
-        let policy = if fields.iter().any(|(name, _)| *name == "x-amz-algorithm") {
+        let policy = if self.unsigned_policies && unsigned::applies(&fields) {
+            AcceptedPolicy::Unsigned(Box::new(unsigned::UnsignedForm::parse(
+                &fields,
+                filename,
+                policy_limits,
+                now,
+                bucket.as_str(),
+            )?))
+        } else if fields.iter().any(|(name, _)| *name == "x-amz-algorithm") {
             // The widest reading: this runs after the authenticator verified the same credential
             // under the deployment's own region and service policy, so an empty or a long region,
             // or a service the RustFS profile verifies on every route, reaching here was read
@@ -401,7 +432,7 @@ where
         if let Some(length) = self.file_length {
             self.policy
                 .enforce_final(self.bucket.as_str(), self.key.as_str(), length)
-                .map_err(|error| self.frames.mark_refusal_if_unfinished(legacy_file_policy_refusal(error)))?;
+                .map_err(|error| self.frames.mark_refusal_if_unfinished(self.policy.file_refusal(error)))?;
             // An empty file is refused here too, before the handler, as legacy RustFS refuses the
             // upload it derived no length for (see `PostFileBody::complete`).
             if length == 0 {
@@ -490,8 +521,9 @@ fn retain_file_bytes(frame: &Bytes, bytes: &[u8]) -> Bytes {
 
 impl<B: Body> PostFileBody<B> {
     fn policy_error(&self, message: &'static str, error: PostPolicyError) -> PostBodyError {
-        let refusal = self.legacy_policy_errors.then(|| {
-            let refusal = legacy_file_policy_refusal(error);
+        let answered = self.legacy_policy_errors || matches!(self.policy, AcceptedPolicy::Unsigned(_));
+        let refusal = answered.then(|| {
+            let refusal = self.policy.file_refusal(error);
             Box::new(self.frames.mark_refusal_if_unfinished(refusal))
         });
         PostBodyError(message, refusal)
@@ -612,6 +644,8 @@ mod fields;
 mod legacy;
 #[path = "post_object/legacy_date.rs"]
 mod legacy_date;
+#[path = "post_object/unsigned.rs"]
+mod unsigned;
 pub(crate) use fields::permission_applies;
 
 #[cfg(test)]

@@ -223,6 +223,7 @@ impl GatewaySeam {
             .read_checksum_declarations_as_legacy_rustfs()
             .url_encode_listings_like_rustfs()
             .legacy_rustfs_post_forms()
+            .enforce_unsigned_post_policies_as_legacy_rustfs()
             .answer_heads_as_legacy_rustfs()
             .read_empty_headers_as_absent()
             .authorize_versions_as_legacy_rustfs()

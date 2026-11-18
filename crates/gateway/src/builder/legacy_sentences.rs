@@ -83,7 +83,7 @@ impl BodySentences {
     /// carries no headers or document elements to keep: the error-resolution authority admits none
     /// for them.
     pub(crate) fn restyle(self, refusal: S3Error) -> S3Error {
-        if self == Self::Gateway {
+        if self == Self::Gateway || refusal.keeps_its_sentence {
             return refusal;
         }
         let Some(code) = refusal.code().cloned() else {

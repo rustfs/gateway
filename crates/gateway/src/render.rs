@@ -61,6 +61,9 @@ pub struct S3Error {
     connection: ConnectionIntent,
     pub(crate) body_unfinished: Option<crate::wire_read::RequestBodyUnfinished>,
     pub(crate) answered_by_handler: bool,
+    /// Already in the sentence legacy RustFS answers it with, so no legacy rewording applies
+    /// (`crate::builder::legacy_sentences`): a RustFS-profile POST policy refusal.
+    pub(crate) keeps_its_sentence: bool,
     extras: Option<Box<Extras>>,
 }
 
@@ -179,6 +182,7 @@ impl From<ErrorResolution> for S3Error {
             connection: crate::close::after_refusal_code(resolution.code()),
             body_unfinished: None,
             answered_by_handler: false,
+            keeps_its_sentence: false,
             extras,
         }
     }
@@ -404,6 +408,7 @@ fn unreachable_internal_resolution() -> S3Error {
         connection: ConnectionIntent::MayKeepAlive,
         body_unfinished: None,
         answered_by_handler: false,
+        keeps_its_sentence: false,
         extras: None,
     }
 }

@@ -187,6 +187,8 @@ mod post_object_signed_filename;
 mod post_object_sigv2;
 #[path = "post_object_streaming.rs"]
 mod post_object_streaming;
+#[path = "post_object_unsigned_policy.rs"]
+mod post_object_unsigned_policy;
 #[path = "precondition_contract.rs"]
 mod precondition_contract;
 #[path = "precondition_reachability.rs"]

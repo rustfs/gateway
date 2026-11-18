@@ -76,6 +76,7 @@ registered before it is removed.
 | `bound_claimed_route_bodies_as_legacy_rustfs` | a claimed route's body over 1 MiB refused before its access check | unregistered (rustfs/gateway#1173) | register; then the claimed route's own ceiling |
 | `clamp_oversized_max_keys` | `max-keys` above 1000 lowered to 1000, not refused | "`max-keys` above 1000 silently lowered" | kept until AWS evidence for the out-of-range answer exists (rustfs/gateway#1093) |
 | `drain_unread_request_bodies` (300 s idle) | an unread HTTP/1 body drained behind the answer, then the connection closed | unregistered (rustfs/gateway#1120, rustfs/rustfs#7019) | register; then a bound from RustFS configuration |
+| `enforce_unsigned_post_policies_as_legacy_rustfs` | a form policy no signature covers parsed and enforced, the request still anonymous; its refusals in RustFS's codes (`400 InvalidPolicyDocument`, `403 AccessDenied`, `400 EntityTooLarge`/`EntityTooSmall`) and sentences, naming the field and the form's own `bucket` value, never a policy value (an exception to rustfs/gateway#1444's no-echo rule); a repeated `key` or `bucket` field `400 InvalidPolicyDocument` | unregistered (rustfs/backlog#2734) | register; then refuse a policy nobody signs, as the core does |
 | `identify_requests_as_legacy_rustfs` | one UUID in `x-amz-request-id` and `x-request-id`, no `x-amz-id-2`, none in an error document | unregistered (ruling R10) | register; the host hands its identifier over (`HostRequestId`) |
 | `ignore_unknown_checksum_algorithms` | a checksum header naming an unknown algorithm is ignored | "unknown-algorithm checksum headers ignored" | refuse unknown algorithms |
 | `leave_anonymous_streaming_payloads_undecoded` | an anonymous aws-chunked upload is refused, not decoded | "anonymous aws-chunked upload not decoded" | decode and store, as the generic gateway does |
@@ -138,7 +139,7 @@ An assembly running the profile writes six lines at start-up, in this order, and
 2. `DIALECT_POSTURE` — whatever dialects the host installed; the launcher installs none;
 3. `PRESIGNED_EXPIRY_POSTURE rule=legacy-rustfs`;
 4. `NAMING_POSTURE slash_policy=rustfs-legacy … key_floor=rustfs-legacy … path_split=rustfs-legacy`;
-5. `PROFILE_POSTURE switches=[…]` — the 45 builder- and router-held readings above, sorted;
+5. `PROFILE_POSTURE switches=[…]` — the 46 builder- and router-held readings above, sorted;
 6. the `SecurityPosture` line a host prints itself — `per-IP bucket: unlimited` and every
    pre-authentication layer under `unlimited pre-authentication layers`.
 

@@ -63,6 +63,7 @@
 //! | `bound_claimed_route_bodies_as_legacy_rustfs` | a claimed route's body over 1 MiB refused before its access check | unregistered (rustfs/gateway#1173) |
 //! | `clamp_oversized_max_keys` | `max-keys` above 1000 lowered, not refused | "`max-keys` above 1000 silently lowered" |
 //! | `drain_unread_request_bodies` (300 s idle) | an unread HTTP/1 body drained behind the answer, then the connection closed | unregistered (rustfs/gateway#1120) |
+//! | `enforce_unsigned_post_policies_as_legacy_rustfs` | a form policy no signature covers enforced, its refusals in RustFS's codes and words | unregistered (rustfs/backlog#2734) |
 //! | `identify_requests_as_legacy_rustfs` | one UUID in `x-amz-request-id` and `x-request-id`, no `x-amz-id-2` | unregistered (ruling R10) |
 //! | `ignore_unknown_checksum_algorithms` | an unknown checksum algorithm header ignored | "unknown-algorithm checksum headers ignored" |
 //! | `leave_anonymous_streaming_payloads_undecoded` | an anonymous aws-chunked upload refused, not decoded | "anonymous aws-chunked upload not decoded" |
@@ -285,6 +286,9 @@ impl ServiceBuilder {
             .answer_cors_as_legacy_rustfs(LegacyRustfsCors::with_fallback_origins(None))
             // RustFS reads a browser upload form with its legacy grammar (rustfs/backlog#1677, R8).
             .legacy_rustfs_post_forms()
+            // RustFS parses and enforces a form's policy whether or not a signature covers it
+            // (rustfs/backlog#2734).
+            .enforce_unsigned_post_policies_as_legacy_rustfs()
             // RustFS answers a policy write `204`, every restore `200`, a policy read untyped, and a
             // HeadBucket without a region its handler left unnamed (rustfs/gateway#1148).
             .answer_heads_as_legacy_rustfs()
@@ -454,6 +458,10 @@ mod tests {
         ("drain_unread_request_bodies", |builder| {
             builder.drain_unread_request_bodies(UnreadBodyDrain::with_idle_timeout(Duration::from_secs(300)))
         }),
+        (
+            "enforce_unsigned_post_policies_as_legacy_rustfs",
+            ServiceBuilder::enforce_unsigned_post_policies_as_legacy_rustfs,
+        ),
         ("identify_requests_as_legacy_rustfs", ServiceBuilder::identify_requests_as_legacy_rustfs),
         ("ignore_unknown_checksum_algorithms", ServiceBuilder::ignore_unknown_checksum_algorithms),
         (

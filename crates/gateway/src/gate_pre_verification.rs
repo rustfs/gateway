@@ -127,7 +127,11 @@ where
             timeouts,
         )
         .await
-        .map(|prelude| prelude.with_declared_length(declared_length))
+        .map(|prelude| {
+            prelude
+                .with_declared_length(declared_length)
+                .with_unsigned_policies(form.unsigned_policies)
+        })
     }
 
     /// Consumed only by the ordinary body read, which still requires metadata admission.
