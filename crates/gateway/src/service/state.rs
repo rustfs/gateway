@@ -17,6 +17,10 @@
 //! NOT responsible for: accepting requests or making pipeline decisions.
 //! Upstream: `ServiceBuilder`. Downstream: `S3Service` and its host.
 
+use std::sync::atomic::Ordering;
+
+use rustfs_gateway_sig::RequestNow;
+
 use super::*;
 
 impl core::fmt::Debug for S3Service {

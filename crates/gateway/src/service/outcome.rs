@@ -20,18 +20,56 @@
 //! Upstream: `super::S3Service`, which owns the request walk.
 //! Downstream: `super::S3Service`, which consumes the rendered response and recorded outcome.
 
+use std::sync::atomic::Ordering;
+
 use http::{Method, Response};
 use rustfs_gateway_core::cors::{PreflightRefusalCause, VARY, VARY_ORIGIN, preflight_refusal_for};
 use rustfs_gateway_core::{ErrorContext, HandlerError, ResponseKind, resolve};
+use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
 
+use super::S3Service;
 use super::cors::CorsDecoration;
 use crate::builder::credential_sentences::CredentialSentences;
 use crate::close::ConnectionIntent;
 use crate::logging::Refused;
 use crate::render::{S3Error, from_handler, from_pre_auth, render};
+use crate::request_config::{HandlerDeadlineReport, HandlerDeadlineReportSlot};
 use crate::trace::RequestTrace;
+
+impl S3Service {
+    pub(super) fn finish_response(
+        &self,
+        mut response: Response<Body>,
+        outcome: &mut Outcome<'_>,
+        method: &Method,
+        handler_deadline_report: &HandlerDeadlineReportSlot,
+        now: RequestNow,
+    ) -> (Response<Body>, Option<HandlerDeadlineReport>) {
+        let handler_deadline = handler_deadline_report.outcome();
+        if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
+            response.extensions_mut().insert(ConnectionIntent::Close);
+        }
+        // The body invariants run here on both paths; this is the only position from which
+        // "a `HEAD` response has no content" covers refusals that never reached an encoder.
+        if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
+            response = outcome.refuse_handler(error.into());
+        }
+        let corrections = crate::invariants::enforce(&mut response, method);
+        if *method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
+            response.headers_mut().remove(http::header::CONTENT_LENGTH);
+        }
+        if corrections.removed_forbidden_body() {
+            self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
+        }
+        // Stamp last on both paths. A refusal already has the same identifiers; success encoders
+        // and filters cannot replace this final value.
+        self.keep_out_of_shared_caches(response.headers_mut(), outcome.identity.as_ref());
+        crate::stamp::stamp(response.headers_mut(), outcome.trace, now);
+        (response, handler_deadline)
+    }
+}
 
 /// Whether an answer reached legacy RustFS's CORS layer.
 #[derive(PartialEq, Eq)]

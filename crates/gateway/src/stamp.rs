@@ -102,7 +102,7 @@ fn http_date(now: RequestNow) -> Option<HeaderValue> {
     let text = Timestamp::from_secs(now.unix_seconds())
         .render(TimestampFormat::HttpDate)
         .ok()?;
-    HeaderValue::from_str(&text).ok()
+    HeaderValue::try_from(text).ok()
 }
 
 #[cfg(test)]

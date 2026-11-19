@@ -109,7 +109,7 @@
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 use bytes::Bytes;
 use http::{Method, Request, Response};
@@ -123,9 +123,7 @@ use rustfs_gateway_core::{
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::{
-    Admission, AuthError, PayloadMode, RawQuery, RequestNow, SecurityFloor, Verdict, WireView, detect_credentials,
-};
+use rustfs_gateway_sig::{Admission, AuthError, PayloadMode, RawQuery, SecurityFloor, Verdict, WireView, detect_credentials};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
@@ -147,7 +145,7 @@ use crate::payload_header::signed_payload;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth};
-use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
+use crate::request_config::{Entered, Guarded, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
 use crate::trace::TraceSource;
@@ -411,37 +409,6 @@ impl S3Service {
             crate::ext::observe_safely(runtime.observer.as_ref(), &event);
         }
         file_body_path.adapt(response)
-    }
-
-    fn finish_response(
-        &self,
-        mut response: Response<Body>,
-        outcome: &mut Outcome<'_>,
-        method: &Method,
-        handler_deadline_report: &HandlerDeadlineReportSlot,
-        now: RequestNow,
-    ) -> (Response<Body>, Option<HandlerDeadlineReport>) {
-        let handler_deadline = handler_deadline_report.outcome();
-        if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
-            response.extensions_mut().insert(ConnectionIntent::Close);
-        }
-        // The body invariants run here on both paths; this is the only position from which
-        // "a `HEAD` response has no content" covers refusals that never reached an encoder.
-        if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
-            response = outcome.refuse_handler(error.into());
-        }
-        let corrections = crate::invariants::enforce(&mut response, method);
-        if *method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
-            response.headers_mut().remove(http::header::CONTENT_LENGTH);
-        }
-        if corrections.removed_forbidden_body() {
-            self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
-        }
-        // Stamp last on both paths. A refusal already has the same identifiers; success encoders
-        // and filters cannot replace this final value.
-        self.keep_out_of_shared_caches(response.headers_mut(), outcome.identity.as_ref());
-        crate::stamp::stamp(response.headers_mut(), outcome.trace, now);
-        (response, handler_deadline)
     }
 
     async fn run<B, M>(
