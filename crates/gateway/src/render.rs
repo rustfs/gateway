@@ -18,7 +18,6 @@
 //! NOT responsible for: choosing an error code or backend header; refusing stages and
 //! `rustfs_gateway_core::ErrorHeader` own those decisions.
 //! Upstream: `rustfs-gateway-types`, `rustfs-gateway-xml`. Downstream: `crate::service`.
-//! It keeps framing, identifiers, reserved headers, and redaction reviewable in one place.
 
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG};
 use http::{Response, StatusCode};
@@ -144,9 +143,7 @@ impl S3Error {
         self.message.as_deref()
     }
 
-    /// The headers the refusing stage attached, before the reserved ones are filtered out.
-    ///
-    /// Only a `HandlerError` populates these today.
+    /// Unfiltered refusal headers supplied by a `HandlerError`.
     #[must_use]
     pub fn headers(&self) -> &[ErrorHeader] {
         self.extras.as_ref().map_or(NO_HEADERS, |extras| &extras.headers)
@@ -500,8 +497,7 @@ pub fn connection_intent_of<B>(response: &Response<B>) -> Option<ConnectionInten
     response.extensions().get::<ConnectionIntent>().copied()
 }
 
-/// The XML declaration every rendered document opens with, re-exported for a consumer that
-/// compares a body byte for byte.
+/// The XML declaration that opens every rendered document.
 #[must_use]
 pub const fn declaration() -> &'static str {
     DECLARATION

@@ -14,12 +14,9 @@
 
 //! The assembled service, and the one ordered walk from a request to a response.
 //!
-//! Responsible for: [`S3Service`] — non-generic, `Clone` for the price of one `Arc` — and the
-//! pipeline that runs the stages in their fixed order.
-//! NOT responsible for: implementing any stage. Acceptance is `rustfs-gateway-http`'s, routing and
-//! decoding are `rustfs-gateway-core`'s, the security floor is `rustfs-gateway-sig`'s, and every
-//! decision this file makes is delegated to one of them. It does not listen on a socket either:
-//! that is P7-02's.
+//! Responsible for: assembling [`S3Service`] and running the ordered request pipeline.
+//! NOT responsible for: wire acceptance, routing, decoding, security policy, or listening.
+//! Those belong to `rustfs-gateway-http`, `rustfs-gateway-core`, `rustfs-gateway-sig`, and P7-02.
 //! Upstream: `crate::builder`. Downstream: `crate::adapt`, and any consumer holding a service.
 //! # The order, and what each position is load-bearing for
 //!

@@ -1,5 +1,7 @@
 [advisories]
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "The pinned s3s compatibility baselines require chrono. This maintenance advisory has no patched release." },
+]
 
 [licenses]
 allow = [

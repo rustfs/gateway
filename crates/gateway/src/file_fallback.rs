@@ -24,12 +24,19 @@
 //! Upstream: `crate::service`, which calls [`FileBodyPath::adapt`] on every response.
 //! Downstream: Hyper, and any other consumer of `S3Service` responses through `http_body`.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
+#[cfg(unix)]
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
+#[cfg(unix)]
 use bytes::Bytes;
 use http::{Extensions, Response, Version};
-use rustfs_gateway_stream::{Body, NoZeroCopy, PayloadCaps, PayloadRead, PayloadStream, StreamError, TrailingHeaders};
+use rustfs_gateway_stream::{Body, NoZeroCopy};
+#[cfg(unix)]
+use rustfs_gateway_stream::{PayloadCaps, PayloadRead, PayloadStream, StreamError, TrailingHeaders};
+#[cfg(unix)]
 use tokio::io::{AsyncRead, ReadBuf};
 
 /// Inserted into a request by the self-held driver, which is the one transport that sends
@@ -57,6 +64,7 @@ impl FileBodyPath {
     }
 
     /// Replaces a file-backed body with a copying one on a transport that cannot send it.
+    #[cfg(unix)]
     pub(crate) fn adapt(self, response: Response<Body>) -> Response<Body> {
         let Self::Copied(reason) = self else {
             return response;
@@ -80,6 +88,13 @@ impl FileBodyPath {
             Err(body) => body,
         };
         Response::from_parts(parts, body)
+    }
+
+    /// Body has no file-region variant on this platform.
+    #[cfg(not(unix))]
+    pub(crate) fn adapt(self, response: Response<Body>) -> Response<Body> {
+        let _ = self;
+        response
     }
 }
 
@@ -106,18 +121,21 @@ fn tls_in_path(_extensions: &Extensions) -> bool {
 }
 
 /// The largest read one poll asks for.
+#[cfg(unix)]
 const CHUNK: u64 = 64 * 1024;
 
 /// A file region read through Tokio's file reader, one bounded read per poll.
 ///
 /// Demand-driven: nothing is read until the consumer polls, and at most one read is in flight, so
 /// a stalled client stops the reads rather than letting them run ahead.
+#[cfg(unix)]
 struct CopiedFileStream {
     file: tokio::fs::File,
     remaining: u64,
     buffer: Vec<u8>,
 }
 
+#[cfg(unix)]
 impl CopiedFileStream {
     fn new(file: std::fs::File, remaining: u64) -> Self {
         Self {
@@ -128,6 +146,7 @@ impl CopiedFileStream {
     }
 }
 
+#[cfg(unix)]
 impl PayloadStream for CopiedFileStream {
     fn poll_read(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
         let this = self.get_mut();
@@ -167,8 +186,10 @@ impl PayloadStream for CopiedFileStream {
 }
 
 /// A body that fails at once. Used only if the copied stream could not be wrapped at all.
+#[cfg(unix)]
 struct FailedStream(u64);
 
+#[cfg(unix)]
 impl PayloadStream for FailedStream {
     fn poll_read(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
         Poll::Ready(Err(StreamError::incomplete_body()))
@@ -186,6 +207,22 @@ impl PayloadStream for FailedStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn copied_path_preserves_non_file_response() -> Result<(), Box<dyn std::error::Error>> {
+        use http_body_util::BodyExt;
+
+        let payload = bytes::Bytes::from_static(b"GET response");
+        let mut response = Response::new(Body::from(payload.clone()));
+        *response.status_mut() = http::StatusCode::PARTIAL_CONTENT;
+
+        let (parts, body) = FileBodyPath::Copied(NoZeroCopy::TransportLacksSendfile)
+            .adapt(response)
+            .into_parts();
+        let bytes = body.collect().await?.to_bytes();
+        assert_eq!((parts.status, bytes), (http::StatusCode::PARTIAL_CONTENT, payload));
+        Ok(())
+    }
 
     /// a-zc-0009 / a-zc-0010. Negative — each transport fact names its own reason, and TLS outranks
     /// HTTP/2 because it is the one an HTTP/1.1 deployment cannot switch off.
