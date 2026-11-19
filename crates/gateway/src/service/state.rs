@@ -29,12 +29,6 @@ impl core::fmt::Debug for S3Service {
 }
 
 impl S3Service {
-    /// The operations this service answers, sorted. Everything else is `501`.
-    pub fn operations(&self) -> impl Iterator<Item = &'static str> {
-        let snapshot = self.inner.config.load();
-        snapshot.runtime().routing.dispatch.names().collect::<Vec<_>>().into_iter()
-    }
-
     /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread.
     pub(crate) fn unread_body_drain(&self) -> Option<crate::UnreadBodyDrain> {
         self.inner.view_policy.unread_body_drain()
