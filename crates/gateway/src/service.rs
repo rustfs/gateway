@@ -657,20 +657,7 @@ impl S3Service {
         };
         let meta = match MetaView::addressed_with(&wire, target, host_bucket, &self.inner.names) {
             Ok(meta) => self.inner.view_policy.apply(operation, meta, pending.as_ref()),
-            Err(error)
-                if self.inner.view_policy.nul_torrent_keys_as_missing
-                    && operation == "GetObjectTorrent"
-                    && error.key_rejection() == Some(&rustfs_gateway_types::NameRejection::Nul) =>
-            {
-                // The host serves no torrents, so this static absence reveals no stored object.
-                let missing = crate::render::from_missing_object(
-                    rustfs_gateway_core::MissingObject::Key,
-                    rustfs_gateway_core::ResourceVisibility::Visible,
-                    response_kind,
-                );
-                return outcome.refuse_at(Refused::Decode, missing);
-            }
-            Err(error) => return outcome.refuse_at(Refused::Decode, from_codec(error, response_kind)),
+            Err(error) => return outcome.refuse_addressing(error, self.inner.view_policy.nul_torrent_keys_as_missing),
         };
         let config = config.routed();
 

@@ -22,8 +22,8 @@
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG};
 use http::{Response, StatusCode};
 use rustfs_gateway_core::{
-    BodyPolicy, CodecError, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, HandlerError, MissingObject, PreAuthError,
-    ResourceVisibility, ResponseKind, resolve,
+    BodyPolicy, CodecError, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, HandlerError, PreAuthError, ResponseKind,
+    resolve,
 };
 use rustfs_gateway_http::WireReject;
 use rustfs_gateway_sig::{AuthError, SignatureMismatchDetail};
@@ -338,10 +338,6 @@ pub(crate) fn from_sse(rejection: &rustfs_gateway_core::SseRejection, response: 
     from_handler(words.error(rejection), response, ConnectionIntent::MayKeepAlive)
 }
 
-pub(crate) fn from_missing_object(kind: MissingObject, visibility: ResourceVisibility, response: ResponseKind) -> S3Error {
-    from_resolution(resolve(ErrorContext::missing_object(kind, visibility), response), response)
-}
-
 pub(crate) fn from_codec(error: CodecError, response: ResponseKind) -> S3Error {
     let context = match ErrorContext::codec(error) {
         Ok(context) => context,
@@ -375,7 +371,7 @@ fn with_connection(mut refusal: S3Error, connection: ConnectionIntent) -> S3Erro
     refusal
 }
 
-fn from_resolution(resolution: ErrorResolution, response: ResponseKind) -> S3Error {
+pub(crate) fn from_resolution(resolution: ErrorResolution, response: ResponseKind) -> S3Error {
     let mut refusal = S3Error::from(resolution);
     // Core reports that HEAD may not carry the document. The facade still has to materialize that
     // representation long enough to measure its Content-Length; the single response invariant

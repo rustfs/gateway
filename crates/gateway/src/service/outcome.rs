@@ -22,15 +22,15 @@
 
 use http::{Method, Response};
 use rustfs_gateway_core::cors::{PreflightRefusalCause, VARY, VARY_ORIGIN, preflight_refusal_for};
-use rustfs_gateway_core::{ErrorContext, HandlerError, ResponseKind, resolve};
+use rustfs_gateway_core::{CodecError, ErrorContext, HandlerError, MissingObject, ResourceVisibility, ResponseKind, resolve};
 use rustfs_gateway_stream::Body;
-use rustfs_gateway_types::ErrorCode;
+use rustfs_gateway_types::{ErrorCode, NameRejection};
 
 use super::cors::CorsDecoration;
 use crate::builder::credential_sentences::CredentialSentences;
 use crate::close::ConnectionIntent;
 use crate::logging::Refused;
-use crate::render::{S3Error, from_handler, from_pre_auth, render};
+use crate::render::{S3Error, from_codec, from_handler, from_pre_auth, from_resolution, render};
 use crate::trace::RequestTrace;
 
 /// Whether an answer reached legacy RustFS's CORS layer.
@@ -97,6 +97,21 @@ impl<'a> Outcome<'a> {
     /// [`Outcome::refuse`], remembering which stage refused, for the request's refusal event.
     pub(super) fn refuse_at(&mut self, refused: Refused, error: S3Error) -> Response<Body> {
         self.refuse_as(Some(refused), error)
+    }
+
+    /// Renders a name refusal before the request can reach authorization or the handler.
+    pub(super) fn refuse_addressing(&mut self, error: CodecError, nul_torrent_keys_as_missing: bool) -> Response<Body> {
+        let refusal = if nul_torrent_keys_as_missing
+            && self.operation == Some("GetObjectTorrent")
+            && error.key_rejection() == Some(&NameRejection::Nul)
+        {
+            // This host serves no torrents, so the static absence reveals no stored object.
+            let context = ErrorContext::missing_object(MissingObject::Key, ResourceVisibility::Visible);
+            from_resolution(resolve(context, self.response_kind), self.response_kind)
+        } else {
+            from_codec(error, self.response_kind)
+        };
+        self.refuse_at(Refused::Decode, refusal)
     }
 
     /// [`Outcome::refuse_at`] for a refusal whose stage is read off the refusal itself, and which
