@@ -638,7 +638,7 @@ fn split_labels(
 /// The rejection's own reason is used, and the value never is: a message that echoed the key back
 /// would put whatever the caller sent into a log line and an error body.
 pub(crate) fn key_rejected(rejection: NameRejection) -> CodecError {
-    CodecError::new(rejection.key_error_code(), rejection.reason()).about("Key")
+    CodecError::rejected_key(rejection)
 }
 
 /// A raw bucket label under exactly the rules a path-style S3 request's first segment meets.

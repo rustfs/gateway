@@ -36,15 +36,30 @@
 use std::fmt;
 
 use http::StatusCode;
-use rustfs_gateway_types::ErrorCode;
+use rustfs_gateway_types::{ErrorCode, NameRejection};
+
+#[derive(Clone, Debug)]
+enum Member {
+    Named(&'static str),
+    Key(NameRejection),
+}
 
 /// Why a request could not be decoded, a dispatch capability refused it, or a response could not be encoded.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct CodecError {
     code: ErrorCode,
     message: &'static str,
-    member: Option<&'static str>,
+    member: Option<Member>,
 }
+
+// Equality compares the public diagnostic, including for callers that construct it with `about`.
+impl PartialEq for CodecError {
+    fn eq(&self, other: &Self) -> bool {
+        self.code == other.code && self.message == other.message && self.member() == other.member()
+    }
+}
+
+impl Eq for CodecError {}
 
 impl CodecError {
     /// An error with a code and a message.
@@ -90,7 +105,7 @@ impl CodecError {
     /// is why naming one is allowed here at all.
     #[must_use]
     pub const fn about(mut self, member: &'static str) -> Self {
-        self.member = Some(member);
+        self.member = Some(Member::Named(member));
         self
     }
 
@@ -109,7 +124,28 @@ impl CodecError {
     /// The model member this error is about, when it is about one.
     #[must_use]
     pub const fn member(&self) -> Option<&'static str> {
-        self.member
+        match &self.member {
+            Some(Member::Named(member)) => Some(*member),
+            Some(Member::Key(_)) => Some("Key"),
+            None => None,
+        }
+    }
+
+    pub(super) fn rejected_key(reason: NameRejection) -> Self {
+        Self {
+            code: reason.key_error_code(),
+            message: reason.reason(),
+            member: Some(Member::Key(reason)),
+        }
+    }
+
+    /// The naming rule that refused an object key, when this error came from key validation.
+    #[must_use]
+    pub const fn key_rejection(&self) -> Option<&NameRejection> {
+        match &self.member {
+            Some(Member::Key(reason)) => Some(reason),
+            _ => None,
+        }
     }
 
     /// The status this error goes out with.
@@ -122,7 +158,7 @@ impl CodecError {
 impl fmt::Display for CodecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.message)?;
-        if let Some(member) = self.member {
+        if let Some(member) = self.member() {
             write!(f, " (member: {member})")?;
         }
         Ok(())

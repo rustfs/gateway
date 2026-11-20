@@ -49,7 +49,7 @@ use crate::trace::Identification;
 impl ViewPolicy {
     /// Adds the name of every legacy reading this policy's state selects to `into`.
     pub(crate) fn legacy_switches(&self, into: &mut BTreeSet<&'static str>) {
-        let readings: [(bool, &'static str); 43] = [
+        let readings: [(bool, &'static str); 44] = [
             (self.checksum_waiver.waives_every_operation(), "accept_all_checksum_omissions"),
             (
                 self.chunk_reading.empty_line_before_trailers,
@@ -76,6 +76,7 @@ impl ViewPolicy {
                 "answer_denials_with_legacy_rustfs_sentence",
             ),
             (self.sse_refusals.legacy_customer_keys(), "answer_customer_key_refusals_as_legacy_rustfs"),
+            (self.nul_torrent_keys_as_missing, "answer_nul_torrent_keys_as_missing"),
             (self.head_refusals_without_length, "answer_head_refusals_without_content_length"),
             (
                 self.header_signatures == HeaderRefusals::LegacyRustfs,

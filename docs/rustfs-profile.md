@@ -33,6 +33,7 @@ with the assembly that calls it, before or after the call:
 - `sse_config`: whether a customer key over cleartext is refused at all is
   `RUSTFS_SSE_C_REQUIRE_TLS`'s decision; the profile only fixes where and how the refusal is
   answered;
+- `answer_nul_torrent_keys_as_missing` lets a host that serves no torrents answer a NUL key on `GetObjectTorrent` with `404 NoSuchKey`. The naming floor still refuses the key before authorization and dispatch.
 - `defer_encryption_header_refusals_to_handlers`: whether a value refusal of the SSE headers is
   handed to the handler instead of answered before it. Legacy RustFS asks its bucket policy before
   it judges an SSE header, and the RustFS bridge authorizes inside its handlers, so the bridge sets

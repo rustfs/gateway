@@ -212,6 +212,7 @@ pub(crate) struct ViewPolicy {
     pub(crate) claimed_bodies: ClaimedBodies,
     /// Which ceiling a buffered body is read under (`super::buffered_ceiling`).
     pub(crate) buffered_ceiling: BufferedCeiling,
+    pub(crate) nul_torrent_keys_as_missing: bool,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,

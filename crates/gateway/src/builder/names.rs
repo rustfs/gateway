@@ -35,6 +35,16 @@ use rustfs_gateway_types::{LegacyRustfsNameValidator, NamePolicy, NameValidator,
 use super::ServiceBuilder;
 
 impl ServiceBuilder {
+    /// Returns `404 NoSuchKey` for a NUL in the key of `GetObjectTorrent`.
+    ///
+    /// For hosts like RustFS 1.0.5 that answer every torrent request as missing.
+    /// The naming floor still rejects the key before authorization or dispatch.
+    #[must_use]
+    pub fn answer_nul_torrent_keys_as_missing(mut self) -> Self {
+        self.view_policy.nul_torrent_keys_as_missing = true;
+        self
+    }
+
     /// Installs a naming policy: the slash rule, the key floor and the validator.
     ///
     /// Defaults to [`NamePolicy::default`] — AWS slash semantics and the AWS bucket naming rules.

@@ -32,8 +32,8 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use rustfs_gateway::dto::{
-    CopyObject, CreateMultipartUpload, DeleteObject, DeleteObjects, GetObject, HeadObject, PostObject, PutObject,
-    PutObjectTagging,
+    CopyObject, CreateMultipartUpload, DeleteObject, DeleteObjects, GetObject, GetObjectTorrent, HeadObject, PostObject,
+    PutObject, PutObjectTagging,
 };
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, ErrorCode, HandlerError, HandlerResult, InputAuthzRequest,
@@ -114,6 +114,11 @@ impl KeyRecorder {
         recorded()
     }
 
+    async fn get_object_torrent(&self, request: Req<GetObjectTorrent>) -> HandlerResult<GetObjectTorrent> {
+        self.0.hand(request.input().key.as_str());
+        recorded()
+    }
+
     async fn head_object(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
         self.0.hand(request.input().key.as_str());
         recorded()
@@ -175,6 +180,7 @@ impl KeyRecorder {
 enum Naming {
     Default,
     SlashRuleOnly,
+    NoTorrents,
     Rustfs,
 }
 
@@ -186,6 +192,7 @@ fn assembled(naming: Naming) -> (S3Service, Arc<Seen>) {
         .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty")))
         .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
         .authorizer(ShowAndAllow(Arc::clone(&seen)))
+        .register::<GetObjectTorrent, _>(Arc::clone(&recorder))
         .register::<GetObject, _>(Arc::clone(&recorder))
         .register::<HeadObject, _>(Arc::clone(&recorder))
         .register::<PutObject, _>(Arc::clone(&recorder))
@@ -195,10 +202,15 @@ fn assembled(naming: Naming) -> (S3Service, Arc<Seen>) {
         .register::<CreateMultipartUpload, _>(Arc::clone(&recorder))
         .register::<PostObject, _>(Arc::clone(&recorder))
         .register::<DeleteObjects, _>(recorder);
+    let builder = if matches!(naming, Naming::NoTorrents) {
+        builder.answer_nul_torrent_keys_as_missing()
+    } else {
+        builder
+    };
     let builder = match naming {
         Naming::Default => builder,
         Naming::SlashRuleOnly => builder.slash_policy(SlashPolicy::RustfsLegacy),
-        Naming::Rustfs => builder
+        Naming::Rustfs | Naming::NoTorrents => builder
             .slash_policy(SlashPolicy::RustfsLegacy)
             .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report(),
     };
@@ -413,4 +425,32 @@ async fn n_the_default_floor_still_refuses_those_form_keys() {
         assert!(seen.handed().is_empty(), "{key} reached the handler");
         seen.shown();
     }
+}
+
+#[tokio::test]
+async fn an_unrepresentable_key_on_a_torrentless_host_is_answered_before_dispatch() {
+    let (service, seen) = assembled(Naming::NoTorrents);
+    let overlong = format!("/bucket/{}?torrent", "k".repeat(1025));
+    for (target, expected_status, code) in [
+        ("/bucket/a%00b?torrent", 404, "NoSuchKey"),
+        ("/bucket/a%00b", 400, "InvalidArgument"),
+        (overlong.as_str(), 400, "KeyTooLongError"),
+    ] {
+        let (status, body) = exchange(&service, request("GET", target, &[], b"")).await;
+        assert_eq!(status.as_u16(), expected_status, "{target}: {body}");
+        assert!(body.contains(&format!("<Code>{code}</Code>")), "{target}: {body}");
+        assert!(seen.shown().is_empty(), "{target} reached authorization");
+        assert!(seen.handed().is_empty(), "{target} reached the handler");
+    }
+
+    let (status, _) = exchange(&service, request("GET", "/bucket/a%2500b?torrent", &[], b"")).await;
+    assert_eq!(status.as_u16(), 501);
+    assert_eq!(seen.handed(), ["a%00b"]);
+    assert_eq!(seen.shown(), ["a%00b"]);
+
+    let (service, seen) = assembled(Naming::Rustfs);
+    let (status, body) = exchange(&service, request("GET", "/bucket/a%00b?torrent", &[], b"")).await;
+    assert_eq!(status.as_u16(), 400);
+    assert!(body.contains("<Code>InvalidArgument</Code>"), "{body}");
+    assert!(seen.handed().is_empty());
 }

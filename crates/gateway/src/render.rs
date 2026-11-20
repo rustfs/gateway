@@ -22,8 +22,8 @@
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG};
 use http::{Response, StatusCode};
 use rustfs_gateway_core::{
-    BodyPolicy, CodecError, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, HandlerError, PreAuthError, ResponseKind,
-    resolve,
+    BodyPolicy, CodecError, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, HandlerError, MissingObject, PreAuthError,
+    ResourceVisibility, ResponseKind, resolve,
 };
 use rustfs_gateway_http::WireReject;
 use rustfs_gateway_sig::{AuthError, SignatureMismatchDetail};
@@ -336,6 +336,10 @@ pub(crate) fn from_sse(rejection: &rustfs_gateway_core::SseRejection, response: 
     // else. The connection survives: the caller is authenticated by this point and the
     // request head was fully readable, so none of RFC 9112 §9.3's reasoning applies.
     from_handler(words.error(rejection), response, ConnectionIntent::MayKeepAlive)
+}
+
+pub(crate) fn from_missing_object(kind: MissingObject, visibility: ResourceVisibility, response: ResponseKind) -> S3Error {
+    from_resolution(resolve(ErrorContext::missing_object(kind, visibility), response), response)
 }
 
 pub(crate) fn from_codec(error: CodecError, response: ResponseKind) -> S3Error {
