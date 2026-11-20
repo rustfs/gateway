@@ -30,6 +30,7 @@ use sha2::{Digest, Sha256};
 mod accelerate_payment;
 mod acceptance_census;
 mod bucket_encryption;
+mod captured_xml;
 #[cfg(test)]
 mod copy_source_seam;
 mod corpus;
@@ -43,6 +44,7 @@ mod migration_inventory;
 mod minio_migration;
 mod notification;
 mod object_lock;
+mod persistence_parity;
 // Test-only: the single-operation decode/encode diff against the pinned s3s service. It links the
 // gateway runtime through dev-dependencies, so it must never become part of the library proper.
 // Its assertions report a fixture the test wrote itself, where a panic is the failure report.
@@ -278,7 +280,7 @@ pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageE
 
 fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCoverageError> {
     let mut families = base_family_corpus_evidence()?;
-    historical_writer::append(&mut families).map_err(|(kind, error)| CorpusCoverageError::InvalidEvidence {
+    captured_xml::append(&mut families).map_err(|(kind, error)| CorpusCoverageError::InvalidEvidence {
         kind,
         reason: error.to_string(),
     })?;

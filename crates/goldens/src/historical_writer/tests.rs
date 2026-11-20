@@ -18,6 +18,7 @@
 //! Upstream: the capture validator. Downstream: the historical writer admission gate.
 
 use super::*;
+use crate::{GoldenSample, captured_xml::accept};
 
 #[test]
 fn all_observed_nonempty_exports_run_d1_to_d5() {

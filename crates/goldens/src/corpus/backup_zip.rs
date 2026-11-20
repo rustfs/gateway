@@ -220,16 +220,16 @@ mod tests {
     #[test]
     fn g_zip_001_old_archive_is_new_readable_and_byte_exact() {
         let report = prove_backup_compatibility().expect("old backup bytes remain new-readable");
-        // 206 samples every revision reads plus the two `BlockedEncryptionTypes` samples only the
+        // 215 samples every revision reads plus the two `BlockedEncryptionTypes` samples only the
         // rollback and candidate revisions write (rustfs/gateway#740).
-        assert_eq!(report.old_to_new_samples, 208);
+        assert_eq!(report.old_to_new_samples, 217);
         assert_eq!(report.family_count, 13);
     }
 
     #[test]
     fn g_zip_002_new_archive_is_old_readable_after_rollback() {
         let report = prove_backup_compatibility().expect("new backup bytes remain old-readable");
-        assert_eq!(report.new_to_old_samples, 206);
+        assert_eq!(report.new_to_old_samples, 215);
         assert!(report.archive_size > 0);
     }
 

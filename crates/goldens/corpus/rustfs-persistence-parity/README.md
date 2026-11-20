@@ -1,0 +1,7 @@
+# RustFS 1.0.5 and candidate persistence XML
+
+These thirteen files are the raw configuration fields extracted from the candidate's erasure-shard-backed `.metadata.bin` after the RustFS end-to-end test wrote each configuration through its real API. The test verified each field byte-for-byte against an isolated RustFS 1.0.5 release before export. The output includes runtime-produced elements such as the lifecycle update time. The samples use the original bytes, including the absence of a trailing newline.
+
+The capture ran on aarch64-apple-darwin using RustFS production sources at `868af666e9c393b182bc7b68f01b8e3c1fa8aa13` and the RustFS test `crates/e2e_test/src/persistence_parity.rs` with SHA-256 `36d695191a3563473b99b46c3003a60731fa88f68947c4e901e668717adb402e`. The candidate executable had SHA-256 `882875c2173cf3c1cd86747437ccf9670343850b01cceeccbb86a7646669afb1`. The release executable extracted from the official 1.0.5 Darwin arm64 archive had SHA-256 `57dce630c054cb6dc383aa89f4ba7e6faefeabe109795d2090c77e1f870ae3b7`, and the downloaded archive had SHA-256 `7c568946ab86df54bb3a7fffee66b4d05896219bec6629f0f7e6366aa69a26ac`.
+
+The RustFS `persistence_parity` test exports `candidate/*.xml` and `reference/*.xml` under `RUSTFS_PERSISTENCE_XML_DIR`. File digests are pinned in `src/persistence_parity.rs`. Run `cargo run -p rustfs-gateway-goldens --bin corpus-report -- --require-closure` to execute D1–D5 under the baseline, rollback and candidate oracle revisions. An already known digest still runs through every direction before it is counted as an alias.

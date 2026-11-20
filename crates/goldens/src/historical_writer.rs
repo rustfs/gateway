@@ -21,15 +21,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rustfs_gateway_types::compat::{
-    parse_s3s_accelerate, parse_s3s_bucket_encryption, parse_s3s_bucket_logging, parse_s3s_cors, parse_s3s_lifecycle,
-    parse_s3s_notification, parse_s3s_object_lock, parse_s3s_public_access_block, parse_s3s_replication,
-    parse_s3s_request_payment, parse_s3s_tagging, parse_s3s_versioning, parse_s3s_website,
-};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::{ConfigKind, CorpusVariant, Direction, FamilyCorpusEvidence, GoldenFailure, GoldenSample, SampleOrigin};
+use crate::{ConfigKind, Direction, FamilyCorpusEvidence, GoldenFailure, SampleOrigin};
 
 mod data;
 pub(crate) use data::REGISTRATIONS;
@@ -238,29 +233,6 @@ pub(crate) fn witness_set_matches(writer: &str, version: &str, digests: &[&str])
     Ok(actual.len() == digests.len() && actual == expected)
 }
 
-fn accept<T>(
-    sample: GoldenSample<T>,
-    check: fn(&GoldenSample<T>) -> Result<(), GoldenFailure>,
-    families: &mut [FamilyCorpusEvidence],
-) -> Result<bool, GoldenFailure> {
-    check(&sample)?;
-    let family = families
-        .iter_mut()
-        .find(|family| family.kind() == sample.kind)
-        .ok_or_else(|| input_failure("the observed family is absent from the corpus"))?;
-    if family
-        .source_a_registrations()
-        .iter()
-        .any(|(_, digest, accepted)| *accepted && *digest == sample.origin.sha256)
-    {
-        return Ok(false);
-    }
-    family
-        .push_accepted(&sample, &[CorpusVariant::Canonical])
-        .map_err(input_failure)?;
-    Ok(true)
-}
-
 /// Family charged with a failure of the capture manifest itself.
 ///
 /// Callers report failures per family, and a manifest failure (digest pin, schema, census) has no
@@ -287,29 +259,11 @@ pub(crate) fn append(families: &mut [FamilyCorpusEvidence]) -> Result<Vec<(Confi
                 version: capture.version.clone(),
                 sha256: configuration.raw_sha256.clone(),
             };
-            macro_rules! observe {
-                ($parse:ident, $check:ident) => {{
-                    let value = $parse(raw).map_err(|error| (kind, input_failure(error)))?.structure;
-                    accept(GoldenSample { kind, bytes: raw.to_vec(), value, origin,
-                        notes: format!("Historical writer raw export; API status {}, mc exit {:?}. A nonempty export is evaluated independently of request success.", configuration.api_status, configuration.mc_exit_code),
-                    }, crate::$check, families).map_err(|failure| (kind, failure))?
-                }};
-            }
-            let added = match kind {
-                ConfigKind::Cors => observe!(parse_s3s_cors, assert_cors_four_way),
-                ConfigKind::Lifecycle => observe!(parse_s3s_lifecycle, assert_lifecycle_four_way),
-                ConfigKind::Versioning => observe!(parse_s3s_versioning, assert_versioning_four_way),
-                ConfigKind::ObjectLock => observe!(parse_s3s_object_lock, assert_object_lock_four_way),
-                ConfigKind::BucketEncryption => observe!(parse_s3s_bucket_encryption, assert_bucket_encryption_four_way),
-                ConfigKind::Tagging => observe!(parse_s3s_tagging, assert_tagging_four_way),
-                ConfigKind::Website => observe!(parse_s3s_website, assert_website_four_way),
-                ConfigKind::Accelerate => observe!(parse_s3s_accelerate, assert_accelerate_four_way),
-                ConfigKind::RequestPayment => observe!(parse_s3s_request_payment, assert_request_payment_four_way),
-                ConfigKind::PublicAccessBlock => observe!(parse_s3s_public_access_block, assert_public_access_block_four_way),
-                ConfigKind::Logging => observe!(parse_s3s_bucket_logging, assert_bucket_logging_four_way),
-                ConfigKind::Replication => observe!(parse_s3s_replication, assert_replication_four_way),
-                ConfigKind::Notification => observe!(parse_s3s_notification, assert_notification_four_way),
-            };
+            let notes = format!(
+                "Historical writer raw export; API status {}, mc exit {:?}. A nonempty export is evaluated independently of request success.",
+                configuration.api_status, configuration.mc_exit_code
+            );
+            let added = crate::captured_xml::observe(kind, raw, origin, notes, families).map_err(|failure| (kind, failure))?;
             let (_, count) = counts
                 .iter_mut()
                 .find(|(family, _)| *family == kind)

@@ -35,7 +35,7 @@ fn sample_regression_commands_remain_successful() {
         .output()
         .expect("run four-way");
     assert!(four_way.status.success(), "{four_way:?}");
-    assert!(String::from_utf8_lossy(&four_way.stdout).starts_with("D1..D5 all clean, 206 samples across 13 families"));
+    assert!(String::from_utf8_lossy(&four_way.stdout).starts_with("D1..D5 all clean, 215 samples across 13 families"));
 }
 
 #[test]
@@ -121,9 +121,9 @@ fn ordinary_report_shows_evidence_per_oracle_revision() {
     // The baseline predates the two `BlockedEncryptionTypes` samples (rustfs/gateway#740), so it
     // widens them; the rollback and candidate revisions run them through D1-D5.
     for (oracle, samples, widened) in [
-        ("baseline s3s@9c4690d8", 206, 2),
-        ("rollback s3s@bdcb6259", 208, 0),
-        ("candidate s3s@0.17.0", 208, 0),
+        ("baseline s3s@9c4690d8", 215, 2),
+        ("rollback s3s@bdcb6259", 217, 0),
+        ("candidate s3s@0.17.0", 217, 0),
     ] {
         let line = text
             .lines()
