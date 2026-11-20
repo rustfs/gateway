@@ -1,4 +1,8 @@
 # Exact profile layouts; unmapped references retain their default golden.
-# Reference capture: https://github.com/rustfs/gateway/issues/1436#issuecomment-6117268048
+# ACL reference capture: https://github.com/rustfs/gateway/issues/1436#issuecomment-6117268048
 [rustfs]
 "goldens/c-acl-0001.xml" = "goldens/rustfs/c-acl-0001.xml"
+
+# Complete RustFS 1.0.5 responses, also served by the native backend and compat-sut.
+"goldens/c-bucketconfig-0023.xml" = "goldens/rustfs/c-bucketconfig-0023.xml"
+"goldens/c-location-0002.xml" = "goldens/rustfs/c-location-0002.xml"
