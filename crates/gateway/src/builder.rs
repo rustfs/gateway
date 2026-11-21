@@ -186,12 +186,6 @@ impl core::fmt::Debug for ServiceBuilder {
     }
 }
 
-impl Default for ServiceBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ServiceBuilder {
     /// A builder over the generated route table with nothing registered and no extension point.
     ///

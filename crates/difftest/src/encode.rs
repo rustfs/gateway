@@ -253,7 +253,7 @@ impl EncodeDiff {
 }
 
 /// The gateway-side encoder defects the negative controls inject, applied to the gateway's answer.
-fn break_gateway_answer(fault: &Fault, answer: &mut WireAnswer) {
+pub(crate) fn break_gateway_answer(fault: &Fault, answer: &mut WireAnswer) {
     let Ok(mut text) = String::from_utf8(answer.body.clone()) else {
         return;
     };
@@ -280,6 +280,10 @@ fn break_gateway_answer(fault: &Fault, answer: &mut WireAnswer) {
             for (name, value) in &mut answer.headers {
                 if name == "x-amz-request-id" {
                     value.make_ascii_lowercase();
+                    // Digit-only identifiers need a lowercase letter to become malformed.
+                    if let Some(first) = value.first_mut() {
+                        *first = b'a';
+                    }
                 }
             }
         }

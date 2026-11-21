@@ -22,16 +22,21 @@ use std::time::Duration;
 /// A runnable yield branch also prevents Tokio's paused clock from auto-advancing on idle I/O.
 pub(crate) async fn with_header_clock_frozen<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::time::pause();
+    let result = poll_without_auto_advance(future).await;
+    tokio::time::resume();
+    result
+}
+
+/// Poll socket work under an already-paused clock, leaving clock advancement to the caller.
+pub(crate) async fn poll_without_auto_advance<T>(future: impl std::future::Future<Output = T>) -> T {
     let started = std::time::Instant::now();
     tokio::pin!(future);
-    let result = loop {
+    loop {
         tokio::select! {
             result = &mut future => break result,
             () = tokio::task::yield_now() => {
                 assert!(started.elapsed() < Duration::from_secs(10), "socket admission or healthy request stalled");
             }
         }
-    };
-    tokio::time::resume();
-    result
+    }
 }
