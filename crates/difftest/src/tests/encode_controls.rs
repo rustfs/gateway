@@ -23,7 +23,7 @@
 //! Upstream: the samples and the encode faults. Downstream: none.
 
 use crate::decode::Fault;
-use crate::encode::{WireAnswer, compare, respell_first_empty_element, swap_first_two_children};
+use crate::encode::{WireAnswer, break_gateway_answer, compare, respell_first_empty_element, swap_first_two_children};
 use crate::normalize::{Format, Side};
 use crate::{Differ, EncodeDiff, Item, KnownDiffs};
 
@@ -130,6 +130,24 @@ fn a_malformed_request_id_fails_its_format_behind_the_placeholder() {
         .find(|assertion| assertion.field == "header x-amz-request-id")
         .expect("the gateway stamps a request id");
     assert!(held.holds && held.side == Side::Gateway && held.value.len() == 16);
+}
+
+/// Negative — the fault makes every valid request id malformed while preserving its length.
+#[test]
+fn a_request_id_fault_breaks_digit_only_and_letter_ids() {
+    for request_id in ["0000000000000000", "0123456789012345", "ABCDEFABCDEFABCD", "0123456789ABCDEF"] {
+        let mut gateway = answer(&[("x-amz-request-id", request_id)], b"");
+        let mut oracle = gateway.clone();
+        break_gateway_answer(&Fault::GatewayRequestIdMalformed, &mut gateway);
+        assert_eq!(gateway.headers[0].1.len(), request_id.len(), "request id length: {request_id}");
+        let diff = compare("PutObject".to_owned(), false, &mut gateway, &mut oracle);
+        assert_eq!(
+            unregistered(&diff),
+            [Item::Format("header x-amz-request-id".to_owned())],
+            "request id {request_id}: {:?}",
+            diff.assertions
+        );
+    }
 }
 
 /// Positive (a-df-0005) — a streaming output carries the deterministic placeholder and both stacks

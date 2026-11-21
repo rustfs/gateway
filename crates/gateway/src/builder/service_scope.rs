@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Construction of an independent service with explicit dialect routes.
+//! Construction of default and explicit signing-service scopes.
 //!
 //! Responsible for: selecting the core router's immutable signing-service scope.
 //! NOT responsible for: listener dispatch, authentication, or protocol codecs.
@@ -22,6 +22,12 @@ use rustfs_gateway_core::RouterBuilder;
 use rustfs_gateway_sig::SigService;
 
 use super::ServiceBuilder;
+
+impl Default for ServiceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ServiceBuilder {
     /// Starts an independent signing service with no generated S3 route table.
