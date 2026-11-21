@@ -16,9 +16,8 @@
 //!
 //! Responsible for: [`ServiceBuilder`] — the only supported way to build an [`S3Service`] — and
 //! the assembly-time checks whose failure is an [`AssemblyError`].
-//! NOT responsible for: registration rules, which are
-//! `rustfs_gateway_core::RouterBuilder::build`'s and are surfaced unchanged; route conflicts,
-//! which the route table decides; or anything per request (`crate::service`).
+//! NOT responsible for: registration rules (`rustfs_gateway_core::RouterBuilder::build`), route
+//! conflicts decided by the route table, or per-request behavior (`crate::service`).
 //! Upstream: `rustfs-gateway-core`, `crate::ext`. Downstream: `crate::service`.
 //!
 //! # Why every refusal comes out of `build` and none out of the setters
@@ -90,6 +89,7 @@ pub(crate) mod plaintext_customer_keys;
 mod post_object_handler;
 mod rustfs_profile;
 mod secret_scope;
+mod service_scope;
 pub(crate) mod sigv4_header_guard;
 pub(crate) mod sse_refusals;
 pub(crate) mod version_actions;
@@ -183,12 +183,6 @@ impl core::fmt::Debug for ServiceBuilder {
             .field("stage_filters", &self.filters.len())
             .field("op_layers", &self.op_layers.values().map(Vec::len).sum::<usize>())
             .finish_non_exhaustive()
-    }
-}
-
-impl Default for ServiceBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -671,6 +665,7 @@ impl ServiceBuilder {
         });
         Ok(S3Service::from_inner(Inner {
             floor: self.floor,
+            signing_service: runtime.routing.router.signing_service(),
             limits: self.limits,
             names: self.names,
             config: self.config,

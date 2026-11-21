@@ -40,6 +40,7 @@ use core::fmt;
 
 use zeroize::Zeroizing;
 
+use crate::scheme::SigService;
 use crate::secret::SessionToken;
 use crate::signature::ct_bytes_equal;
 use crate::verdict::AuthError;
@@ -213,6 +214,21 @@ impl<'q> RawQuery<'q> {
     ///   which one the operation reads, and "the signature covered both, the handler read one" is
     ///   the shape of a parameter-smuggling bypass (s3s#176).
     pub fn canonical(&self, exclusion: QueryExclusion) -> Result<String, AuthError> {
+        self.canonical_for_service(exclusion, SigService::S3)
+    }
+
+    /// Rebuilds the canonical query with this signing service's list-valued parameters.
+    ///
+    /// Only [`SigService::S3Vectors`] permits repeated occurrences of the exact percent-decoded
+    /// name `tagKeys`. Every value, including repeated values, remains in the encoded tuple sort.
+    /// Every other retained name must be unique; [`QueryExclusion`] keeps its existing behavior.
+    /// A verifier supplies its routed service after checking the credential scope. This method
+    /// does not authenticate a scope or validate an operation's parameter values.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Self::canonical`], except for the stated `tagKeys` list permission.
+    pub fn canonical_for_service(&self, exclusion: QueryExclusion, service: SigService) -> Result<String, AuthError> {
         if self.raw.is_empty() {
             return Ok(String::new());
         }
@@ -238,7 +254,8 @@ impl<'q> RawQuery<'q> {
                 Some(value) => percent_encode(&percent_decode(value)?),
                 None => String::new(),
             };
-            if pairs.iter().any(|(existing, _)| *existing == key) {
+            let list_value = service == SigService::S3Vectors && decoded_key == b"tagKeys";
+            if !list_value && pairs.iter().any(|(existing, _)| *existing == key) {
                 return Err(AuthError::AuthorizationHeaderMalformed);
             }
             pairs.push((key, value));

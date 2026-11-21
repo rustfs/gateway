@@ -44,6 +44,7 @@
 //! implementation of a pre-authentication security decision is only allowed to exist while
 //! something is continuously proving it agrees with the implementation a person can read.
 
+use rustfs_gateway_sig::SigService;
 use std::sync::{Arc, OnceLock};
 
 use crate::error::PreAuthError;
@@ -141,6 +142,7 @@ pub struct Router {
     claims: ClaimedTable,
     registry: Registry,
     selection: Selection,
+    signing_service: Option<SigService>,
 }
 
 impl Router {
@@ -169,7 +171,21 @@ impl Router {
             claims,
             registry,
             selection: Selection::Table,
+            signing_service: None,
         })
+    }
+
+    /// The independent signing service, or `None` for the ordinary S3 routing assembly.
+    ///
+    /// Hosts use this immutable scope to reject registry updates that change service ownership.
+    #[must_use]
+    pub const fn signing_service(&self) -> Option<SigService> {
+        self.signing_service
+    }
+
+    pub(crate) fn with_signing_service(mut self, service: Option<SigService>) -> Self {
+        self.signing_service = service;
+        self
     }
 
     /// The same router, choosing among the operations a request outside every claim names by
@@ -219,6 +235,7 @@ impl Router {
             claims: ClaimedTable::default(),
             registry,
             selection: Selection::Table,
+            signing_service: None,
         })
     }
 

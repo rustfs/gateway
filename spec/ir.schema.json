@@ -268,7 +268,7 @@
         },
         "presigned_allowed": { "type": "boolean" },
         "service": {
-          "enum": ["s3", "sts", "s3express", "s3-object-lambda", "s3-outposts"],
+          "enum": ["s3", "sts", "s3express", "s3-object-lambda", "s3-outposts", "s3vectors"],
           "description": "SigV4 credential-scope service. Cross-checked against the routed operation so an sts-scoped signature cannot reach an s3 operation."
         }
       }

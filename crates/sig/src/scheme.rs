@@ -152,6 +152,8 @@ pub enum SigService {
     S3ObjectLambda,
     /// `s3-outposts`
     S3Outposts,
+    /// `s3vectors`
+    S3Vectors,
 }
 
 impl SigService {
@@ -170,13 +172,14 @@ impl SigService {
             "s3express" => Ok(Self::S3Express),
             "s3-object-lambda" => Ok(Self::S3ObjectLambda),
             "s3-outposts" => Ok(Self::S3Outposts),
+            "s3vectors" => Ok(Self::S3Vectors),
             _ => Err(SigParseError::UnknownService),
         }
     }
 
     /// The wire spelling, as it appears in the credential scope.
     ///
-    /// These are the same five values as the IR's `service` enum
+    /// These are the same values as the IR's `service` enum
     /// (`spec/ir.schema.json`), and the cross-check in P2-04 compares the two directly.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
@@ -186,6 +189,7 @@ impl SigService {
             Self::S3Express => "s3express",
             Self::S3ObjectLambda => "s3-object-lambda",
             Self::S3Outposts => "s3-outposts",
+            Self::S3Vectors => "s3vectors",
         }
     }
 }

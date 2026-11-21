@@ -67,10 +67,12 @@ impl S3Service {
     /// # Errors
     ///
     /// Returns [`AssemblyError`] when the candidate registry is empty, has an unattached operation
-    /// layer, contains conflicting routes, or cannot build a matching codec/handler dispatch table.
+    /// layer, contains conflicting routes, changes the signing-service scope, or cannot build a
+    /// matching codec/handler dispatch table.
     /// The last-good generation remains installed on every error.
     pub fn replace_registry(&self, builder: ServiceBuilder) -> Result<(), AssemblyError> {
         let routing = Arc::new(builder.into_routing()?);
+        self.check_service_scope(&routing.router)?;
         self.inner.config.rcu(|current| {
             Arc::new(AssemblySnapshot {
                 config: Arc::clone(&current.config),
@@ -96,10 +98,21 @@ impl S3Service {
     ///
     /// # Errors
     ///
-    /// Returns [`AssemblyError`] for an invalid candidate, preserving the installed assembly.
+    /// Returns [`AssemblyError`] for an invalid candidate or a changed signing-service scope,
+    /// preserving the installed assembly.
     pub fn replace_assembly(&self, update: AssemblyUpdate) -> Result<(), AssemblyError> {
         let snapshot = update.into_snapshot()?;
+        self.check_service_scope(&snapshot.runtime().routing.router)?;
         self.inner.config.store(Arc::new(snapshot));
+        Ok(())
+    }
+
+    fn check_service_scope(&self, replacement: &rustfs_gateway_core::Router) -> Result<(), AssemblyError> {
+        let expected = self.inner.signing_service;
+        let actual = replacement.signing_service();
+        if expected != actual {
+            return Err(rustfs_gateway_core::BuildError::ServiceScopeChanged { expected, actual }.into());
+        }
         Ok(())
     }
 }

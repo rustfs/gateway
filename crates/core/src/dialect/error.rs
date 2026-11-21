@@ -25,10 +25,25 @@ use std::fmt;
 use crate::op::ResourceShape;
 use crate::registry::RegistryError;
 use crate::route::{ClaimRejection, FormClaimRejection, HostClass, TemplateRejection};
+use rustfs_gateway_sig::SigService;
 
 /// Why a dialect could not be assembled. Every variant is a start-up failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DialectError {
+    /// An independent service's operation declares a different signing service.
+    SigningServiceMismatch {
+        /// The operation.
+        name: &'static str,
+        /// The service selected by the dialect assembly.
+        expected: SigService,
+        /// The service declared by the operation's floor.
+        actual: SigService,
+    },
+    /// An independent service's operation permits authentication without its SigV4 scope.
+    ServiceRequiresSigV4 {
+        /// The operation.
+        name: &'static str,
+    },
     /// The operation failed one of the rules every registration passes.
     ///
     /// Reached from here as well as from [`crate::registry::Registry::register_handler`], so that a
@@ -259,6 +274,8 @@ impl DialectError {
             Self::Registration(error) => Some(error.operation()),
             Self::MalformedVendor { .. } => None,
             Self::WrongVendor { name, .. }
+            | Self::SigningServiceMismatch { name, .. }
+            | Self::ServiceRequiresSigV4 { name }
             | Self::NotInOverlay { name }
             | Self::DeclaredNowhere { name }
             | Self::DeclaredTwice { name }
@@ -292,6 +309,15 @@ impl DialectError {
 impl fmt::Display for DialectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SigningServiceMismatch { name, expected, actual } => write!(
+                f,
+                "{name} uses signing service {}, but this dialect requires {}",
+                actual.as_str(),
+                expected.as_str()
+            ),
+            Self::ServiceRequiresSigV4 { name } => {
+                write!(f, "{name} must require SigV4 under every policy in an independent service")
+            }
             Self::Registration(error) => write!(f, "{error}"),
             Self::MalformedVendor { dialect, vendor } => write!(
                 f,

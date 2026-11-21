@@ -20,6 +20,7 @@
 
 #![allow(clippy::expect_used)]
 
+use futures_util::FutureExt;
 use rustfs_gateway::{
     Authorizer, AuthzRequest, Decision, DenyAllAuthorizer, Identity, PolicySnapshot, RequestContext, ResourceShape, TargetOrigin,
     allow_when, decide_with,
@@ -89,4 +90,60 @@ async fn n_the_closure_adapters_are_not_one_directional() {
         three.authorize_route(&context, &request(None, ResourceShape::Service)).await,
         Decision::Indeterminate
     );
+}
+
+/// A fallible closure route keeps the legacy allocation cost for all three decisions.
+#[test]
+fn n_fallible_closure_routes_add_no_allocation() {
+    const ENV: &str = "RUSTFS_GATEWAY_AUTHORIZER_ALLOCATION_PROBE";
+    const SENTINEL: &str = "rustfs-gateway authorizer allocation probe: ";
+    const TEST: &str = "authz_implementations::n_fallible_closure_routes_add_no_allocation";
+    const SHORT: usize = 16;
+    const LONG: usize = 144;
+    if let Some(counts) = crate::support::allocations::requested_sizes(ENV) {
+        let authorizer = decide_with(|request| match request.resource {
+            ResourceShape::Service => Decision::Allow,
+            ResourceShape::Bucket => Decision::Deny,
+            ResourceShape::Object => Decision::Indeterminate,
+        });
+        let snapshot = PolicySnapshot::empty();
+        let context = RequestContext::new(rustfs_gateway::RequestNow::from_unix_seconds(0), &snapshot);
+        for count in counts {
+            let mut blocks = [0; 2];
+            for (fallible, total) in [false, true].into_iter().zip(&mut blocks) {
+                let profiler = dhat::Profiler::builder().testing().build();
+                for _ in 0..count {
+                    for (shape, expected) in [
+                        (ResourceShape::Service, Decision::Allow),
+                        (ResourceShape::Bucket, Decision::Deny),
+                        (ResourceShape::Object, Decision::Indeterminate),
+                    ] {
+                        let question = request(None, shape);
+                        let decision = if fallible {
+                            authorizer
+                                .authorize_route_result(&context, &question)
+                                .now_or_never()
+                                .expect("a synchronous decision")
+                                .expect("a closure decision succeeds")
+                        } else {
+                            authorizer
+                                .authorize_route(&context, &question)
+                                .now_or_never()
+                                .expect("a synchronous decision")
+                        };
+                        assert_eq!(decision, expected);
+                    }
+                }
+                *total = dhat::HeapStats::get().total_blocks;
+                drop(profiler);
+            }
+            crate::support::allocations::report(SENTINEL, &blocks);
+        }
+        return;
+    }
+    let rows = crate::support::allocations::measure(TEST, ENV, SENTINEL, &[SHORT, LONG], 2);
+    let legacy = rows[1][0] - rows[0][0];
+    let fallible = rows[1][1] - rows[0][1];
+    assert!(legacy >= (LONG - SHORT) as u64, "the allocator must observe the legacy route futures");
+    assert_eq!(fallible, legacy, "fallible closure routes must keep one future per decision");
 }

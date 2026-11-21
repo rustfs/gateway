@@ -121,7 +121,7 @@ use rustfs_gateway_core::{
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{
-    Admission, AuthError, PayloadMode, RawQuery, RequestNow, SecurityFloor, Verdict, WireView, detect_credentials,
+    Admission, AuthError, PayloadMode, RawQuery, RequestNow, SecurityFloor, SigService, Verdict, WireView, detect_credentials,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
@@ -163,13 +163,13 @@ use self::outcome::{LegacyCorsDisposition, Outcome};
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
-/// A constant because both signing families reach it and they must be indistinguishable: which
-/// algorithm the credential store fell over under is not a fact a caller needs.
+/// Both signing families share this constant so credential-store failures cannot reveal the signing algorithm.
 const UNAUTHENTICATED: &str = "the request could not be authenticated";
 
 /// Everything an assembled service holds, behind one `Arc` so a clone is one refcount bump.
 pub(crate) struct Inner {
     pub(crate) floor: SecurityFloor,
+    pub(crate) signing_service: Option<SigService>,
     pub(crate) limits: Limits,
     pub(crate) names: NamePolicy,
     pub(crate) config: ConfigStore,
@@ -843,7 +843,7 @@ impl S3Service {
                     // chain is verified with the same key and seed the request signature was, and
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                     .with_chunk_sink(&chunk_sink)
-                    .with_sts_body_reader(routed_body.sts_body_reader(), config.config().request_body_deadlines());
+                    .with_sts_body_reader(routed_body.sts_body_reader(), operation, config.config());
                     let result = self.inner.authenticator.authenticate(&question).await;
                     signed_body = question.signs_its_body();
                     let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
