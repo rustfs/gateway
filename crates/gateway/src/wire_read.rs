@@ -55,6 +55,41 @@ use sha2::{Digest, Sha256};
 use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
 use crate::render::S3Error;
 
+/// A host timer expired while awaiting bytes from the client request body.
+///
+/// A transport adapter can return this error or include it in its error's source chain
+/// to preserve the S3 `RequestTimeout` response.
+#[derive(Debug)]
+pub struct HostBodyReadTimeout;
+
+impl core::fmt::Display for HostBodyReadTimeout {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("client body read timed out")
+    }
+}
+
+impl std::error::Error for HostBodyReadTimeout {}
+
+pub(crate) fn transport_refusal(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, progress: &WireProgress) -> S3Error {
+    let boxed = error.into();
+    let mut current: &(dyn std::error::Error + 'static) = boxed.as_ref();
+    // A transport owns its error chain, including whether a source points back to itself.
+    for _ in 0..32 {
+        if current.is::<HostBodyReadTimeout>() {
+            return crate::gate::body_idle_timeout(progress.request_body_unfinished());
+        }
+        // io::Error::source skips the wrapped error itself.
+        let next = current
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .map(|source| source as &(dyn std::error::Error + 'static))
+            .or_else(|| current.source());
+        let Some(source) = next else { break };
+        current = source;
+    }
+    crate::gate::incomplete()
+}
+
 /// How many frames carrying no payload may arrive between two that carry some.
 ///
 /// Two frame shapes carry nothing: a trailer section, which [`http_body::Frame::into_data`]
@@ -240,7 +275,7 @@ impl WireProgress {
 /// line is refused rather than buffered — which is the whole difference between a ceiling and a
 /// report about a buffer that already exists.
 pub(crate) struct WireFrames<B: http_body::Body> {
-    refusal: fn(B::Error) -> S3Error,
+    refusal: fn(B::Error, &WireProgress) -> S3Error,
     body: Pin<Box<B>>,
     progress: WireProgress,
     ceilings: BodyCeilings,
@@ -263,9 +298,12 @@ where
     B: http_body::Body,
 {
     /// Opens the read. Nothing is polled until [`Self::poll_next`] is.
-    pub(crate) fn new(body: B, progress: WireProgress, ceilings: BodyCeilings, timeouts: BodyTimeouts) -> Self {
+    pub(crate) fn new(body: B, progress: WireProgress, ceilings: BodyCeilings, timeouts: BodyTimeouts) -> Self
+    where
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
         Self {
-            refusal: |_| crate::gate::incomplete(),
+            refusal: transport_refusal,
             body: Box::pin(body),
             progress,
             ceilings,
@@ -277,7 +315,7 @@ where
     }
 
     /// Keeps a local protocol adapter's typed refusal; transport readers use the default.
-    pub(crate) fn with_refusal(mut self, refusal: fn(B::Error) -> S3Error) -> Self {
+    pub(crate) fn with_refusal(mut self, refusal: fn(B::Error, &WireProgress) -> S3Error) -> Self {
         self.refusal = refusal;
         self
     }
@@ -416,20 +454,19 @@ where
         }
     }
 
-    /// A transport error is a body that did not arrive as it was framed, and nothing more
-    /// specific: the transport's own reason is not a sentence to put on the wire.
-    /// A local protocol adapter may instead supply an explicit typed refusal converter.
+    /// A failed frame is not evidence of EOF, even if its adapter has fused after the failure.
+    /// The refusal converter determines the protocol response without exposing the transport's text.
     fn settle(
         &mut self,
         frame: Option<Result<http_body::Frame<B::Data>, B::Error>>,
     ) -> Result<Option<http_body::Frame<B::Data>>, S3Error> {
-        if frame.is_some() && self.body.as_ref().get_ref().is_end_stream() {
+        if matches!(frame, Some(Ok(_))) && self.body.as_ref().get_ref().is_end_stream() {
             self.progress.record_eof();
         }
         match frame {
             None => Ok(None),
             Some(Ok(frame)) => Ok(Some(frame)),
-            Some(Err(error)) => Err((self.refusal)(error)),
+            Some(Err(error)) => Err((self.refusal)(error, &self.progress)),
         }
     }
 }
@@ -509,7 +546,7 @@ where
 }
 
 #[cfg(test)]
-mod lifted_deadline_tests {
+mod tests {
     use super::*;
 
     /// A body whose next frame never arrives.
@@ -534,6 +571,20 @@ mod lifted_deadline_tests {
             BodyCeilings::streaming(None),
             timeouts,
         )
+    }
+
+    #[test]
+    fn a_host_timer_fusing_its_body_does_not_prove_wire_eof() {
+        use http_body_util::{BodyExt as _, Empty};
+
+        let fused = Empty::<Bytes>::new().map_err(|never| -> HostBodyReadTimeout { match never {} });
+        let mut frames = WireFrames::new(
+            fused,
+            WireProgress::new(BodyDigestObligation::None, false),
+            BodyCeilings::streaming(None),
+            BodyTimeouts::S3,
+        );
+        assert!(matches!(frames.settle(Some(Err(HostBodyReadTimeout))), Err(refusal) if refusal.body_unfinished.is_some()));
     }
 
     /// Negative — while a frame is awaited, a lifted idle deadline arms no timer, on the first

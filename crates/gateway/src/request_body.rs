@@ -40,7 +40,7 @@ use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
 use crate::integrity::{Integrity, IntegrityCodes};
 use crate::render::S3Error;
 use crate::request_deadline::armed;
-use crate::wire_read::{WireFrames, WireProgress, WireReader};
+use crate::wire_read::{WireFrames, WireProgress, WireReader, transport_refusal};
 
 const DELIVERY_BYTES: usize = 64 * 1024;
 
@@ -70,9 +70,15 @@ impl StreamingRead {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        Self::new_with_refusal(body, (declared_length, object_ceiling), body_plan, ingest, digest, integrity, |_| {
-            crate::gate::incomplete()
-        })
+        Self::new_with_refusal(
+            body,
+            (declared_length, object_ceiling),
+            body_plan,
+            ingest,
+            digest,
+            integrity,
+            transport_refusal,
+        )
     }
 
     /// Preserves a local body adapter's typed refusal outside the protocol-neutral stream.
@@ -83,7 +89,7 @@ impl StreamingRead {
         ingest: Option<ChunkIngest>,
         digest: BodyDigestObligation,
         integrity: impl Into<Integrity>,
-        refusal: fn(B::Error) -> S3Error,
+        refusal: fn(B::Error, &WireProgress) -> S3Error,
     ) -> Result<Self, S3Error>
     where
         B: http_body::Body + Send + 'static,

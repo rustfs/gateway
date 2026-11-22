@@ -486,7 +486,7 @@ where
             None,
             BodyDigestObligation::None,
             BodyIntegrity::NONE,
-            PostBodyError::into_refusal,
+            |error, _| error.into_refusal(),
         )?;
         let (stream, monitor) = opened.into_parts();
         Ok((

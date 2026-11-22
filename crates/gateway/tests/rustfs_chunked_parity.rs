@@ -220,6 +220,31 @@ async fn answer(service: &S3Service, request: http::Request<Bytes>) -> (u16, Str
     (collected.status().as_u16(), String::from_utf8_lossy(collected.body()).into_owned())
 }
 
+/// Only a timeout marked by the host's client-body timer has the S3 request-timeout contract.
+#[tokio::test]
+async fn host_body_read_timeout_is_distinct_from_transport_failures() {
+    use std::io;
+
+    for target in [PUT, PART] {
+        for (error, expected) in [
+            (io::Error::other(rustfs_gateway::HostBodyReadTimeout), "RequestTimeout"),
+            (io::Error::new(io::ErrorKind::TimedOut, "client body read timed out"), "IncompleteBody"),
+            (io::Error::new(io::ErrorKind::UnexpectedEof, "RequestTimeout"), "IncompleteBody"),
+        ] {
+            let (service, stored) = assembled(true);
+            let request = upload(target, Mode::Signed, OBJECT.len(), |chain| signed_body(chain, false));
+            let (parts, bytes) = request.into_parts();
+            let frames = [Ok(http_body::Frame::data(bytes.slice(..1))), Err(error)];
+            let body = http_body_util::StreamBody::new(futures_util::stream::iter(frames));
+            let response = service.call(http::Request::from_parts(parts, body)).await;
+            let collected = rustfs_gateway::collect(response).await.expect("a gateway error response");
+            assert_eq!(collected.status(), http::StatusCode::BAD_REQUEST);
+            assert_eq!(code(std::str::from_utf8(collected.body()).unwrap()), Some(expected));
+            assert!(stored.0.lock().unwrap().is_empty());
+        }
+    }
+}
+
 // ── signed trailers after an empty line ────────────────────────────────────────────────────
 
 /// Positive — the signed-trailer upload RustFS's suite sends, with an empty line between the

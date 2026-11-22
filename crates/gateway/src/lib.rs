@@ -197,6 +197,7 @@ pub use crate::trace::{
 pub use crate::transport::Transport;
 pub use crate::unread_body::UnreadBodyDrain;
 pub use crate::wire::{OrderedHeaders, WireResponse, collect};
+pub use crate::wire_read::HostBodyReadTimeout;
 pub use rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES;
 pub use rustfs_gateway_macros::handlers;
 #[cfg(feature = "server")]
