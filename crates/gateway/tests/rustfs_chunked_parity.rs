@@ -226,11 +226,17 @@ async fn host_body_read_timeout_is_distinct_from_transport_failures() {
     use std::io;
 
     for target in [PUT, PART] {
-        for (error, expected) in [
-            (io::Error::other(rustfs_gateway::HostBodyReadTimeout), "RequestTimeout"),
-            (io::Error::new(io::ErrorKind::TimedOut, "client body read timed out"), "IncompleteBody"),
-            (io::Error::new(io::ErrorKind::UnexpectedEof, "RequestTimeout"), "IncompleteBody"),
-        ] {
+        type BodyError = Box<dyn std::error::Error + Send + Sync>;
+        let cases: [(BodyError, &str); 4] = [
+            (rustfs_gateway::HostBodyReadTimeout.into(), "RequestTimeout"),
+            (io::Error::other(rustfs_gateway::HostBodyReadTimeout).into(), "RequestTimeout"),
+            (
+                io::Error::new(io::ErrorKind::TimedOut, "client body read timed out").into(),
+                "IncompleteBody",
+            ),
+            (io::Error::new(io::ErrorKind::UnexpectedEof, "RequestTimeout").into(), "IncompleteBody"),
+        ];
+        for (error, expected) in cases {
             let (service, stored) = assembled(true);
             let request = upload(target, Mode::Signed, OBJECT.len(), |chain| signed_body(chain, false));
             let (parts, bytes) = request.into_parts();

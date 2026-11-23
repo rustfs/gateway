@@ -68,23 +68,33 @@ impl core::fmt::Display for HostBodyReadTimeout {
     }
 }
 
-impl std::error::Error for HostBodyReadTimeout {}
+impl std::error::Error for HostBodyReadTimeout {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // io::Error forwards its wrapped error's source, skipping the wrapped error itself.
+        Some(&ClientBodyReadDeadlineElapsed)
+    }
+}
+
+#[derive(Debug)]
+struct ClientBodyReadDeadlineElapsed;
+
+impl core::fmt::Display for ClientBodyReadDeadlineElapsed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("client body read deadline elapsed")
+    }
+}
+
+impl std::error::Error for ClientBodyReadDeadlineElapsed {}
 
 pub(crate) fn transport_refusal(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, progress: &WireProgress) -> S3Error {
     let boxed = error.into();
     let mut current: &(dyn std::error::Error + 'static) = boxed.as_ref();
     // A transport owns its error chain, including whether a source points back to itself.
     for _ in 0..32 {
-        if current.is::<HostBodyReadTimeout>() {
+        if current.is::<HostBodyReadTimeout>() || current.is::<ClientBodyReadDeadlineElapsed>() {
             return crate::gate::body_idle_timeout(progress.request_body_unfinished());
         }
-        // io::Error::source skips the wrapped error itself.
-        let next = current
-            .downcast_ref::<std::io::Error>()
-            .and_then(std::io::Error::get_ref)
-            .map(|source| source as &(dyn std::error::Error + 'static))
-            .or_else(|| current.source());
-        let Some(source) = next else { break };
+        let Some(source) = current.source() else { break };
         current = source;
     }
     crate::gate::incomplete()
