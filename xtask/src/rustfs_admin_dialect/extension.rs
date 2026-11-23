@@ -320,12 +320,16 @@ impl Extended {
             .chain(self.requires.iter().map(|(key, _, read)| (key.as_str(), read)))
     }
 
+    fn render_rules(&self, separator: &str, render: fn(&Discriminator, &str) -> String) -> String {
+        self.rules()
+            .map(|(key, rule)| render(rule, key))
+            .collect::<Vec<_>>()
+            .join(separator)
+    }
+
     /// Every rule, as a reader sees it.
     fn phrase(&self) -> String {
-        self.rules()
-            .map(|(key, read)| read.phrase(key))
-            .collect::<Vec<_>>()
-            .join(", and ")
+        self.render_rules(", and ", Discriminator::phrase)
     }
 
     /// The route table's rendering of the shape this row advertises.
@@ -433,31 +437,21 @@ impl Extended {
             router_url,
             ..
         } = self;
-        let query = self
-            .rules()
-            .map(|(key, read)| match read {
-                Discriminator::Present => format!("{key}=…"),
-                Discriminator::Equals(value) if value.is_empty() => key.to_owned(),
-                Discriminator::Equals(value) => format!("{key}={value}"),
-            })
-            .collect::<Vec<_>>()
-            .join("&");
+        let query = self.render_rules("&", |read, key| match read {
+            Discriminator::Present => format!("{key}=…"),
+            Discriminator::Equals(value) if value.is_empty() => key.to_owned(),
+            Discriminator::Equals(value) => format!("{key}={value}"),
+        });
         let request = format!("{method} {}?{query}", self.path_shape());
         let selector = format!(
             "Predicate::Method(http::Method::{method}), Predicate::Target(TargetKind::{target:?}), {}",
-            self.rules()
-                .map(|(key, read)| read.predicate(key))
-                .collect::<Vec<_>>()
-                .join(", "),
+            self.render_rules(", ", Discriminator::predicate),
             target = self.target
         );
         let rendered = format!(
             "Method({method}) ∧ Target({}) ∧ {}",
             self.target.as_str(),
-            self.rules()
-                .map(|(key, read)| read.rendered(key))
-                .collect::<Vec<_>>()
-                .join(" ∧ ")
+            self.render_rules(" ∧ ", Discriminator::rendered)
         );
         let listing = self.claimer == Claimer::MetadataRoute;
         let on = match self.target {
