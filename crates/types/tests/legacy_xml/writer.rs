@@ -17,11 +17,10 @@
 //! Responsible for: comparing legacy and Gateway writer bytes, typed readback, and input preservation.
 //! NOT responsible for: request-body policy or persistence families outside Acceleration and Tagging.
 //! Upstream: the pinned RustFS s3s oracle and Gateway codecs. Downstream: persistence migration regressions.
-#![cfg(feature = "compat-s3s-rustfs")]
 
 use rustfs_gateway_types::cors_tagging::{PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
 use rustfs_gateway_types::persistence::{PersistedAccelerateConfiguration, parse_accelerate, serialize_accelerate};
-use s3s_rustfs::xml::{Deserialize, Deserializer, Serialize, Serializer};
+use s3s_wire_oracle::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
 fn write_old(value: &impl Serialize) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
@@ -33,7 +32,7 @@ fn write_old(value: &impl Serialize) -> Result<Vec<u8>, String> {
 
 fn read_old_accelerate(bytes: &[u8]) -> Result<PersistedAccelerateConfiguration, String> {
     let mut reader = Deserializer::new(bytes);
-    let value = s3s_rustfs::dto::AccelerateConfiguration::deserialize(&mut reader).map_err(|error| format!("{error:?}"))?;
+    let value = s3s_wire_oracle::dto::AccelerateConfiguration::deserialize(&mut reader).map_err(|error| format!("{error:?}"))?;
     reader.expect_eof().map_err(|error| format!("{error:?}"))?;
     Ok(PersistedAccelerateConfiguration {
         status: value.status.map(|status| status.as_str().to_owned()),
@@ -42,7 +41,7 @@ fn read_old_accelerate(bytes: &[u8]) -> Result<PersistedAccelerateConfiguration,
 
 fn read_old_tagging(bytes: &[u8]) -> Result<PersistedTagging, String> {
     let mut reader = Deserializer::new(bytes);
-    let value = s3s_rustfs::dto::Tagging::deserialize(&mut reader).map_err(|error| format!("{error:?}"))?;
+    let value = s3s_wire_oracle::dto::Tagging::deserialize(&mut reader).map_err(|error| format!("{error:?}"))?;
     reader.expect_eof().map_err(|error| format!("{error:?}"))?;
     Ok(PersistedTagging {
         tag_set: value
@@ -79,8 +78,8 @@ fn acceleration_writer_matches_real_rustfs_5761_bytes_and_preserves_typed_value(
         let input = PersistedAccelerateConfiguration {
             status: Some(text.to_owned()),
         };
-        let old_input = s3s_rustfs::dto::AccelerateConfiguration {
-            status: Some(s3s_rustfs::dto::BucketAccelerateStatus::from(text.to_owned())),
+        let old_input = s3s_wire_oracle::dto::AccelerateConfiguration {
+            status: Some(s3s_wire_oracle::dto::BucketAccelerateStatus::from(text.to_owned())),
         };
         let old_bytes = write_old(&old_input);
         let old_read = match &old_bytes {
@@ -92,7 +91,7 @@ fn acceleration_writer_matches_real_rustfs_5761_bytes_and_preserves_typed_value(
         let old_preserves_input = old_read.as_ref().is_ok_and(|value| value == &input);
         let gateway_preserves_input = gateway_read.as_ref().is_ok_and(|value| value == &input);
         eprintln!(
-            "{case}: input={input:?}; old_input={old_input:?}; old_bytes={old_bytes:?}; gateway_bytes={gateway_bytes:?}; old_self_read={old_read:?}; gateway_self_read={gateway_read:?}; old_preserves_input={old_preserves_input}; gateway_preserves_input={gateway_preserves_input}; expected_source=real s3s_rustfs@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Serialize+Deserialize+expect_eof; gateway_writer=rustfs_gateway_types::persistence::serialize_accelerate"
+            "{case}: input={input:?}; old_input={old_input:?}; old_bytes={old_bytes:?}; gateway_bytes={gateway_bytes:?}; old_self_read={old_read:?}; gateway_self_read={gateway_read:?}; old_preserves_input={old_preserves_input}; gateway_preserves_input={gateway_preserves_input}; expected_source=real s3s_wire_oracle@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Serialize+Deserialize+expect_eof; gateway_writer=rustfs_gateway_types::persistence::serialize_accelerate"
         );
         old_preserves_every_input &= old_preserves_input;
         gateway_preserves_every_input &= gateway_preserves_input;
@@ -137,8 +136,8 @@ fn tagging_writer_matches_real_rustfs_5761_bytes_and_preserves_typed_values() {
                 value: Some(value.to_owned()),
             }],
         };
-        let old_input = s3s_rustfs::dto::Tagging {
-            tag_set: vec![s3s_rustfs::dto::Tag {
+        let old_input = s3s_wire_oracle::dto::Tagging {
+            tag_set: vec![s3s_wire_oracle::dto::Tag {
                 key: Some(key.to_owned()),
                 value: Some(value.to_owned()),
             }],
@@ -153,7 +152,7 @@ fn tagging_writer_matches_real_rustfs_5761_bytes_and_preserves_typed_values() {
         let old_preserves_input = old_read.as_ref().is_ok_and(|value| value == &input);
         let gateway_preserves_input = gateway_read.as_ref().is_ok_and(|value| value == &input);
         eprintln!(
-            "{case}: input={input:?}; old_input={old_input:?}; old_bytes={old_bytes:?}; gateway_bytes={gateway_bytes:?}; old_self_read={old_read:?}; gateway_self_read={gateway_read:?}; old_preserves_input={old_preserves_input}; gateway_preserves_input={gateway_preserves_input}; expected_source=real s3s_rustfs@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Serialize+Deserialize+expect_eof; gateway_writer=rustfs_gateway_types::cors_tagging::serialize_tagging"
+            "{case}: input={input:?}; old_input={old_input:?}; old_bytes={old_bytes:?}; gateway_bytes={gateway_bytes:?}; old_self_read={old_read:?}; gateway_self_read={gateway_read:?}; old_preserves_input={old_preserves_input}; gateway_preserves_input={gateway_preserves_input}; expected_source=real s3s_wire_oracle@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Serialize+Deserialize+expect_eof; gateway_writer=rustfs_gateway_types::cors_tagging::serialize_tagging"
         );
         old_preserves_every_input &= old_preserves_input;
         gateway_preserves_every_input &= gateway_preserves_input;

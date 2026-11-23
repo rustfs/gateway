@@ -83,12 +83,13 @@ const PARSED: &[(&str, &str)] = &[
 ];
 
 macro_rules! define_tests {
-    ($name:ident, $revision:ident) => {
+    ($name:ident, $legacy:path $(, $seam:path)?) => {
         mod $name {
-            use rustfs_gateway_types::{CopySourceValue as Owned, compat::$revision as seam};
-            use seam::s3s::dto::CopySource as Legacy;
+            use rustfs_gateway_types::CopySourceValue as Owned;
+            use $legacy as s3s;
+            use s3s::dto::CopySource as Legacy;
 
-            fn owned_view(value: Owned) -> serde_json::Value {
+            pub(super) fn owned_view(value: Owned) -> serde_json::Value {
                 match value {
                     Owned::Bucket { bucket, key, version_id } => {
                         serde_json::json!({"kind":"bucket", "bucket":bucket, "key":key, "version_id":version_id})
@@ -115,7 +116,7 @@ macro_rules! define_tests {
                     }
                 }
             }
-            fn legacy_view(value: Legacy) -> serde_json::Value {
+            pub(super) fn legacy_view(value: Legacy) -> serde_json::Value {
                 match value {
                     Legacy::Bucket { bucket, key, version_id } => {
                         serde_json::json!({"kind":"bucket", "bucket":bucket, "key":key, "version_id":version_id})
@@ -215,6 +216,19 @@ macro_rules! define_tests {
                 pairs
             }
 
+            #[test]
+            fn raw_sources_keep_the_measured_fields() {
+                for &(raw, expected) in super::PARSED {
+                    let value = Legacy::parse(raw).expect("fixture parses");
+                    let expected: serde_json::Value = serde_json::from_str(expected).expect("measured source");
+                    assert_eq!(legacy_view(value), expected, "{raw}");
+                }
+                for (owned, legacy) in direct_pairs() {
+                    assert_eq!(owned_view(owned), legacy_view(legacy));
+                }
+            }
+
+            $(use $seam as seam;
             /// Positive and negative controls — independent parser facts retain their full decoded shape.
             #[test]
             fn parsed_sources_keep_the_observed_fields() -> Result<(), String> {
@@ -241,21 +255,30 @@ macro_rules! define_tests {
                     assert_eq!(legacy_view(seam::copy_source::to_s3s(input)), legacy_view(expected));
                 }
             }
+            )?
         }
     };
 }
 
-define_tests!(release, s3s_0_17_0);
-define_tests!(rustfs, s3s_5761ddfe);
-define_tests!(baseline, s3s_9c4690d8);
+define_tests!(
+    release,
+    rustfs_gateway_types::compat::s3s_0_17_0::s3s,
+    rustfs_gateway_types::compat::s3s_0_17_0
+);
+define_tests!(rustfs, s3s_wire_oracle);
+define_tests!(
+    baseline,
+    rustfs_gateway_types::compat::s3s_9c4690d8::s3s,
+    rustfs_gateway_types::compat::s3s_9c4690d8
+);
 
 // Only the release and RustFS revision expose the full generated operation seam.
 // Baseline evidence continues through the three carrier tests above.
 macro_rules! operation_input_test {
-    ($test:ident, $name:ident, $revision:ident) => {
+    ($test:ident, $name:ident, $revision:path) => {
         #[test]
         fn $test() {
-            use rustfs_gateway_types::compat::$revision as seam;
+            use $revision as seam;
             for (expected, source) in $name::direct_pairs() {
                 let copy = seam::s3s::dto::CopyObjectInput::builder()
                     .bucket("target".to_owned())
@@ -278,5 +301,31 @@ macro_rules! operation_input_test {
         }
     };
 }
-operation_input_test!(release_operation_inputs_keep_direct_sources, release, s3s_0_17_0);
-operation_input_test!(rustfs_operation_inputs_keep_direct_sources, rustfs, s3s_5761ddfe);
+operation_input_test!(
+    release_operation_inputs_keep_direct_sources,
+    release,
+    rustfs_gateway_types::compat::s3s_0_17_0
+);
+#[test]
+fn historical_operation_inputs_keep_direct_sources() {
+    use s3s_wire_oracle::dto::{CopyObjectInput, UploadPartCopyInput};
+    for (expected, source) in rustfs::direct_pairs() {
+        let copy = CopyObjectInput::builder()
+            .bucket("target".into())
+            .key("key".into())
+            .copy_source(source.clone())
+            .build()
+            .expect("copy input");
+        let part = UploadPartCopyInput::builder()
+            .bucket("target".into())
+            .key("key".into())
+            .part_number(1)
+            .upload_id("upload".into())
+            .copy_source(source)
+            .build()
+            .expect("part copy input");
+        let expected = rustfs::owned_view(expected);
+        assert_eq!(rustfs::legacy_view(copy.copy_source), expected);
+        assert_eq!(rustfs::legacy_view(part.copy_source), expected);
+    }
+}

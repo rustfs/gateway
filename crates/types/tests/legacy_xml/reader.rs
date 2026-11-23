@@ -17,13 +17,12 @@
 //! Responsible for: comparing legacy and Gateway persistence reader results on stored XML.
 //! NOT responsible for: request-body policy or serialization compatibility.
 //! Upstream: the pinned RustFS s3s oracle and Gateway readers. Downstream: persistence migration regressions.
-#![cfg(feature = "compat-s3s-rustfs")]
 
-use s3s_rustfs::xml::{Deserialize, Deserializer};
+use s3s_wire_oracle::xml::{Deserialize, Deserializer};
 
 fn read_old(input: &[u8]) -> Result<Option<String>, String> {
     let mut reader = Deserializer::new(input);
-    let value = s3s_rustfs::dto::AccelerateConfiguration::deserialize(&mut reader).map_err(|error| format!("{error:?}"))?;
+    let value = s3s_wire_oracle::dto::AccelerateConfiguration::deserialize(&mut reader).map_err(|error| format!("{error:?}"))?;
     reader.expect_eof().map_err(|error| format!("{error:?}"))?;
     Ok(value.status.map(|status| status.as_str().to_owned()))
 }
@@ -64,7 +63,7 @@ fn acceleration_reader_matches_explicit_rustfs_5761_text_contract() {
                 .map(|value| value.status)
                 .map_err(|error| format!("{error:?}"));
             eprintln!(
-                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_rustfs@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::persistence::parse_accelerate"
+                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_wire_oracle@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::persistence::parse_accelerate"
             );
             // Compare accepted raw values or rejection, not unrelated error strings.
             ((case, old.map_err(|_| ())), (case, gateway.map_err(|_| ())))
@@ -93,13 +92,13 @@ fn public_access_block_reader_matches_explicit_rustfs_5761_nested_scalar_contrac
         .into_iter()
         .map(|(case, input)| {
             let mut reader = Deserializer::new(input);
-            let old = s3s_rustfs::dto::PublicAccessBlockConfiguration::deserialize(&mut reader).and_then(|value| {
+            let old = s3s_wire_oracle::dto::PublicAccessBlockConfiguration::deserialize(&mut reader).and_then(|value| {
                 reader.expect_eof()?;
                 Ok(value)
             });
             let gateway = rustfs_gateway_types::persistence::parse_public_access_block(input);
             eprintln!(
-                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_rustfs@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::persistence::parse_public_access_block"
+                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_wire_oracle@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::persistence::parse_public_access_block"
             );
             let old: Result<[Option<bool>; 4], ()> = old
                 .map(|value| {
@@ -169,13 +168,13 @@ fn tagging_reader_matches_explicit_rustfs_5761_text_contract() {
         .into_iter()
         .map(|(case, input)| {
             let mut reader = Deserializer::new(input);
-            let old = s3s_rustfs::dto::Tagging::deserialize(&mut reader).and_then(|value| {
+            let old = s3s_wire_oracle::dto::Tagging::deserialize(&mut reader).and_then(|value| {
                 reader.expect_eof()?;
                 Ok(value)
             });
             let gateway = rustfs_gateway_types::cors_tagging::parse_tagging(input);
             eprintln!(
-                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_rustfs@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::cors_tagging::parse_tagging"
+                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_wire_oracle@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::cors_tagging::parse_tagging"
             );
             let old: TaggingResult = old
                 .map(|value| value.tag_set.into_iter().map(|tag| (tag.key, tag.value)).collect())
@@ -229,13 +228,13 @@ fn cors_reader_matches_explicit_rustfs_5761_max_age_contract() {
         .into_iter()
         .map(|(case, input)| {
             let mut reader = Deserializer::new(input);
-            let old = s3s_rustfs::dto::CORSConfiguration::deserialize(&mut reader).and_then(|value| {
+            let old = s3s_wire_oracle::dto::CORSConfiguration::deserialize(&mut reader).and_then(|value| {
                 reader.expect_eof()?;
                 Ok(value)
             });
             let gateway = rustfs_gateway_types::cors_tagging::parse_cors(input);
             eprintln!(
-                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_rustfs@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::cors_tagging::parse_cors"
+                "{case}: old={old:?}, gateway={gateway:?}; expected_source=real s3s_wire_oracle@5761ddfe4c509fcac87e3b99fd5bd9e176b442c0 Deserialize+expect_eof; gateway_reader=rustfs_gateway_types::cors_tagging::parse_cors"
             );
             let old: Result<Vec<RuleFields>, ()> = old
                 .map(|value| {

@@ -32,6 +32,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# DELETE BY: P9-09, with the historical RustFS codec measurements.
+s3s_wire_oracle = { package = "s3s", git = "https://github.com/s3s-project/s3s", rev = "5761ddfe4c509fcac87e3b99fd5bd9e176b442c0", features = ["minio"] }
 zip = { version = "9.0.5", default-features = false }
 # The operation decode/encode diff (rustfs/backlog#1762) runs the real gateway route and codec
 # against the pinned s3s oracle. Dev-only: the goldens library itself never links the runtime.

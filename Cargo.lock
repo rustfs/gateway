@@ -1967,6 +1967,7 @@ dependencies = [
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
+ "s3s 0.17.0 (git+https://github.com/s3s-project/s3s?rev=5761ddfe4c509fcac87e3b99fd5bd9e176b442c0)",
  "serde",
  "serde_json",
  "sha2",

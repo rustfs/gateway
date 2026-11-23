@@ -19,7 +19,7 @@
 //! Upstream: public probe receipts linked from issue #1470. Downstream: the goldens test target.
 
 macro_rules! define_tests {
-    ($name:ident, $revision_module:ident, $revision:literal, $message:literal) => {
+    ($name:ident, $legacy:path, $revision:literal, $message:literal $(, $seam:path)?) => {
         mod $name {
             use std::cell::Cell;
             use std::collections::VecDeque;
@@ -36,9 +36,8 @@ macro_rules! define_tests {
             use rustfs_gateway_core::route::TargetKind;
             use rustfs_gateway_http::{Limits, WireRequest};
             use rustfs_gateway_stream::{PayloadRead, PayloadStream};
-            use rustfs_gateway_types::compat::$revision_module as seam;
             use rustfs_gateway_types::{SelectEventError, SelectEventStream as OwnedStream, dto};
-            use seam::s3s as legacy_api;
+            use $legacy as legacy_api;
 
             const REVISION: &str = $revision;
             const DEFAULT_MESSAGE: &str = $message;
@@ -345,6 +344,31 @@ macro_rules! define_tests {
             }
 
             #[test]
+            fn the_real_codecs_emit_the_measured_bytes() {
+                for (name, items) in legacy_cases() {
+                    assert_eq!(legacy_bytes(legacy_output(items)), expected(name), "{REVISION}/{name}");
+                }
+                for (name, items) in owned_cases() {
+                    assert_eq!(gateway_bytes(owned_output(items)), expected(name), "{REVISION}/{name}");
+                }
+            }
+
+            #[test]
+            fn both_producers_preserve_presence_and_cancel_without_eager_polling() {
+                assert_eq!(empty_kind(legacy::SelectObjectContentOutput::default().payload), ("absent", true));
+                assert_eq!(empty_kind(legacy_output(Vec::new()).payload), ("present", true));
+                assert_eq!(empty_kind(dto::SelectObjectContentOutput::default().payload), ("absent", true));
+                assert_eq!(empty_kind(owned_output(Vec::new()).payload), ("present", true));
+                let (old, counts) = source(vec![Ok(legacy::SelectObjectContentEvent::End(legacy::EndEvent {}))], true, ());
+                let old = observed(Some(legacy::SelectObjectContentEventStream::new(old)), counts);
+                let (native, counts) = source(vec![Ok(dto::SelectObjectContentEventStream::End(dto::EndEvent {}))], true, Cell::new(()));
+                let native = observed(Some(OwnedStream::new(native)), counts);
+                let expected = vec![("constructed", [0, 0]), ("pending", [1, 0]), ("item", [2, 0]), ("dropped", [2, 1])];
+                assert_eq!([old, native], [expected.clone(), expected]);
+            }
+
+            $(use $seam as seam;
+            #[test]
             fn n_the_response_seam_declares_every_owned_output_member() {
                 let counts =
                     std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../generated/dto/field_counts.txt"))
@@ -453,6 +477,7 @@ macro_rules! define_tests {
                 ];
                 assert_eq!([from_observed, observed(to.payload, to_counts)], [expected.clone(), expected]);
             }
+            )?
         }
     };
 }

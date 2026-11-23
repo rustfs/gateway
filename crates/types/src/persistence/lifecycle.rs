@@ -713,5 +713,5 @@ fn write_bool(writer: &mut XmlWriter, name: &str, value: Option<bool>) {
     }
 }
 
-#[cfg(all(test, feature = "compat-s3s-rustfs"))]
+#[cfg(test)]
 mod legacy_date_tests;

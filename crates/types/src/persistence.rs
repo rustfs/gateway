@@ -196,10 +196,10 @@ impl fmt::Debug for RedactedKeyId<'_> {
 ///
 /// Its only caller is `crate::compat`, so it is compiled under the same features: ungated it is
 /// dead code in every build without them, which `-D warnings` refuses.
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 pub(crate) struct RedactedEncryptionRuleBehavior<'a>(pub(crate) &'a EncryptionRuleBehavior);
 
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 impl fmt::Debug for RedactedEncryptionRuleBehavior<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (algorithm, key_id, bucket_key_enabled, blocked) = self.0;
@@ -754,10 +754,10 @@ pub fn serialize_public_access_block(value: &PersistedPublicAccessBlockConfigura
     writer.finish().into_bytes()
 }
 
-#[cfg(all(test, feature = "compat-s3s-rustfs"))]
+#[cfg(test)]
 mod versioning_compat_tests {
-    use crate::compat::s3s_5761ddfe::s3s;
     use s3s::xml::Deserialize as _;
+    use s3s_wire_oracle as s3s;
 
     #[test]
     fn excluded_prefix_unknown_child_matches_pinned_reader() {

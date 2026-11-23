@@ -12,20 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Temporary adapters to the pinned s3s revisions: the persistence oracles migration admission is
-//! measured against, and the migration seam the RustFS ring-2 adapter converts through.
+//! Adapters to the historical s3s revisions used for persistence and wire admission tests.
 //!
-//! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
-//! selecting which revision answers, and exposing family-scoped adapters over owned values (feature
-//! `compat-s3s`); and the migration seam — the generated conversions of every covered operation
-//! in both directions, the hand-written adapters (`put_object`, `get_bucket_location`, Select
-//! requests/responses in `select`), the error seam
-//! and the request-context conversion (`request_context`) — compiled once per seam revision:
-//! `s3s_5761ddfe`, the revision RustFS main links (feature `compat-s3s-rustfs`,
-//! rustfs/backlog#2759); `s3s_0_17_0`, the release it linked at 528a3681, which the goldens and
-//! difftest measure (feature `compat-s3s-0-17-0`); and `s3s_9c4690d8`, the baseline oracle the
-//! goldens also measure (feature `compat-s3s`). The seam modules are the only ones whose API names
-//! s3s types, and each exists only under its own feature, so none of them is an intra-doc link.
+//! The `compat-s3s` feature selects the exact persistence codec named by `OracleRevision`.
+//! The goldens and difftest use the `s3s_0_17_0` operation, error, Select and request-context
+//! conversions (`compat-s3s-0-17-0`). The goldens also exercise `s3s_9c4690d8` (`compat-s3s`).
+//! Unit tests additionally run the generated conversion corpus against RustFS's historical git pin.
 //! NOT responsible for: production XML behavior, golden assertions, or the RustFS side of any
 //! conversion (its extensions, its hooks, its call order).
 //! Upstream: the three s3s revisions named by [`OracleRevision`](crate::compat::OracleRevision).
@@ -126,45 +118,31 @@ pub mod s3s_0_17_0 {
     }
 }
 
-/// The migration seam against s3s-project/s3s@5761ddfe, the revision RustFS `main` links today
-/// (rustfs/rustfs@6b155400): what `impl s3s::S3 for FS` converts through while its use cases are
-/// ported to gateway types (rustfs/backlog#2749), and what the RustFS ring-2 adapter converts
-/// through after the flip (rustfs/backlog#2759).
-///
-/// Its `s3s` is the crate RustFS itself names, unified by Cargo because this crate declares it
-/// with the same source and revision, so the converted values are the ones `impl s3s::S3 for FS`
-/// takes. The revision is s3s `0.17.0` plus fixes outside the DTO and error tables, so the seam
-/// source and the generated tree are the ones `s3s_0_17_0` compiles, compiled once more.
-#[cfg(feature = "compat-s3s-rustfs")]
+/// Test instantiation of the generated conversion corpus on the real historical revision until P9-09.
+#[cfg(all(test, feature = "compat-s3s-0-17-0"))]
 #[path = "compat/seam"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one seam source is compiled once per revision.
-pub mod s3s_5761ddfe {
-    /// The s3s revision every signature in this module names: RustFS main's own.
-    pub use ::s3s_rustfs as s3s;
+pub mod historical_wire {
+    /// The historical codec used by these tests.
+    pub use ::s3s_wire_oracle as s3s;
 
     pub mod error;
     /// As `s3s_0_17_0::generated`, compiled against this module's `s3s`.
     #[rustfmt::skip]
     #[path = "../../../generated/seam/mod.rs"]
     pub mod generated;
-    #[cfg(test)]
     mod absent_length_tests;
-    #[cfg(test)]
     mod census_tests;
     pub mod copy_source;
-    #[cfg(test)]
     mod generated_tests;
     pub mod get_bucket_location;
     pub mod leaf;
-    #[cfg(test)]
     mod names_tests;
     pub mod put_object;
     pub mod request_context;
-    #[cfg(test)]
     mod reverse_tests;
     pub mod select;
     pub mod trailers;
-    #[cfg(test)]
     mod trailers_tests;
 
     /// `5761ddfe` fills a message from the code's default sentence when a body names none, as
@@ -750,7 +728,5 @@ dispatch! {
     fn serialize_s3s_replication(value: &PersistedReplicationConfiguration) -> Vec<u8>;
 }
 
-#[cfg(all(test, feature = "compat-s3s-rustfs"))]
-mod rustfs_tests;
 #[cfg(all(test, feature = "compat-s3s"))]
 mod tests;

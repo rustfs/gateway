@@ -19,7 +19,7 @@
 //! Upstream: public codec/service measurements. Downstream: the three-revision migration gate.
 
 macro_rules! define_tests {
-    ($name:ident, $revision:ident) => {
+    ($name:ident, $legacy:path $(, $seam:path)?) => {
         mod $name {
             use bytes::Bytes;
             use rustfs_gateway_core::{
@@ -27,9 +27,9 @@ macro_rules! define_tests {
                 route::TargetKind,
             };
             use rustfs_gateway_http::{Limits, WireRequest};
-            use rustfs_gateway_types::compat::$revision as seam;
-            use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy, Stricter, dto};
-            use seam::s3s::{self, S3, S3Request, S3Response, S3Result, dto as legacy};
+            use rustfs_gateway_types::dto;
+            use $legacy as s3s;
+            use s3s::{S3, S3Request, S3Response, S3Result, dto as legacy};
             use std::{
                 future::Future,
                 pin::Pin,
@@ -146,6 +146,16 @@ macro_rules! define_tests {
                 cases
             }
 
+            pub(super) fn raw_input_facts() -> Vec<(serde_json::Value, serde_json::Value)> {
+                let mut rows: Vec<_> = cases().into_iter().map(|(new, old)| (owned_view(&new, Some("fixture")), legacy_view(&old, Some("fixture")))).collect();
+                for header in [None, Some(""), Some("fixture")] {
+                    rows.push((owned_view(&owned(MINIMAL, header), header), legacy_view(&legacy(MINIMAL, header), header)));
+                }
+                rows
+            }
+
+            $(use $seam as seam;
+            use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy, Stricter};
             /// Positive — independently decoded inputs agree after conversion, including empty structures.
             #[test]
             fn input_to_legacy_preserves_nested_values() {
@@ -288,10 +298,28 @@ macro_rules! define_tests {
                     )
                 );
             }
+            )?
         }
     };
 }
 
-define_tests!(release, s3s_0_17_0);
-define_tests!(rustfs, s3s_5761ddfe);
-define_tests!(baseline, s3s_9c4690d8);
+define_tests!(
+    release,
+    rustfs_gateway_types::compat::s3s_0_17_0::s3s,
+    rustfs_gateway_types::compat::s3s_0_17_0
+);
+define_tests!(rustfs, s3s_wire_oracle);
+define_tests!(
+    baseline,
+    rustfs_gateway_types::compat::s3s_9c4690d8::s3s,
+    rustfs_gateway_types::compat::s3s_9c4690d8
+);
+
+/// The historical service must still decode every nested member and header like the release
+/// whose two-way conversions are exercised above.
+#[test]
+fn historical_select_inputs_match_the_measured_release_facts() {
+    let expected = release::raw_input_facts();
+    assert_eq!(rustfs::raw_input_facts(), expected);
+    assert_eq!(baseline::raw_input_facts(), expected);
+}

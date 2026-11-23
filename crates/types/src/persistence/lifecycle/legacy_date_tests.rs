@@ -95,18 +95,19 @@ fn date(value: &PersistedLifecycleConfiguration, field: DateField) -> Option<&st
 }
 
 fn old_rejects(input: &str) -> bool {
-    let mut decoder = s3s_rustfs::xml::Deserializer::new(input.as_bytes());
-    <s3s_rustfs::dto::BucketLifecycleConfiguration as s3s_rustfs::xml::Deserialize>::deserialize(&mut decoder).is_err()
+    let mut decoder = s3s_wire_oracle::xml::Deserializer::new(input.as_bytes());
+    <s3s_wire_oracle::dto::BucketLifecycleConfiguration as s3s_wire_oracle::xml::Deserialize>::deserialize(&mut decoder).is_err()
         || decoder.expect_eof().is_err()
 }
 
 fn old_output(input: &str) -> Vec<u8> {
-    let mut decoder = s3s_rustfs::xml::Deserializer::new(input.as_bytes());
-    let value = <s3s_rustfs::dto::BucketLifecycleConfiguration as s3s_rustfs::xml::Deserialize>::deserialize(&mut decoder)
-        .expect("the pinned real codec accepts this valid Lifecycle document");
+    let mut decoder = s3s_wire_oracle::xml::Deserializer::new(input.as_bytes());
+    let value =
+        <s3s_wire_oracle::dto::BucketLifecycleConfiguration as s3s_wire_oracle::xml::Deserialize>::deserialize(&mut decoder)
+            .expect("the pinned real codec accepts this valid Lifecycle document");
     decoder.expect_eof().expect("the entire old document was consumed");
     let mut bytes = Vec::new();
-    s3s_rustfs::xml::Serialize::serialize(&value, &mut s3s_rustfs::xml::Serializer::new(&mut bytes))
+    s3s_wire_oracle::xml::Serialize::serialize(&value, &mut s3s_wire_oracle::xml::Serializer::new(&mut bytes))
         .expect("the pinned real codec writes its decoded Lifecycle value");
     bytes
 }

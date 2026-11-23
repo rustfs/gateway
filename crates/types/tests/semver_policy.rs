@@ -19,13 +19,10 @@
 //! NOT responsible for: inspecting generated source text; repository guards own that. Upstream:
 //! rustc and the pinned legacy XML oracle. Downstream: DTO SemVer and persistence migration policy.
 
-#[cfg(feature = "compat-s3s-rustfs")]
 #[path = "legacy_xml/reader.rs"]
 mod legacy_xml_text_contract;
-#[cfg(feature = "compat-s3s-rustfs")]
 #[path = "legacy_xml/writer.rs"]
 mod legacy_xml_writer_contract;
-#[cfg(feature = "compat-s3s-rustfs")]
 #[path = "legacy_xml/writer_scalar_contract.rs"]
 mod legacy_xml_writer_scalar_contract;
 

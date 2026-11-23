@@ -387,7 +387,7 @@ Three annotations you must not lose:
   (P2) is numbered before the wire phase (P3).
 - **The `compat-s3s` feature of `rustfs-gateway-types` is the only place a kernel crate may depend on s3s**
   (orphan rule, measured E0117: a third-party crate cannot write
-  `impl From<s3s::X> for rustfs-gateway::X`). It must carry a `# DELETE BY <milestone>` marker.
+  `impl From<s3s::X> for rustfs-gateway::X`). It must carry a `# DELETE BY <milestone>` marker. The types and goldens test targets additionally pin the historical RustFS wire codec as a dev dependency until P9-09.
 
 Direction violations are hard-blocked by `scripts/check_layer_dependencies.sh` (`P0-09`).
 

@@ -19,7 +19,7 @@
 //! stack in front of a ported RustFS use case (rustfs/backlog#2749) — one module per nested shape
 //! either direction reaches, the member and error-code census, and the test-only fixtures the
 //! round trips start from. The tree is mounted by `rustfs-gateway-types` inside each seam revision
-//! module (`compat::s3s_0_17_0::generated`, `compat::s3s_5761ddfe::generated`) and converts
+//! module (`compat::s3s_0_17_0::generated`) and converts
 //! against the mounting module's `s3s` and hand-written `leaf` functions.
 //! NOT responsible for: request context, errors, or the hand-written operations
 //! ([`overrides::HAND_WRITTEN`]).

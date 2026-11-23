@@ -21,6 +21,18 @@
 mod checks;
 mod input;
 
-checks::define_tests!(release, s3s_0_17_0, "0.17.0", "Access Denied");
-checks::define_tests!(rustfs, s3s_5761ddfe, "5761ddfe", "Access Denied");
-checks::define_tests!(baseline, s3s_9c4690d8, "9c4690d8", "");
+checks::define_tests!(
+    release,
+    rustfs_gateway_types::compat::s3s_0_17_0::s3s,
+    "0.17.0",
+    "Access Denied",
+    rustfs_gateway_types::compat::s3s_0_17_0
+);
+checks::define_tests!(rustfs, s3s_wire_oracle, "5761ddfe", "Access Denied");
+checks::define_tests!(
+    baseline,
+    rustfs_gateway_types::compat::s3s_9c4690d8::s3s,
+    "9c4690d8",
+    "",
+    rustfs_gateway_types::compat::s3s_9c4690d8
+);

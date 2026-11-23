@@ -7809,68 +7809,37 @@ PYEOF
 expect_fail check_ring_boundaries.sh \
     'an s3s feature compat-s3s does not include' mut_s3s_feature_outside_umbrella
 
-mut_rustfs_feature_enabling_another_alias() {
-    python3 - <<'PYEOF'
+mut_historical_s3s_pin() {
+    python3 - "$@" <<'PYEOF'
 from pathlib import Path
-path = Path("crates/types/Cargo.toml")
+import sys
+package, mutation = sys.argv[1:]
+path = Path(f"crates/{package}/Cargo.toml")
 text = path.read_text()
-old = 'compat-s3s-rustfs = ["dep:s3s_rustfs"'
-if text.count(old) != 1:
-    raise SystemExit(f"{old} is not unique")
-path.write_text(text.replace(old, 'compat-s3s-rustfs = ["dep:s3s_candidate"'))
-PYEOF
-}
-expect_fail check_ring_boundaries.sh \
-    'compat-s3s-rustfs enabling an alias other than s3s_rustfs' \
-    mut_rustfs_feature_enabling_another_alias
-
-mut_rustfs_alias_on_a_branch() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-path = Path("crates/types/Cargo.toml")
-text = path.read_text()
-old = 'rev = "5761ddfe4c509fcac87e3b99fd5bd9e176b442c0", features = ["minio"], optional = true }'
-if text.count(old) != 1:
-    raise SystemExit(f"{old} is not unique")
-path.write_text(text.replace(old, 'branch = "main", features = ["minio"], optional = true }'))
-PYEOF
-}
-expect_fail check_ring_boundaries.sh \
-    'the s3s_rustfs alias floating on a branch instead of a full commit' \
-    mut_rustfs_alias_on_a_branch
-
-mut_rustfs_alias_on_a_short_rev() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-path = Path("crates/types/Cargo.toml")
-text = path.read_text()
-old = 'rev = "5761ddfe4c509fcac87e3b99fd5bd9e176b442c0", features = ["minio"], optional = true }'
-if text.count(old) != 1:
-    raise SystemExit(f"{old} is not unique")
-path.write_text(text.replace(old, 'rev = "5761ddfe", features = ["minio"], optional = true }'))
-PYEOF
-}
-expect_fail check_ring_boundaries.sh \
-    'the s3s_rustfs alias pinned to a short commit' \
-    mut_rustfs_alias_on_a_short_rev
-
-mut_rustfs_feature_under_a_renamed_alias() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-path = Path("crates/types/Cargo.toml")
-text = path.read_text()
-for old, new in (('s3s_rustfs = { package = "s3s", git', 's3s_main = { package = "s3s", git'),
-                 ('compat-s3s-rustfs = ["dep:s3s_rustfs"', 'compat-s3s-rustfs = ["dep:s3s_main"'),
-                 ('"dep:s3s_rustfs"', '"dep:s3s_main"')):
-    if text.count(old) != 1:
-        raise SystemExit(f"{old} is not unique")
-    text = text.replace(old, new)
+pin = next(line for line in text.splitlines() if line.startswith("s3s_wire_oracle = "))
+if mutation == "normal":
+    text = text.replace(pin, "").replace("[dependencies]", "[dependencies]\n" + pin)
+elif mutation == "branch":
+    text = text.replace(pin, pin.replace('rev = "5761ddfe4c509fcac87e3b99fd5bd9e176b442c0"', 'branch = "main"'))
+elif mutation == "short-rev":
+    text = text.replace(pin, pin.replace("5761ddfe4c509fcac87e3b99fd5bd9e176b442c0", "5761ddfe"))
+elif mutation == "renamed":
+    text = text.replace(pin, pin.replace("s3s_wire_oracle", "another_name"))
+else:
+    raise SystemExit(mutation)
 path.write_text(text)
 PYEOF
 }
-expect_fail check_ring_boundaries.sh \
-    'compat-s3s-rustfs enabling a full-rev git alias not named s3s_rustfs' \
-    mut_rustfs_feature_under_a_renamed_alias
+mut_historical_s3s_types_normal() { mut_historical_s3s_pin types normal; }
+mut_historical_s3s_goldens_normal() { mut_historical_s3s_pin goldens normal; }
+mut_historical_s3s_branch() { mut_historical_s3s_pin types branch; }
+mut_historical_s3s_short() { mut_historical_s3s_pin types short-rev; }
+mut_historical_s3s_renamed() { mut_historical_s3s_pin types renamed; }
+expect_fail check_ring_boundaries.sh 'the historical XML oracle as a normal types dependency' mut_historical_s3s_types_normal
+expect_fail check_ring_boundaries.sh 'the historical wire oracle as a normal goldens dependency' mut_historical_s3s_goldens_normal
+expect_fail check_ring_boundaries.sh 'the historical oracle floating on a branch' mut_historical_s3s_branch
+expect_fail check_ring_boundaries.sh 'the historical oracle pinned to a short revision' mut_historical_s3s_short
+expect_fail check_ring_boundaries.sh 'the historical oracle under a renamed alias' mut_historical_s3s_renamed
 
 mut_server_unreviewed_dep() {
     python3 - <<'PYEOF'

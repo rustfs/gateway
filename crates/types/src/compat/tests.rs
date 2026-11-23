@@ -70,7 +70,7 @@ const RUSTFS_MAIN_S3S: &str = r#"s3s = { version = "0.17.0", features = ["minio"
 /// candidate alias must spell exactly what RustFS main spells, and the production feature must pull
 /// in that alias and nothing from the oracle revisions.
 #[test]
-fn the_production_seam_links_the_very_s3s_rustfs_main_declares() {
+fn the_release_seam_links_the_s3s_version_of_the_candidate_build() {
     let manifest = include_str!("../../Cargo.toml");
     let ours = manifest
         .lines()
