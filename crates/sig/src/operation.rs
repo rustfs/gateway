@@ -185,6 +185,7 @@ pub struct OperationFloor {
     /// [`OperationFloor::refuses_sigv2_under_every_policy`], which `sigv4_required` also implies.
     sigv2_refused: bool,
     bearer: Option<QueryBearerClaim>,
+    pub(crate) signed_event_list: bool,
 }
 
 impl OperationFloor {
@@ -199,6 +200,7 @@ impl OperationFloor {
             sigv4_required: false,
             sigv2_refused: false,
             bearer: None,
+            signed_event_list: false,
         }
     }
 
@@ -218,6 +220,7 @@ impl OperationFloor {
             sigv4_required: false,
             sigv2_refused: false,
             bearer: None,
+            signed_event_list: false,
         }
     }
 
@@ -232,7 +235,18 @@ impl OperationFloor {
             sigv4_required: false,
             sigv2_refused: false,
             bearer: None,
+            signed_event_list: false,
         }
+    }
+
+    /// Signs every occurrence of the notification subscription's `events` filter.
+    ///
+    /// Use only on an operation that reads all event names as one set. Each value is included
+    /// in the SigV4 header signature; every other query parameter keeps its singleton rule.
+    #[must_use]
+    pub const fn with_signed_event_list(mut self) -> Self {
+        self.signed_event_list = true;
+        self
     }
 
     /// Admits SigV4 only, header or presigned, as the allow-list says. Every other admission is

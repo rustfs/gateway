@@ -487,6 +487,11 @@ impl Extended {
                  AuthRequirement::new({action:?}, {resource}).with_version_requirement(&VERSION_AUTH);\n"
             ),
         };
+        let header_floor = if matches!(type_name.as_str(), "ListenBucketNotification" | "ListenNotification") {
+            "admin::floor(NAME).with_signed_event_list()"
+        } else {
+            "admin::floor(NAME)"
+        };
         let (floor_phrase, floor) = match &self.presigned {
             None if listing => (
                 "the floor is the standard listing floor",
@@ -500,10 +505,11 @@ impl Extended {
             ),
             None => (
                 "the floor is privileged",
-                "/// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request\n\
-                 /// `403 AccessDenied` here, and no RustFS client is shown to presign this route (ADR-0024 (f)).\n\
-                 static FLOOR: OperationFloor = admin::floor(NAME);\n"
-                    .to_owned(),
+                format!(
+                    "/// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request\n\
+                     /// `403 AccessDenied` here, and no RustFS client is shown to presign this route (ADR-0024 (f)).\n\
+                     static FLOOR: OperationFloor = {header_floor};\n"
+                ),
             ),
             Some(evidence) => (
                 "the floor admits a SigV4 header signature or presigned URL and never an anonymous or SigV2 request",

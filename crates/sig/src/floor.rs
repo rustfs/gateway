@@ -610,6 +610,10 @@ impl SecurityFloor {
             None
         };
 
+        let mut view = view;
+        view.query = view
+            .query
+            .with_signed_event_list(operation.signed_event_list && matches!(marker.location(), SigLocation::Header));
         Ok(Admission::Sealed(SealedAws::new(
             view,
             marker,

@@ -777,6 +777,7 @@ gateway_modules = (
     "legacy_completion_checksum",
     "legacy_cors",
     "lifecycle_reachability",
+    "listen_signed_events",
     "lock_encryption_reachability",
     "macro_scenarios",
     "middleware",

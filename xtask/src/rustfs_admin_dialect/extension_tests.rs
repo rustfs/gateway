@@ -313,6 +313,16 @@ fn only_the_presigned_ruling_renders_the_presigned_floor() {
     for extended in plan.extensions.iter().skip(METADATA_ROWS) {
         let rendered = extended.render("");
         let presigned = extended.name == "MiscExtRoute::ObjectLambda[object]";
+        let listens = matches!(
+            extended.name.as_str(),
+            "MiscExtRoute::ListenNotification[service]" | "MiscExtRoute::ListenNotification[bucket]"
+        );
+        assert_eq!(
+            rendered.contains("admin::floor(NAME).with_signed_event_list();"),
+            listens,
+            "{}",
+            extended.name
+        );
         assert_eq!(
             rendered.contains("static FLOOR: OperationFloor = admin::presigned_floor(NAME);"),
             presigned,
@@ -321,7 +331,7 @@ fn only_the_presigned_ruling_renders_the_presigned_floor() {
         );
         assert_eq!(
             rendered.contains("static FLOOR: OperationFloor = admin::floor(NAME);"),
-            !presigned,
+            !presigned && !listens,
             "{}",
             extended.name
         );

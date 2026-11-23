@@ -159,6 +159,7 @@ impl QueryExclusion {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RawQuery<'q> {
     raw: &'q str,
+    signed_event_list: bool,
 }
 
 impl fmt::Debug for RawQuery<'_> {
@@ -180,7 +181,15 @@ impl<'q> RawQuery<'q> {
     /// Wraps a raw query string. Pass the value without the leading `?`; `None` becomes empty.
     #[must_use]
     pub const fn new(raw: &'q str) -> Self {
-        Self { raw }
+        Self {
+            raw,
+            signed_event_list: false,
+        }
+    }
+
+    pub(crate) const fn with_signed_event_list(mut self, enabled: bool) -> Self {
+        self.signed_event_list = enabled;
+        self
     }
 
     /// The raw text.
@@ -199,7 +208,8 @@ impl<'q> RawQuery<'q> {
     ///
     /// Each parameter is percent-decoded and re-encoded once, so that the value the client signed
     /// and the value a proxy re-spelled canonicalise to the same bytes. Parameters are then sorted
-    /// by encoded name, ties broken by encoded value, and joined with `&`. A parameter that
+    /// by encoded name and joined with `&`. A notification subscription preserves wire order
+    /// among its event values, matching its client and the filters the handler receives. A parameter that
     /// arrived without a value is written `name=`, which is what a signer emits for `?acl`.
     ///
     /// # Errors
@@ -211,7 +221,8 @@ impl<'q> RawQuery<'q> {
     /// * [`AuthError::AuthorizationHeaderMalformed`] for the same parameter name twice. AWS's
     ///   canonical form sorts duplicates by value, but a server that accepts them has to decide
     ///   which one the operation reads, and "the signature covered both, the handler read one" is
-    ///   the shape of a parameter-smuggling bypass (s3s#176).
+    ///   the shape of a parameter-smuggling bypass (s3s#176). A notification subscription explicitly
+    ///   signs every value of its multi-valued `events` filter; the subscriber reads them all.
     pub fn canonical(&self, exclusion: QueryExclusion) -> Result<String, AuthError> {
         if self.raw.is_empty() {
             return Ok(String::new());
@@ -238,13 +249,18 @@ impl<'q> RawQuery<'q> {
                 Some(value) => percent_encode(&percent_decode(value)?),
                 None => String::new(),
             };
-            if pairs.iter().any(|(existing, _)| *existing == key) {
+            if !(self.signed_event_list && key == "events") && pairs.iter().any(|(existing, _)| *existing == key) {
                 return Err(AuthError::AuthorizationHeaderMalformed);
             }
             pairs.push((key, value));
         }
 
-        pairs.sort_unstable();
+        if self.signed_event_list {
+            // MinIO Java and RustFS 1.0.5 sort names and keep the wire order within the events list.
+            pairs.sort_by(|left, right| left.0.cmp(&right.0));
+        } else {
+            pairs.sort_unstable();
+        }
 
         let mut out = String::with_capacity(self.raw.len() + pairs.len());
         for (index, (key, value)) in pairs.iter().enumerate() {

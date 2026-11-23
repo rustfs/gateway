@@ -290,7 +290,7 @@ static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request
 /// `403 AccessDenied` here, and no RustFS client is shown to presign this route (ADR-0024 (f)).
-static FLOOR: OperationFloor = admin::floor(NAME);
+static FLOOR: OperationFloor = admin::floor(NAME).with_signed_event_list();
 
 impl Operation for ListenBucketNotification {
     const NAME: &'static str = NAME;

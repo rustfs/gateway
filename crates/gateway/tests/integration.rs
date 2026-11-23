@@ -145,6 +145,8 @@ mod legacy_completion_checksum;
 mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]
 mod lifecycle_reachability;
+#[path = "listen_signed_events.rs"]
+mod listen_signed_events;
 #[path = "lock_encryption_reachability.rs"]
 mod lock_encryption_reachability;
 #[path = "macro_scenarios.rs"]
