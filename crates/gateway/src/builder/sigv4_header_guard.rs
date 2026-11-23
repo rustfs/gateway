@@ -141,20 +141,17 @@ fn sentence(headers: &HeaderMap, query: &str) -> Option<&'static str> {
         let Ok(value) = value.to_str() else {
             continue;
         };
-        let Some(signature) = HeaderSignature::read(value) else {
+        let Some(signature) = SigV4HeaderCoverage::parse(value) else {
             if value.starts_with(SIGV4_ALGORITHM) {
                 return Some(INVALID_HEADER);
             }
             continue;
         };
-        if signature.algorithm != SIGV4_ALGORITHM {
+        if signature.algorithm() != SIGV4_ALGORITHM {
             return Some(UNSUPPORTED_ALGORITHM);
         }
-        let exempt = |name: &str| {
-            name == CLOUDFRONT_ID
-                || HEADER_SIGNED_ENVELOPE.contains(&name)
-                || signature.signed.iter().any(|signed| signed.eq_ignore_ascii_case(name))
-        };
+        let exempt =
+            |name: &str| name == CLOUDFRONT_ID || HEADER_SIGNED_ENVELOPE.contains(&name) || signature.covers_header(name);
         if unsigned_amz_header(headers, exempt) {
             return Some(UNSIGNED_HEADERS);
         }
@@ -241,22 +238,27 @@ fn hex(digit: u8) -> Option<u8> {
     char::from(digit).to_digit(16).and_then(|value| u8::try_from(value).ok())
 }
 
-/// What the guard reads out of one SigV4 `Authorization` value.
+/// The algorithm and header coverage claimed by a SigV4-shaped `Authorization` value.
 ///
-/// The shape legacy RustFS reads it with: an algorithm token of one or more characters that are not
-/// ASCII whitespace; at least one space, tab, CR or LF; `Credential=` and a credential scope
-/// (`<key>/<YYYYMMDD>/<region>/<service>/aws4_request`, the key and the region possibly empty, the
-/// date a real calendar date) closed by `,`; optional whitespace; `SignedHeaders=` and one or more
-/// `;`-separated names (each possibly empty, none containing `,`) closed by `,`; optional
-/// whitespace; `Signature=` and a value that is exactly 64 lower-case hex digits; and optional
-/// whitespace to the end. Any other value does not read.
-struct HeaderSignature<'a> {
+/// The RustFS admission guard uses these fields before authentication. The authenticator independently
+/// verifies the signature and establishes the caller's identity.
+pub struct SigV4HeaderCoverage<'a> {
     algorithm: &'a str,
     signed: Vec<&'a str>,
 }
 
-impl<'a> HeaderSignature<'a> {
-    fn read(value: &'a str) -> Option<Self> {
+impl<'a> SigV4HeaderCoverage<'a> {
+    /// Reads the legacy RustFS header grammar. Returns `None` for malformed input and preserves
+    /// the algorithm token even when the algorithm is unsupported.
+    ///
+    /// The nonempty algorithm token ends at ASCII whitespace. At least one space, tab, CR or LF
+    /// separates it from `Credential=`. The scope is `<key>/<YYYYMMDD>/<region>/<service>/aws4_request`
+    /// with a valid calendar date and a nonempty service. The key and region may be empty.
+    /// Commas separate the scope, `SignedHeaders=` and `Signature=`, with optional whitespace after
+    /// each comma. The signed header list is split on semicolons, preserving empty names. The
+    /// signature has exactly 64 lowercase hexadecimal digits followed by optional whitespace.
+    #[must_use]
+    pub fn parse(value: &'a str) -> Option<Self> {
         let algorithm_end = value.find(|c: char| c.is_ascii_whitespace())?;
         let (algorithm, rest) = value.split_at(algorithm_end);
         if algorithm.is_empty() {
@@ -279,6 +281,18 @@ impl<'a> HeaderSignature<'a> {
             return None;
         }
         Some(Self { algorithm, signed })
+    }
+
+    /// The algorithm token exactly as the caller supplied it.
+    #[must_use]
+    pub const fn algorithm(&self) -> &str {
+        self.algorithm
+    }
+
+    /// Whether `SignedHeaders` names this header, using ASCII case-insensitive comparison.
+    #[must_use]
+    pub fn covers_header(&self, name: &str) -> bool {
+        self.signed.iter().any(|signed| signed.eq_ignore_ascii_case(name))
     }
 }
 

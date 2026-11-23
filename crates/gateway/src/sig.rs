@@ -20,7 +20,8 @@
 //! crate. The conformance suite in particular may use this facade and nothing else.
 //! NOT responsible for: implementing any of it, or re-exporting the crate wholesale. A type is
 //! listed here when something outside this workspace has to spell it.
-//! Upstream: `rustfs-gateway-sig`. Downstream: every consumer of the facade.
+//! [`SigV4HeaderCoverage`] exposes the header claims read by the RustFS admission guard.
+//! Upstream: `rustfs-gateway-sig` and the RustFS admission guard. Downstream: every consumer of the facade.
 //!
 //! # The client-side signer
 //!
@@ -35,6 +36,7 @@
 //! It is published because the suite that drives the server has to produce signed requests, and it
 //! may use this facade and nothing else.
 
+pub use crate::builder::sigv4_header_guard::SigV4HeaderCoverage;
 pub use rustfs_gateway_sig::timing::LookupBudget;
 pub use rustfs_gateway_sig::{
     AmzDate, AnonymousAck, AuthError, AuthScheme, CHUNK_ALGORITHM, CHUNK_SIGNATURE_EXTENSION, ChunkSigner, CredentialPresence,
