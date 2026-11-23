@@ -137,6 +137,23 @@ impl LegacyRustfsVirtualHosts {
         self.domains.iter().map(AsRef::as_ref)
     }
 
+    /// Reads the host value already selected by a RustFS caller. Returns the host-named bucket,
+    /// or `None` when the path names the bucket. The caller owns header and authority selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HostRefusal::UnusableHost`] for an unusable domain and [`HostRefusal::RefusedBucket`]
+    /// when the prefix of a configured domain is an invalid bucket name.
+    pub fn bucket_for_host_header(&self, host: &str) -> Result<Option<BucketName>, HostRefusal> {
+        match self.read(host) {
+            Reading::Path => Ok(None),
+            Reading::Bucket(label) => BucketName::materialize(&label, &self.names)
+                .map(Some)
+                .map_err(|_| HostRefusal::RefusedBucket),
+            Reading::Unusable => Err(HostRefusal::UnusableHost),
+        }
+    }
+
     fn read<'a>(&self, host: &'a str) -> Reading<'a> {
         if self.domains.is_empty() || host.parse::<SocketAddr>().is_ok() || host.parse::<IpAddr>().is_ok() {
             return Reading::Path;
@@ -165,28 +182,20 @@ impl LegacyRustfsVirtualHosts {
 
 impl HostResolver for LegacyRustfsVirtualHosts {
     fn resolve(&self, query: &HostQuery<'_>) -> ResolvedHost {
-        match self.read(query.host.raw_for_signing().as_str()) {
-            Reading::Bucket(label) => match BucketName::materialize(&label, &self.names) {
-                Ok(bucket) => ResolvedHost::virtual_hosted(target_of_vhost_path(query.path), bucket, None),
-                // Refused by `refusal`, before this reading is routed.
-                Err(_) => ResolvedHost::standard(target_of_path(query.path)),
-            },
-            Reading::Unusable => ResolvedHost::standard(target_of_path(query.path)),
+        match self.bucket_for_host_header(query.host.raw_for_signing().as_str()) {
+            Ok(Some(bucket)) => ResolvedHost::virtual_hosted(target_of_vhost_path(query.path), bucket, None),
             // With no domain configured legacy RustFS's hint for a misaddressed request applies,
             // as it does to `PathStyleOnly`; with one, it does not.
-            Reading::Path if self.domains.is_empty() => {
+            Ok(None) if self.domains.is_empty() => {
                 ResolvedHost::standard(target_of_path(query.path)).with_diagnostic(vhost_hint(query))
             }
-            Reading::Path => ResolvedHost::standard(target_of_path(query.path)),
+            // A refusal is answered before this reading is routed.
+            Ok(None) | Err(_) => ResolvedHost::standard(target_of_path(query.path)),
         }
     }
 
     fn refusal(&self, query: &HostQuery<'_>) -> Option<HostRefusal> {
-        match self.read(query.host.raw_for_signing().as_str()) {
-            Reading::Unusable => Some(HostRefusal::UnusableHost),
-            Reading::Bucket(label) if BucketName::materialize(&label, &self.names).is_err() => Some(HostRefusal::RefusedBucket),
-            Reading::Bucket(_) | Reading::Path => None,
-        }
+        self.bucket_for_host_header(query.host.raw_for_signing().as_str()).err()
     }
 
     // The label even when `refusal` refuses it: legacy RustFS signs what its host reading found,

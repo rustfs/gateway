@@ -194,3 +194,23 @@ fn n_no_domain_reads_every_host_path_style() {
     });
     assert_eq!(resolved.diagnostic, Some(VhostHint::LooksLikeVhostButNotConfigured));
 }
+
+#[test]
+fn an_already_selected_host_names_a_bucket_or_path_style() {
+    let resolver = measured();
+    for (host, expected) in [
+        ("my.dotted.bkt.example.com:9411", Some("my.dotted.bkt")),
+        ("Ex-Ample.COM", Some("ex-ample.com")),
+        ("example.com", None),
+        ("localhost:9411", None),
+        ("127.0.0.1:9411", None),
+        ("::1", None),
+    ] {
+        let bucket = resolver.bucket_for_host_header(host).expect("a usable host");
+        assert_eq!(bucket.as_ref().map(BucketName::as_str), expected, "{host}");
+    }
+    assert_eq!(resolver.bucket_for_host_header("VHB.example.com"), Err(HostRefusal::RefusedBucket));
+    assert_eq!(resolver.bucket_for_host_header("my_host"), Err(HostRefusal::UnusableHost));
+    let none = LegacyRustfsVirtualHosts::new([] as [&str; 0]).expect("an empty list");
+    assert_eq!(none.bucket_for_host_header("vhb.example.com"), Ok(None));
+}
