@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A deployment can authenticate an unframed upload before refusing its announced trailers.
-//! This reading does not accept a payload or decode a body. The service owns those boundaries.
+//! Responsible for: opting into authentication before refusal of unframed uploads with declared trailers.
+//! NOT responsible for: accepting a payload or decoding the request body.
 //! Upstream: `ServiceBuilder`. Downstream: header authentication and route authorization.
 
 use super::{ServiceBuilder, ViewPolicy, header_signatures::SignedHead};

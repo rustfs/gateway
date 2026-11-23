@@ -21,8 +21,6 @@
 
 mod support;
 
-mod operation_decode_error;
-
 #[path = "action_rules_runtime.rs"]
 mod action_rules_runtime;
 #[path = "anonymous_chunked_upload.rs"]
@@ -165,6 +163,8 @@ mod object_attributes_etag;
 mod object_lock_intent;
 #[path = "observer_panic.rs"]
 mod observer_panic;
+#[path = "operation_decode_error.rs"]
+mod operation_decode_error;
 #[path = "operation_registry_hot_update.rs"]
 mod operation_registry_hot_update;
 #[path = "operation_registry_wire.rs"]

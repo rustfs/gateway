@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Installs a typed operation, its handler and its optional input-decode error mapping.
-//! Registration rules remain with the core router. The dynamic dispatch entry applies a
-//! host's mapping only after the operation's own codec rejects its input.
+//! Responsible for: installing a typed operation, its handler and its optional decode error mapping.
+//! NOT responsible for: deciding registration conflicts or validating the operation input.
+//! Upstream: service builder registrations. Downstream: the core router and its dispatch entries.
 
 use std::sync::Arc;
 

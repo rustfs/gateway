@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! When an unframed upload declares trailers, it can be authenticated before its mandatory refusal.
-//! This suite checks the gateway's opt-in refusal ordering, not the aws-chunked decoder.
+//! Responsible for: checking authentication and refusal ordering for unframed uploads with declared trailers.
+//! NOT responsible for: decoding aws-chunked payloads.
 //! Upstream: the signed-request fixture. Downstream: the route policy and the wire response.
 
 use crate::support;

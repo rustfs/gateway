@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Adapters to the historical s3s revisions used for persistence and wire admission tests.
+//! Responsible for: adapters to the historical s3s revisions used for persistence and wire admission tests.
 //!
 //! The `compat-s3s` feature selects the exact persistence codec named by `OracleRevision`.
 //! The goldens and difftest use the `s3s_0_17_0` operation, error, Select and request-context

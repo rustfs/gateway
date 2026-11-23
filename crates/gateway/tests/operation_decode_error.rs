@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Exercises a host mapping one registered operation's decode refusal over signed HTTP.
-//! The codec still validates the input and the handler sees only successful decodes.
-//! Uses the standard completion registration to compare the wire error with and without the mapping.
+//! Responsible for: comparing mapped and default completion decode refusals on signed requests.
+//! NOT responsible for: XML validation or invoking a handler on invalid input.
+//! Upstream: the completion codec and signed-request fixture. Downstream: HTTP error assertions.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
