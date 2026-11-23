@@ -45,9 +45,7 @@ use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rustfs_gateway_core::{
-    Dialect, Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RedirectTarget, RouterBuilder, SseConfig,
-};
+use rustfs_gateway_core::{Dialect, MissingHandlers, Operation, OperationSet, RedirectTarget, RouterBuilder, SseConfig};
 use rustfs_gateway_http::Limits;
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck};
@@ -85,6 +83,7 @@ mod legacy_heads;
 mod legacy_sentences;
 mod names;
 mod not_modified_headers;
+mod operation_registration;
 mod operation_selection;
 pub(crate) mod plaintext_customer_keys;
 mod post_object_handler;
@@ -131,6 +130,7 @@ pub struct ServiceBuilder {
     router: RouterBuilder,
     /// One entry per `register` call, keyed by name; deferred so a later `op_layer` is seen too.
     pending: BTreeMap<&'static str, PendingRegistration>,
+    has_decode_error_mapping: bool,
     /// The layers registered per operation, in registration order.
     op_layers: BTreeMap<&'static str, Vec<ErasedOpLayer>>,
     /// The stage filters, in registration order.
@@ -201,6 +201,7 @@ impl ServiceBuilder {
         Self {
             router: RouterBuilder::new(),
             pending: BTreeMap::new(),
+            has_decode_error_mapping: false,
             op_layers: BTreeMap::new(),
             filters: Vec::new(),
             floor: SecurityFloor::new(),
@@ -247,45 +248,6 @@ impl ServiceBuilder {
     #[must_use]
     pub fn allow_temporary_redirect_target(mut self, target: RedirectTarget) -> Self {
         self.temporary_redirect_targets.push(target);
-        self
-    }
-
-    /// Registers `backend` as the handler for one operation.
-    ///
-    /// The registration goes to `rustfs_gateway_core::RouterBuilder` as well as to this crate's
-    /// wire table, so every registration-time refusal — a duplicate, an un-namespaced third-party
-    /// name, a name colliding with an AWS one, an operation with no authorisation action — is the
-    /// core's answer and not a second implementation of it. Refusals surface from
-    /// [`ServiceBuilder::build`].
-    #[must_use]
-    pub fn register<O, B>(mut self, backend: Arc<B>) -> Self
-    where
-        O: OperationCodec,
-        B: Handler<O>,
-    {
-        self.router = self.router.handle::<O, B>(Arc::clone(&backend));
-        // A taken name is already a `RegistryError::Duplicate` from the line above, which `build`
-        // reports. Inserting over it here would leave the two tables disagreeing about which
-        // backend answers the operation.
-        self.pending.entry(O::NAME).or_insert_with(|| {
-            Box::new(move |erased: Vec<ErasedOpLayer>| {
-                let mut layers: Vec<Arc<dyn OpLayer<O>>> = Vec::with_capacity(erased.len());
-                for slot in erased {
-                    // Unreachable through `op_layer`, which keys the slot by the very `O::NAME` the
-                    // registration is under. Refused rather than unwrapped: two operation types
-                    // sharing one name is an assembly defect, and answering it with a panic would
-                    // take a process down at start-up for a reason the message never states.
-                    let slot = slot
-                        .downcast::<OpLayerSlot<O>>()
-                        .map_err(|_| AssemblyError::OpLayerTypeMismatch {
-                            operation: O::NAME,
-                            rule: RuleRef::OP_LAYER_TYPE,
-                        })?;
-                    layers.push(slot.into_layer());
-                }
-                Ok(OperationDispatch::layered::<O, B>(backend, layers))
-            })
-        });
         self
     }
 
@@ -722,6 +684,12 @@ impl ServiceBuilder {
         H: Send + Sync + 'static,
         Operations: MonomorphicOperationSet<H>,
     {
+        if self.has_decode_error_mapping {
+            return Err(AssemblyError::MonomorphicSet {
+                reason: "operation decode error mappings require dynamic dispatch".to_owned(),
+                rule: RuleRef::MONOMORPHIC_SET,
+            });
+        }
         if !self.op_layers.is_empty() {
             return Err(AssemblyError::MonomorphicSet {
                 reason: "operation layers require dynamic per-operation continuations".to_owned(),

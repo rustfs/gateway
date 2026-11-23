@@ -21,6 +21,8 @@
 
 mod support;
 
+mod operation_decode_error;
+
 #[path = "action_rules_runtime.rs"]
 mod action_rules_runtime;
 #[path = "anonymous_chunked_upload.rs"]
@@ -275,6 +277,8 @@ mod unread_body_drain;
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]
 mod upload_object_ceiling;
+#[path = "upload_trailer_refusals.rs"]
+mod upload_trailer_refusals;
 #[path = "verified_scope_runtime.rs"]
 mod verified_scope_runtime;
 #[path = "version_actions_runtime.rs"]

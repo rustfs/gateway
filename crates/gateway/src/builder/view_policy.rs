@@ -106,6 +106,7 @@ pub(crate) mod presigned_urls;
 mod profile_census;
 #[cfg(test)]
 mod rustfs_listings_tests;
+mod signed_upload_trailers;
 pub use self::checksum_declarations::LEGACY_CHECKSUM_DECLARATION_OPERATIONS;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 
@@ -228,6 +229,7 @@ pub(crate) struct ViewPolicy {
     /// (`crate::unread_body`).
     pub(super) unread_body_drain: Option<crate::unread_body::UnreadBodyDrain>,
     presigned_payload_unsigned: bool,
+    defer_unframed_upload_trailers: bool,
     base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
     rustfs_listings: bool,
@@ -282,12 +284,6 @@ impl ViewPolicy {
     /// ([`ServiceBuilder::identify_requests_as_legacy_rustfs`]).
     pub(crate) const fn identification(&self) -> Identification {
         self.identification
-    }
-
-    /// Whether a presigned request's payload declaration is read as legacy RustFS reads it
-    /// ([`ServiceBuilder::sign_presigned_payloads_as_unsigned`]).
-    pub(crate) const fn presigned_payload_unsigned(&self) -> bool {
-        self.presigned_payload_unsigned
     }
 
     /// The guard this assembly asks before routing

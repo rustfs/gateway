@@ -140,7 +140,6 @@ use crate::logging::{Extension, Refused};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::panic_boundary::catch_boxed_future;
-use crate::payload_header::signed_payload;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth};
@@ -780,6 +779,7 @@ impl S3Service {
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
+        let mut trailer_refusal = None;
         let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
         let mut body_digest = BodyDigestObligation::None;
         let mut signed_body = false; // Whether a SigV4 header signature covers the body (rustfs/gateway#1587).
@@ -806,13 +806,9 @@ impl S3Service {
             }
             Ok(Admission::Sealed(sealed)) => {
                 let location = sealed.marker().location();
-                let presigned_unsigned = self.inner.view_policy.presigned_payload_unsigned();
-                let (payload, obligation) = match signed_payload(&headers, location, presigned_unsigned) {
+                let (payload, obligation) = match policy.signed_payload(&signed_head, operation, location, &mut trailer_refusal) {
                     Ok(declared) => declared,
-                    Err(refusal) => {
-                        return outcome
-                            .refuse_at(Refused::Authentication, refusal.render(response_kind, wire.framing().has_body()));
-                    }
+                    Err(refusal) => return outcome.refuse_at(Refused::Authentication, refusal.render(response_kind, body_owed)),
                 };
                 signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
@@ -1286,6 +1282,9 @@ impl S3Service {
                 });
             }
 
+            if let Some(refusal) = trailer_refusal {
+                return Err(refusal);
+            }
             // A claimed row's path is not a bucket surface: a bound bucket's CORS rules do not
             // answer an admin request (ADR-0025).
             let cors_bucket = if claimed { None } else { route_meta.bucket() };

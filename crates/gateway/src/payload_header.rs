@@ -92,6 +92,30 @@ pub(crate) fn signed_payload(
     Ok((payload, obligation))
 }
 
+/// Reads an unframed declaration for signature verification only. The route must still refuse it.
+/// Only a well-formed header signature that covers the trailer declaration is eligible.
+pub(crate) fn unframed_upload_with_signed_trailers(headers: &HeaderMap) -> Option<(PayloadMode, BodyDigestObligation)> {
+    let single = |name: &'static str| {
+        let mut values = headers.get_all(name).iter();
+        let value = values.next()?.to_str().ok()?;
+        values.next().is_none().then_some(value)
+    };
+    single("x-amz-trailer")?;
+    if !declared_trailers(headers).ok()?.is_declared() {
+        return None;
+    }
+    let mode = PayloadMode::parse(single("x-amz-content-sha256")?, TrailerSet::None).ok()?;
+    if !matches!(mode, PayloadMode::ExactSha256(_) | PayloadMode::Unsigned) {
+        return None;
+    }
+    let auth = rustfs_gateway_sig::SigV4Authorization::parse(single("authorization")?).ok()?;
+    if !auth.signed_headers().split(';').any(|name| name == "x-amz-trailer") {
+        return None;
+    }
+    let obligation = body_digest_obligation(&mode, SigLocation::Header).ok()?;
+    Some((mode, obligation))
+}
+
 /// A presigned request's declaration as legacy RustFS reads it: always signed as
 /// `UNSIGNED-PAYLOAD`, with a declared digest verified against the body.
 fn legacy_presigned_payload(headers: &HeaderMap) -> Result<(PayloadMode, BodyDigestObligation), PayloadRefusal> {

@@ -30,19 +30,10 @@
 //! and this is the shape that consumes them. Registration still goes through `RouterBuilder`, so
 //! every registration-time refusal is unchanged; this table is what the request actually reaches.
 //!
-//! # Why the body is offered as a stream first
+//! # The request body
 //!
-//! `OperationSpec` does not carry the IR's `payload.request.buffering`, so the facade cannot ask
-//! an operation whether its decoder wants `RequestBody::Stream` or `RequestBody::Buffered`. Two
-//! wrong answers are available and only one of them is loud: handing a buffered body to a
-//! streaming decoder makes `into_stream()` return `None` and the upload silently vanishes, while
-//! handing a stream to a buffered decoder is refused by `RequestBody::into_buffered` with a
-//! `500 InternalError` that says exactly what happened. So the stream is offered first and the
-//! documented refusal is what selects the other shape. The retry costs one extra decode pass for
-//! the buffered operations, whose bodies are small XML documents, and none for the streaming ones.
-//!
-//! A field on `OperationSpec` would remove the retry entirely; that is a `-core` change and a
-//! regeneration, and it is recorded here rather than guessed at.
+//! The operation's codec declares its request-body mode. Typed input decoding runs before
+//! invocation and fails closed even when the registered host chooses a different wire error.
 //!
 //! # Where `OpLayer<O>` joins, and what it costs when nobody registered one
 //!
@@ -142,6 +133,7 @@ pub(crate) struct OperationDispatch {
     #[cfg(feature = "external-payload")]
     external_payload: external_payload::Registration,
     codec: ErasedCodec,
+    pub(crate) decode_error_mapping: Option<Arc<(CodecError, CodecError)>>,
     invoke: Invoke,
     encode: Encode,
     floor: &'static OperationFloor,
@@ -265,6 +257,7 @@ impl OperationDispatch {
             #[cfg(feature = "external-payload")]
             external_payload: external_payload::Registration::new(O::spec().deadline_class()),
             codec,
+            decode_error_mapping: None,
             invoke,
             encode,
             floor: O::floor(),
@@ -304,7 +297,12 @@ impl OperationDispatch {
     ///
     /// [`CodecError`] when the request could not be read. A handler failure is inside the future.
     pub(crate) fn decode(&self, meta: &MetaView<'_>, body: RequestBody) -> Result<ErasedDecoded, CodecError> {
-        self.codec.decode(meta, body)
+        self.codec
+            .decode(meta, body)
+            .map_err(|error| match self.decode_error_mapping.as_deref() {
+                Some((original, replacement)) if *original == error => replacement.clone(),
+                _ => error,
+            })
     }
 
     /// The normalized resources that require the second authorization stage.
