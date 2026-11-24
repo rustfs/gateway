@@ -29,9 +29,6 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html
 summary = "The subresource read returns the decoded tag set."
 kind = "aws-doc"
 
-[clock]
-fixed = "2026-01-02T03:04:05Z"
-
 [connection]
 reuse = true
 
@@ -67,6 +64,4 @@ status = 200
 connection_after = "open"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>a b</Key><Value>c+d</Value></Tag><Tag><Key>plain</Key><Value>1</Value></Tag></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0003.xml"

@@ -29,9 +29,6 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html
 summary = "The documented response carries the same wrapped shape back."
 kind = "aws-doc"
 
-[clock]
-fixed = "2026-01-02T03:04:05Z"
-
 [connection]
 reuse = true
 
@@ -71,6 +68,4 @@ connection_after = "open"
 "content-type" = "application/xml"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>project</Key><Value>gateway</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>stage</Key><Value>p5</Value></Tag></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0001.xml"

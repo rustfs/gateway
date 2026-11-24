@@ -35,3 +35,10 @@
 
 # RustFS reads the tag set attached to the specified object version.
 "goldens/c-tagging-0021-set.xml" = "goldens/rustfs/c-tagging-0021-set.xml"
+
+# RustFS bulk delete and tagging documents returned after writes.
+"goldens/c-object-0004.xml" = "goldens/rustfs/c-object-0004.xml"
+"goldens/c-object-0024.xml" = "goldens/rustfs/c-object-0024.xml"
+"goldens/c-tagging-0001.xml" = "goldens/rustfs/c-tagging-0001.xml"
+"goldens/c-tagging-0003.xml" = "goldens/rustfs/c-tagging-0003.xml"
+"goldens/c-tagging-0022.xml" = "goldens/rustfs/c-tagging-0022.xml"

@@ -33,9 +33,6 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html
 summary = "An object with no tags answers a success with an empty TagSet, which is the state a cleared object is in."
 kind = "aws-doc"
 
-[clock]
-fixed = "2026-01-02T03:04:05Z"
-
 [connection]
 reuse = true
 
@@ -94,6 +91,4 @@ status = 200
 connection_after = "open"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0011.xml"

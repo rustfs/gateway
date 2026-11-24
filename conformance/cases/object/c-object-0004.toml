@@ -30,9 +30,6 @@ url = "https://github.com/s3s-project/s3s/issues/469"
 summary = "Upstream dropped keys it could not delete from the result, so a caller could not tell which of its keys survived."
 kind = "s3s-issue"
 
-[clock]
-fixed = "2026-01-02T03:04:05Z"
-
 [[setup.buckets]]
 name = "conf-object"
 
@@ -74,6 +71,4 @@ terminate_within_ms = 5000
 # Three keys in, three entries out — including the key that was never there, because a delete of an
 # absent key is a success (see c-object-0003) and must be reported as one.
 [expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>batch/one</Key></Deleted><Deleted><Key>batch/two</Key></Deleted><Deleted><Key>batch/absent</Key></Deleted></DeleteResult>'''
+golden = "goldens/c-object-0004.xml"

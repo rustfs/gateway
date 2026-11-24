@@ -15,9 +15,6 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
 summary = "The documented multi-object delete is the authority for its request root, its result root and its integrity header."
 kind = "aws-doc"
 
-[clock]
-fixed = "2026-01-02T03:04:05Z"
-
 [[setup.buckets]]
 name = "conf-object"
 
@@ -40,6 +37,4 @@ status = 200
 connection_after = "open"
 
 [expect.body]
-exact_utf8 = """
-<?xml version="1.0" encoding="UTF-8"?>
-<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></DeleteResult>"""
+golden = "goldens/c-object-0024.xml"
