@@ -75,6 +75,4 @@ request_id_present = true
 
 [exchanges.expect.body]
 redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NoSuchCORSConfiguration</Code><Message>The CORS configuration does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+golden = "goldens/c-cors-0012.xml"

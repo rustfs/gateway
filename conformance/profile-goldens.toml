@@ -32,3 +32,6 @@
 # Tagging reads use the RustFS XML declaration layout.
 "goldens/c-tagging-0011.xml" = "goldens/rustfs/c-tagging-0011.xml"
 "goldens/c-tagging-0023.xml" = "goldens/rustfs/c-tagging-0023.xml"
+
+# RustFS reads the tag set attached to the specified object version.
+"goldens/c-tagging-0021-set.xml" = "goldens/rustfs/c-tagging-0021-set.xml"

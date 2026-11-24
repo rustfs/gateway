@@ -31,9 +31,6 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html
 summary = "The read documents versionId as selecting the version whose tag set is answered, and its absence as selecting the current one."
 kind = "aws-doc"
 
-[clock]
-fixed = "2026-01-02T03:04:05Z"
-
 [connection]
 reuse = true
 
@@ -107,9 +104,7 @@ status = 200
 connection_after = "open"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0021-set.xml"
 
 [[exchanges]]
 name = "the-version-beside-it-is-untouched"
@@ -125,9 +120,7 @@ status = 200
 connection_after = "open"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0011.xml"
 
 [[exchanges]]
 name = "no-version-id-selects-the-newest"
@@ -143,6 +136,4 @@ status = 200
 connection_after = "open"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0011.xml"
