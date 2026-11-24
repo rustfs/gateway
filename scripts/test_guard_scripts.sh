@@ -26749,6 +26749,30 @@ expect_fail check_corpus_provenance.sh \
     mut_corpus_unpinned_client_source \
     'no pinned revision'
 
+add_corpus_rustfs_e2e_source() {
+    python3 - "$1" <<'PYEOF'
+import json
+import sys
+from pathlib import Path
+
+entry = json.loads(Path("corpus/object/PutObject.jsonl").read_text().splitlines()[0])
+entry["src"] = "rustfs-e2e@" + sys.argv[1]
+entry["sut"] = "none"
+Path("corpus/object/suite-fixture.jsonl").write_text(json.dumps(entry) + "\n")
+with Path("corpus/MANIFEST.toml").open("a") as manifest:
+    manifest.write(f'\n[[source]]\nid = "{entry["src"]}"\nsut = "none"\n')
+PYEOF
+}
+mut_corpus_pinned_rustfs_e2e() { add_corpus_rustfs_e2e_source "$(git rev-parse HEAD)"; }
+mut_corpus_unpinned_rustfs_e2e() { add_corpus_rustfs_e2e_source main; }
+expect_guard_pass check_corpus_provenance.sh \
+    'a RustFS E2E recording attributed to a full suite commit' \
+    mut_corpus_pinned_rustfs_e2e
+expect_fail check_corpus_provenance.sh \
+    'a RustFS E2E recording attributed to a moving branch' \
+    mut_corpus_unpinned_rustfs_e2e \
+    'requires a full lowercase Git commit'
+
 mut_corpus_uncited_s3s_issue() {
     python3 - <<'PYEOF'
 import json

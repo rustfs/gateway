@@ -64,6 +64,7 @@ pub const SOURCE_ALLOWLIST: &[(&str, bool)] = &[
     ("handwritten:s3s-issues#", false),
     ("mint@", false),
     ("minio-interop@", false),
+    ("rustfs-e2e@", false),
     ("s3-tests@", false),
 ];
 
@@ -155,6 +156,12 @@ pub fn check_source(src: &str) -> Result<(), String> {
         };
         if !matched {
             continue;
+        }
+        if *prefix == "rustfs-e2e@" {
+            let revision = &src[prefix.len()..];
+            if !is_commit(revision) || revision.bytes().all(|b| b == b'0') {
+                return Err(format!("source `{src}` requires a full lowercase Git commit"));
+            }
         }
         if prefix.ends_with('#') {
             let number = &src[prefix.len()..];
@@ -454,4 +461,33 @@ pub fn load_all(root: &Path) -> Result<Vec<Entry>, String> {
         all.extend(entries);
     }
     Ok(all)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_source;
+
+    #[test]
+    fn rustfs_e2e_traffic_requires_the_exact_suite_commit() {
+        let revision = "7575e26315a31ffd7b6341096acba4f610b3e5ee";
+        assert!(check_source(&format!("rustfs-e2e@{revision}")).is_ok());
+        for invalid in [
+            "rustfs-e2e",
+            "e2e-full",
+            "rustfs-e2e@main",
+            "rustfs-e2e@",
+            "rustfs-e2e@01234567",
+        ] {
+            assert!(check_source(invalid).is_err(), "{invalid}");
+        }
+        for invalid in [
+            "0".repeat(40),
+            "g".repeat(40),
+            revision.to_uppercase(),
+            format!("{revision}0"),
+            format!("{revision}/production"),
+        ] {
+            assert!(check_source(&format!("rustfs-e2e@{invalid}")).is_err(), "{invalid}");
+        }
+    }
 }

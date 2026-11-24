@@ -8,7 +8,8 @@ set -euo pipefail
 #   Every `src` in a `corpus/**/*.jsonl` entry and every `[[source]] id` in
 #   `corpus/MANIFEST.toml` names a source on the allowlist, and the allowlist it checks
 #   against is read out of `crates/corpus/src/store.rs` rather than written down twice.
-#   A `client-matrix:` source must also carry a pinned revision after `@`. Every entry
+#   A `client-matrix:` source must carry a pinned revision after `@`. A `rustfs-e2e@`
+#   source must name the exact suite commit as 40 lowercase hex digits. Every entry
 #   also names a `sut` from the closed vocabulary in `crates/corpus/src/store.rs`, the
 #   manifest's `[[source]]` census reproduces the `(id, sut)` pairs the entries carry, and
 #   its `entries_from_production_server` count matches the entries themselves.
@@ -89,6 +90,10 @@ def refusal(src: str) -> str | None:
         matched = src.startswith(prefix) if prefix[-1] in ":@#" else src == prefix
         if not matched:
             continue
+        if prefix == "rustfs-e2e@":
+            revision = src[len(prefix):]
+            if not re.fullmatch(r"[0-9a-f]{40}", revision) or revision == "0" * 40:
+                return f"source `{src}` requires a full lowercase Git commit"
         if needs_revision and "@" not in src[len(prefix):]:
             return f"source `{src}` names no pinned revision after `@`"
         if prefix.endswith("#"):
