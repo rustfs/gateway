@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Checks the framing of sanitized POST-policy captures at the shared recorder and CLI boundary.
+//! Responsible for: verifying how sanitizing a multipart POST changes the recorded wire length.
+//! NOT responsible for: parsing multipart input or sending the captured request.
+//! Upstream: the corpus form sanitizer and the strict store validator.
+//! Downstream: the corpus crate's unit tests.
 
 #![allow(clippy::unwrap_used)]
 
