@@ -58,6 +58,8 @@ ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # `bound`   — evidence is one or more `<path>::<selector>` entries separated by `;`.
 #             A `.toml` selector is `<json pointer>`, `<pointer>=<literal>` or
 #             `<pointer>~<substring>`, resolved against the parsed case document.
+#             A pointer ending in `/golden` does not compare the path: the substring has to occur
+#             in that file and in every profile golden that replaces it.
 #             A `.rs` selector is `fn <name>`, which must be an enabled `#[test]`.
 #             A `.sh` selector is `fn <name>`, which must be a shell function that some
 #             `expect_fail` line in the same file names — a negative control, not a definition.
@@ -89,7 +91,7 @@ requirements=(
     'c-err-1011|negative|bound|crates/model/src/tests/overlay_tests.rs::fn refuses_a_row_without_a_status'
     'c-err-1012|negative|bound|scripts/test_guard_scripts.sh::fn mut_error_status_unlisted_dead_row;scripts/test_guard_scripts.sh::fn mut_error_status_stale_allowance'
     'c-err-1013|negative|bound|crates/core/tests/purity_guard.rs::fn the_pre_auth_error_never_formats_a_message'
-    'c-err-1014|negative|bound|conformance/cases/object/c-object-0011.toml::/expect/body/exact_utf8~<Error><Key>batch/retained</Key>;conformance/cases/object/c-object-0004.toml::/expect/body/golden=goldens/c-object-0004.xml'
+    'c-err-1014|negative|bound|conformance/cases/object/c-object-0011.toml::/expect/body/exact_utf8~<Error><Key>batch/retained</Key>;conformance/cases/object/c-object-0004.toml::/expect/body/golden~<Deleted><Key>batch/absent</Key></Deleted>'
     'c-err-1015|negative|bound|crates/core/src/ops/shared/bucket_region.rs::fn c_err_1015_a_permanent_redirect_has_no_location_header'
 )
 
@@ -252,6 +254,49 @@ def resolve(document, pointer):
     return current
 
 
+def golden_bodies(value):
+    """Bytes the runner compares for a `/golden` pointer.
+
+    The pointer itself is only a path. The substring has to survive in the default document and in
+    every profile document that replaces it, or a profile swap can drop the rule while this ledger
+    stays green.
+    """
+    def under_goldens(relative):
+        if not isinstance(relative, str) or relative.startswith(("/", "\\")):
+            return None
+        parts = relative.split("/")
+        if parts[0] != "goldens" or any(part in ("", ".", "..") for part in parts):
+            return None
+        return root / "conformance" / relative
+
+    path = under_goldens(value)
+    if path is None:
+        fail(f"golden path is not under conformance/goldens: {value!r}")
+        return None
+    paths = [path]
+    profile_path = root / "conformance" / "profile-goldens.toml"
+    if profile_path.is_file():
+        try:
+            profile = tomllib.loads(profile_path.read_text())
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            fail(f"conformance/profile-goldens.toml: {error}")
+            return None
+        for table in profile.values():
+            if isinstance(table, dict) and value in table:
+                mapped = under_goldens(table[value])
+                if mapped is None:
+                    fail(f"profile golden path is not under conformance/goldens: {table[value]!r}")
+                    return None
+                paths.append(mapped)
+    bodies = []
+    for golden in paths:
+        if not golden.is_file():
+            fail(f"golden file is missing: {golden.relative_to(root)}")
+            return None
+        bodies.append(golden.read_text())
+    return bodies
+
+
 def check_toml_evidence(identifier, relative, selector):
     document = load(relative)
     if document is None:
@@ -278,6 +323,13 @@ def check_toml_evidence(identifier, relative, selector):
         return
     if separator == "=" and str(value) != literal:
         fail(f"{identifier}: {relative}{pointer} is {value!r}, the ledger records {literal!r}")
+        return
+    if separator == "~" and pointer.endswith("/golden"):
+        bodies = golden_bodies(value)
+        if bodies is None:
+            return
+        if any(literal not in body for body in bodies):
+            fail(f"{identifier}: {relative}{pointer} does not contain {literal!r}")
         return
     if separator == "~" and literal not in str(value):
         fail(f"{identifier}: {relative}{pointer} does not contain {literal!r}")
