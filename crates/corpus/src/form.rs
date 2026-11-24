@@ -18,7 +18,7 @@
 //! placeholder, and proving a claimed rewrite.
 //! Not responsible for: any other body content, which stays a refusal; see `redact`.
 //! Upstream: `redact::scan`, `redact::sanitize` and the redaction-claim check.
-//! Downstream: nothing; this module only reads and rewrites `schema::Entry` bodies.
+//! Downstream: the schema and the declared-length check for complete captures.
 //!
 //! A form field is spelled `name="x-amz-signature"` followed by a blank line and the value, so
 //! none of the text rules sees it: there is no `Signature=` for the SigV4 rule, and a SigV2
@@ -211,6 +211,29 @@ pub fn has_live_form_credential(text: &str) -> bool {
     })
 }
 
+/// Only a complete, fixed-length entity has a length the sanitizer can update.
+fn fixed_length_header(entry: &Entry) -> Option<usize> {
+    if entry.capture != crate::schema::Capture::HeadFull
+        || entry.has_chunk_framing()
+        || entry.header_values("transfer-encoding").next().is_some()
+        || entry
+            .chunks
+            .iter()
+            .flatten()
+            .any(|chunk| matches!(chunk, Chunk::Control { .. }))
+    {
+        return None;
+    }
+    let mut lengths = entry
+        .headers
+        .iter()
+        .enumerate()
+        .filter(|(_, (name, _))| name.eq_ignore_ascii_case("content-length"));
+    let (index, (_, value)) = lengths.next()?;
+    let value = value.trim_matches([' ', '\t']);
+    (lengths.next().is_none() && !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())).then_some(index)
+}
+
 /// Rewrite every sensitive form field of a declared multipart body to the placeholder, returning
 /// the `redacted` record names touched.
 ///
@@ -220,8 +243,17 @@ pub fn sanitize_body(entry: &mut Entry) -> Vec<String> {
     if !declares_form(entry) {
         return Vec::new();
     }
+    let mut length_header = fixed_length_header(entry);
+    // Refuse to turn an inconsistent capture into an admissible one if the replacement
+    // happens to fill the exact gap. Both callers run the credential gate after sanitizing.
+    if length_header.is_some() && crate::store::check_declared_length(entry).is_err() {
+        return Vec::new();
+    }
     let mut touched: Vec<String> = Vec::new();
-    for chunk in entry.chunks.iter_mut().flatten() {
+    let mut recorded_len = 0;
+    let chunks = entry.chunks.as_deref_mut().unwrap_or_default();
+    let chunk_count = chunks.len();
+    for (index, chunk) in chunks.iter_mut().enumerate() {
         let Chunk::Data { bytes_b64, .. } = chunk else {
             continue;
         };
@@ -234,6 +266,11 @@ pub fn sanitize_body(entry: &mut Entry) -> Vec<String> {
             if bytes[field.start..field.end] == *PLACEHOLDER.as_bytes() || field.start == field.end {
                 continue;
             }
+            // A timed chunk can end inside a field. Without its closing delimiter the
+            // chunk-local matcher cannot establish the length of the original field.
+            if field.end == bytes.len() && index + 1 < chunk_count {
+                length_header = None;
+            }
             bytes.splice(field.start..field.end, PLACEHOLDER.bytes());
             changed = true;
             let record = format!("{RECORD_PREFIX}{}", field.name);
@@ -241,8 +278,17 @@ pub fn sanitize_body(entry: &mut Entry) -> Vec<String> {
                 touched.push(record);
             }
         }
+        recorded_len += bytes.len();
         if changed {
             *bytes_b64 = base64::encode(&bytes);
+        }
+    }
+    if !touched.is_empty()
+        && let Some(index) = length_header
+    {
+        let value = &mut entry.headers[index].1;
+        if value.trim().parse::<usize>() != Ok(recorded_len) {
+            *value = recorded_len.to_string();
         }
     }
     touched
@@ -681,3 +727,7 @@ mod tests {
         redact::admit(&posted).expect("a sanitized form is admitted");
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/form_capture_length.rs"]
+mod capture_length_tests;
