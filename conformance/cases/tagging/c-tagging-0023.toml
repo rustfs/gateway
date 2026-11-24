@@ -79,7 +79,7 @@ name = "the-read-of-an-unknown-version-is-refused"
 
 [exchanges.request]
 method = "GET"
-target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=497bfe72-51aa-4672-8410-24977663a995"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [exchanges.expect]
@@ -96,7 +96,7 @@ name = "the-write-to-an-unknown-version-is-refused"
 
 [exchanges.request]
 method = "PUT"
-target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=497bfe72-51aa-4672-8410-24977663a995"
 headers = {  }
 content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>red</Value></Tag></TagSet></Tagging>' }
@@ -116,7 +116,7 @@ name = "the-untag-of-an-unknown-version-is-refused"
 
 [exchanges.request]
 method = "DELETE"
-target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=497bfe72-51aa-4672-8410-24977663a995"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [exchanges.expect]
@@ -142,6 +142,4 @@ status = 200
 connection_after = "open"
 
 [exchanges.expect.body]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>'''
+golden = "goldens/c-tagging-0023.xml"

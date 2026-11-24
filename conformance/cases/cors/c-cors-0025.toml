@@ -40,9 +40,7 @@ request_id_present = true
 
 [exchanges.expect.body]
 redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+golden = "goldens/c-cors-0025.xml"
 
 [[exchanges]]
 name = "write"
@@ -66,9 +64,7 @@ request_id_present = true
 
 [exchanges.expect.body]
 redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+golden = "goldens/c-cors-0025.xml"
 
 [[exchanges]]
 name = "delete"
@@ -89,6 +85,4 @@ request_id_present = true
 
 [exchanges.expect.body]
 redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+golden = "goldens/c-cors-0025.xml"

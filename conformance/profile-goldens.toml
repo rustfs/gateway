@@ -20,6 +20,7 @@
 
 # R10 identifies a RustFS error with RequestId alone.
 "goldens/c-cors-0012.xml" = "goldens/rustfs/c-cors-0012.xml"
+"goldens/c-cors-0025.xml" = "goldens/rustfs/c-cors-0025.xml"
 
 # RustFS 1.0.5 CORS configuration read after PutBucketCors.
 "goldens/c-cors-0002.xml" = "goldens/rustfs/c-cors-0002.xml"
@@ -27,3 +28,7 @@
 "goldens/c-cors-0004.xml" = "goldens/rustfs/c-cors-0004.xml"
 "goldens/c-cors-0005.xml" = "goldens/rustfs/c-cors-0005.xml"
 "goldens/c-cors-0009.xml" = "goldens/rustfs/c-cors-0009.xml"
+
+# Tagging reads use the RustFS XML declaration layout.
+"goldens/c-tagging-0011.xml" = "goldens/rustfs/c-tagging-0011.xml"
+"goldens/c-tagging-0023.xml" = "goldens/rustfs/c-tagging-0023.xml"
