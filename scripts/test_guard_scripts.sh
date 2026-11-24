@@ -3075,6 +3075,44 @@ expect_fail_with_diagnostic check_object_semantics_ledger.sh \
     "the ledger records 'binary/octet-stream'" \
     mut_object_ledger_assertion_value_changed
 
+mut_object_ledger_default_golden_drops_a_deleted_key() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/goldens/c-object-0004.xml")
+text = path.read_text()
+old = "<Deleted><Key>batch/two</Key></Deleted>"
+if text.count(old) != 1:
+    raise SystemExit("default delete golden mutation subject is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+# The case now points at a golden file. A ledger that only checked the path string would stay green
+# after the deleted-key element disappeared from the bytes the runner compares.
+expect_fail_with_diagnostic check_object_semantics_ledger.sh \
+    'the default multi-object delete golden dropping a key the ledger still names' \
+    'does not contain' \
+    mut_object_ledger_default_golden_drops_a_deleted_key
+
+mut_object_ledger_profile_golden_drops_an_absent_key() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/goldens/rustfs/c-object-0004.xml")
+text = path.read_text()
+old = "<Deleted><Key>batch/absent</Key></Deleted>"
+if text.count(old) != 1:
+    raise SystemExit("profile delete golden mutation subject is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+# The RustFS profile replaces the default document before the comparison. Dropping the key only
+# there has to fail too, or the profile swap is an untested way around the ledger.
+expect_fail_with_diagnostic check_object_semantics_ledger.sh \
+    'the RustFS profile delete golden dropping a key the ledger still names' \
+    'does not contain' \
+    mut_object_ledger_profile_golden_drops_an_absent_key
+
 mut_object_ledger_case_polarity_flipped() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -23775,6 +23813,40 @@ PYEOF
 expect_fail check_error_contract_ledger.sh \
     'the exact NoSuchKey message bytes reworded out of the case that pins them' \
     mut_error_ledger_exact_message_weakened \
+    'does not contain'
+
+mut_error_ledger_default_golden_drops_the_absent_key() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/goldens/c-object-0004.xml")
+text = path.read_text()
+old = "<Deleted><Key>batch/absent</Key></Deleted>"
+if text.count(old) != 1:
+    raise SystemExit("default absent-key golden mutation subject is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_error_contract_ledger.sh \
+    'the default delete golden dropping the absent key the error ledger names' \
+    mut_error_ledger_default_golden_drops_the_absent_key \
+    'does not contain'
+
+mut_error_ledger_profile_golden_drops_the_absent_key() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/goldens/rustfs/c-object-0004.xml")
+text = path.read_text()
+old = "<Deleted><Key>batch/absent</Key></Deleted>"
+if text.count(old) != 1:
+    raise SystemExit("profile absent-key golden mutation subject is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_error_contract_ledger.sh \
+    'the RustFS profile delete golden dropping the absent key the error ledger names' \
+    mut_error_ledger_profile_golden_drops_the_absent_key \
     'does not contain'
 
 mut_error_ledger_compile_fail_fixture_gutted() {

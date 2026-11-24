@@ -26,7 +26,9 @@ ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 #
 # `bound`   — evidence is one or more `<path>::<selector>` entries separated by `;`.
 #             A `.toml` selector is `<json pointer>`, `<pointer>=<literal>` or `<pointer>~<substring>`,
-#             resolved against the parsed case document. A `.rs` selector is `fn <name>`.
+#             resolved against the parsed case document. A pointer ending in `/golden` does not
+#             compare the path: the substring has to occur in that file and in every profile golden
+#             that replaces it. A `.rs` selector is `fn <name>`.
 # `blocked` — evidence is `<owner issue>::<why it is not an assertion yet>`; naming a path is refused.
 #
 # The polarity column is §7's own, per rule. It is not the polarity of the case that carries the
@@ -51,8 +53,8 @@ requirements=(
     'c-obj-0016|positive|bound|conformance/cases/object/c-object-0036.toml::/exchanges/0/expect/status=204;conformance/cases/object/c-object-0036.toml::/exchanges/0/expect/headers_present/x-amz-delete-marker=true'
     'c-obj-0017|positive|bound|conformance/cases/object/c-object-0045.toml::/request/target=/conf-object-null-version/versioned/read.txt?versionId=null;conformance/cases/object/c-object-0045.toml::/expect/status=404;conformance/cases/object/c-object-0045.toml::/expect/error/code=NoSuchVersion'
     'c-obj-0018|positive|bound|conformance/cases/tagging/c-tagging-0019.toml::/exchanges/1/expect/headers_present/x-amz-tagging-count=2'
-    'c-obj-0019|positive|bound|conformance/cases/object/c-object-0004.toml::/expect/body/golden=goldens/c-object-0004.xml'
-    'c-obj-0020|positive|bound|conformance/cases/object/c-object-0024.toml::/expect/body/golden=goldens/c-object-0024.xml'
+    'c-obj-0019|positive|bound|conformance/cases/object/c-object-0004.toml::/expect/body/golden~<Deleted><Key>batch/two</Key></Deleted>'
+    'c-obj-0020|positive|bound|conformance/cases/object/c-object-0024.toml::/expect/body/golden~<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></DeleteResult>'
     'c-obj-0021|positive|bound|conformance/cases/object/c-object-0041.toml::/exchanges/0/expect/headers_present/x-amz-checksum-crc32c=yZRlqg==;conformance/cases/object/c-object-0041.toml::/exchanges/1/expect/headers_present/x-amz-checksum-crc32c=yZRlqg==;conformance/cases/object/c-object-0041.toml::/exchanges/2/expect/headers_present/x-amz-checksum-crc32c=yZRlqg=='
     'c-obj-0022|positive|bound|conformance/cases/object/c-object-0042.toml::/exchanges/0/expect/headers_present/x-amz-checksum-crc64nvme=jSnVw/bqjr4=;conformance/cases/object/c-object-0042.toml::/exchanges/1/expect/headers_present/x-amz-checksum-crc64nvme=jSnVw/bqjr4='
     'c-obj-0023|positive|bound|conformance/cases/naming/c-naming-0001.toml::/expect/body/exact_utf8=the empty segment survived'
@@ -65,7 +67,7 @@ requirements=(
     'c-obj-0030|negative|bound|conformance/cases/object/c-object-0025.toml::/exchanges/0/expect/error/code=NoSuchBucket'
     'c-obj-0031|negative|bound|conformance/cases/object/c-object-0003.toml::/expect/status=204'
     'c-obj-0032|negative|bound|conformance/cases/object/c-object-0025.toml::/exchanges/1/expect/error/code=NoSuchBucket'
-    'c-obj-0033|negative|bound|conformance/cases/object/c-object-0004.toml::/expect/body/golden=goldens/c-object-0004.xml'
+    'c-obj-0033|negative|bound|conformance/cases/object/c-object-0004.toml::/expect/body/golden~<Deleted><Key>batch/absent</Key></Deleted>'
     'c-obj-0034|negative|bound|conformance/cases/object/c-object-0011.toml::/expect/body/exact_utf8~<Error><Key>batch/retained</Key>'
     'c-obj-0035|negative|bound|conformance/cases/object/c-object-0010.toml::/expect/body/contains_utf8/1=Content-MD5'
     'c-obj-0036|negative|bound|conformance/cases/object/c-object-0026.toml::/exchanges/0/expect/error/code=InvalidDigest'
@@ -286,6 +288,49 @@ def resolve(document, pointer):
     return current
 
 
+def golden_bodies(value):
+    """Bytes the runner compares for a `/golden` pointer.
+
+    The pointer itself is only a path. The substring has to survive in the default document and in
+    every profile document that replaces it, or a profile swap can drop the rule while this ledger
+    stays green.
+    """
+    def under_goldens(relative):
+        if not isinstance(relative, str) or relative.startswith(("/", "\\")):
+            return None
+        parts = relative.split("/")
+        if parts[0] != "goldens" or any(part in ("", ".", "..") for part in parts):
+            return None
+        return root / "conformance" / relative
+
+    path = under_goldens(value)
+    if path is None:
+        fail(f"golden path is not under conformance/goldens: {value!r}")
+        return None
+    paths = [path]
+    profile_path = root / "conformance" / "profile-goldens.toml"
+    if profile_path.is_file():
+        try:
+            profile = tomllib.loads(profile_path.read_text())
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            fail(f"conformance/profile-goldens.toml: {error}")
+            return None
+        for table in profile.values():
+            if isinstance(table, dict) and value in table:
+                mapped = under_goldens(table[value])
+                if mapped is None:
+                    fail(f"profile golden path is not under conformance/goldens: {table[value]!r}")
+                    return None
+                paths.append(mapped)
+    bodies = []
+    for golden in paths:
+        if not golden.is_file():
+            fail(f"golden file is missing: {golden.relative_to(root)}")
+            return None
+        bodies.append(golden.read_text())
+    return bodies
+
+
 def check_toml_evidence(identifier, relative, selector):
     document = load(relative)
     if document is None:
@@ -312,6 +357,13 @@ def check_toml_evidence(identifier, relative, selector):
         return
     if separator == "=" and str(value) != literal:
         fail(f"{identifier}: {relative}{pointer} is {value!r}, the ledger records {literal!r}")
+        return
+    if separator == "~" and pointer.endswith("/golden"):
+        bodies = golden_bodies(value)
+        if bodies is None:
+            return
+        if any(literal not in body for body in bodies):
+            fail(f"{identifier}: {relative}{pointer} does not contain {literal!r}")
         return
     if separator == "~" and literal not in str(value):
         fail(f"{identifier}: {relative}{pointer} does not contain {literal!r}")
