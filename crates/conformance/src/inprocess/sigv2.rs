@@ -70,7 +70,7 @@ impl<'a> SignInput<'a> {
     }
 }
 
-pub(super) fn sign_header(input: SignInput<'_>) -> Result<Vec<(String, String)>, SutError> {
+fn sign_header(input: SignInput<'_>, request_time: &crate::time::Instant) -> Result<Vec<(String, String)>, SutError> {
     let SignInput {
         sign,
         method,
@@ -99,6 +99,16 @@ pub(super) fn sign_header(input: SignInput<'_>) -> Result<Vec<(String, String)>,
     }
     if sign.read("signSpec.region").is_some() {
         return Err(unsupported("sigv2_header", "a SigV4 region scope"));
+    }
+    if !headers.contains_key(http::header::DATE) && !headers.contains_key("x-amz-date") {
+        let date = rustfs_gateway::Timestamp::from_secs(request_time.unix_seconds)
+            .render(rustfs_gateway::TimestampFormat::HttpDate)
+            .map_err(|_| SutError::Environment("SigV2 request time exceeds the HTTP date range".to_owned()))?;
+        headers.insert(
+            http::header::DATE,
+            http::HeaderValue::from_str(&date)
+                .map_err(|_| SutError::Environment("SigV2 request time is not an HTTP header value".to_owned()))?,
+        );
     }
     if let Some(token) = token {
         let value = http::HeaderValue::from_str(token)
@@ -141,7 +151,7 @@ pub(super) fn sign(
     original_target: &str,
 ) -> Result<(Vec<(String, String)>, String), SutError> {
     match mode {
-        "sigv2_header" => Ok((sign_header(input)?, original_target.to_owned())),
+        "sigv2_header" => Ok((sign_header(input, request_time)?, original_target.to_owned())),
         "presigned_v2" => sign_presigned(input, request_time),
         _ => Err(SutError::Environment(format!("`sign.mode = \"{mode}\"` is not SigV2"))),
     }
@@ -270,22 +280,40 @@ mod tests {
             steps: Vec::new(),
             sign: Some(sign.clone()),
         };
-        let headers = vec![
-            ("host".to_owned(), HOST.to_owned()),
-            ("date".to_owned(), "Fri, 02 Jan 2026 03:04:05 GMT".to_owned()),
-        ];
-        let request_time = time::parse_rfc3339(time::DEFAULT_FIXED).expect("the pinned fixture time");
+        let request_time = time::parse_rfc3339("2026-04-12T01:02:03Z").expect("the test signing time");
         let target = InProcess::new(PathBuf::from("."));
+        let previous = "Fri, 02 Jan 2026 03:04:05 GMT";
 
-        let (signed, request_target) =
-            sign_request(&sign, &wire, &headers, &request_time, target.limits(), 0).expect("SigV2 header signing must be wired");
-
-        assert_eq!(request_target, wire.target);
-        assert!(
-            signed
-                .iter()
-                .any(|(name, value)| name == "authorization" && value.starts_with("AWS "))
-        );
+        for (date, amz_date, expected_date) in [
+            (None, None, Some("Sun, 12 Apr 2026 01:02:03 GMT")),
+            (Some(previous), None, Some(previous)),
+            (None, Some(previous), None),
+            (Some(previous), Some(previous), Some(previous)),
+        ] {
+            let mut headers = vec![("host".to_owned(), HOST.to_owned())];
+            for (name, value) in [("date", date), ("x-amz-date", amz_date)] {
+                if let Some(value) = value {
+                    headers.push((name.to_owned(), value.to_owned()));
+                }
+            }
+            let (signed, request_target) =
+                sign_request(&sign, &wire, &headers, &request_time, target.limits(), 0).expect("signs the SigV2 request");
+            let values = |key: &str| {
+                signed
+                    .iter()
+                    .filter(|(name, _)| name == key)
+                    .map(|(_, value)| value.as_str())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(request_target, wire.target);
+            assert_eq!(values("date"), expected_date.into_iter().collect::<Vec<_>>());
+            assert_eq!(values("x-amz-date"), amz_date.into_iter().collect::<Vec<_>>());
+            assert!(
+                signed
+                    .iter()
+                    .any(|(name, value)| name == "authorization" && value.starts_with("AWS "))
+            );
+        }
     }
 
     #[test]

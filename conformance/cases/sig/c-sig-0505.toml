@@ -31,7 +31,6 @@ name = "conf-sig-v2-cors"
 [request]
 method = "GET"
 target = "/conf-sig-v2-cors?cors"
-headers = { "date" = "Fri, 02 Jan 2026 03:04:05 GMT" }
 sign = { mode = "sigv2_header", credential = "valid" }
 
 [expect]
