@@ -16,6 +16,7 @@
 # RustFS 1.0.5 versioning and lifecycle documents read after a successful write.
 "goldens/c-bucketconfig-0002.xml" = "goldens/rustfs/c-bucketconfig-0002.xml"
 "goldens/c-lifecycle-0008.xml" = "goldens/rustfs/c-lifecycle-0008.xml"
+"goldens/c-lifecycle-0031.xml" = "goldens/rustfs/c-lifecycle-0031.xml"
 "goldens/c-lifecycle-0038.xml" = "goldens/rustfs/c-lifecycle-0038.xml"
 
 # R10 identifies a RustFS error with RequestId alone.
