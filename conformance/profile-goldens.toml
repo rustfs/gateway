@@ -17,3 +17,6 @@
 "goldens/c-bucketconfig-0002.xml" = "goldens/rustfs/c-bucketconfig-0002.xml"
 "goldens/c-lifecycle-0008.xml" = "goldens/rustfs/c-lifecycle-0008.xml"
 "goldens/c-lifecycle-0038.xml" = "goldens/rustfs/c-lifecycle-0038.xml"
+
+# R10 identifies a RustFS error with RequestId alone.
+"goldens/c-cors-0012.xml" = "goldens/rustfs/c-cors-0012.xml"
