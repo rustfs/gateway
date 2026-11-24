@@ -6,3 +6,9 @@
 # Complete RustFS 1.0.5 responses, also served by the native backend and compat-sut.
 "goldens/c-bucketconfig-0023.xml" = "goldens/rustfs/c-bucketconfig-0023.xml"
 "goldens/c-location-0002.xml" = "goldens/rustfs/c-location-0002.xml"
+
+# Empty bucket configuration responses captured from RustFS 1.0.5.
+"goldens/c-bucketconfig-0024.xml" = "goldens/rustfs/c-bucketconfig-0024.xml"
+"goldens/c-bucketconfig-0025.xml" = "goldens/rustfs/c-bucketconfig-0025.xml"
+"goldens/c-bucketconfig-0026.xml" = "goldens/rustfs/c-bucketconfig-0026.xml"
+"goldens/c-bucketconfig-0027.xml" = "goldens/rustfs/c-bucketconfig-0027.xml"
