@@ -89,7 +89,7 @@ requirements=(
     'c-err-1011|negative|bound|crates/model/src/tests/overlay_tests.rs::fn refuses_a_row_without_a_status'
     'c-err-1012|negative|bound|scripts/test_guard_scripts.sh::fn mut_error_status_unlisted_dead_row;scripts/test_guard_scripts.sh::fn mut_error_status_stale_allowance'
     'c-err-1013|negative|bound|crates/core/tests/purity_guard.rs::fn the_pre_auth_error_never_formats_a_message'
-    'c-err-1014|negative|bound|conformance/cases/object/c-object-0011.toml::/expect/body/exact_utf8~<Error><Key>batch/retained</Key>;conformance/cases/object/c-object-0004.toml::/expect/body/exact_utf8~<Deleted><Key>batch/absent</Key></Deleted>'
+    'c-err-1014|negative|bound|conformance/cases/object/c-object-0011.toml::/expect/body/exact_utf8~<Error><Key>batch/retained</Key>;conformance/cases/object/c-object-0004.toml::/expect/body/golden=goldens/c-object-0004.xml'
     'c-err-1015|negative|bound|crates/core/src/ops/shared/bucket_region.rs::fn c_err_1015_a_permanent_redirect_has_no_location_header'
 )
 
