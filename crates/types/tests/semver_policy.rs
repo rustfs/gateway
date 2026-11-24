@@ -19,10 +19,15 @@
 //! NOT responsible for: inspecting generated source text; repository guards own that. Upstream:
 //! rustc and the pinned legacy XML oracle. Downstream: DTO SemVer and persistence migration policy.
 
+// The persistence oracles need the s3s dev-dependency. The std-only compiler probe sets
+// `dto_fru_probe` and skips them; `cargo test` does not set it, so those tests still run.
+#[cfg(not(dto_fru_probe))]
 #[path = "legacy_xml/reader.rs"]
 mod legacy_xml_text_contract;
+#[cfg(not(dto_fru_probe))]
 #[path = "legacy_xml/writer.rs"]
 mod legacy_xml_writer_contract;
+#[cfg(not(dto_fru_probe))]
 #[path = "legacy_xml/writer_scalar_contract.rs"]
 mod legacy_xml_writer_scalar_contract;
 
