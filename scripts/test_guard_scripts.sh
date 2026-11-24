@@ -1139,7 +1139,9 @@ expect_rustc_test_fail_with_diagnostic() {
     make_sandbox
     sandbox="$SANDBOX"
     binary="$(mktemp "${TMPDIR:-/tmp}/gateway-rustc-test.XXXXXX")"
-    if ! rustc --edition=2024 --test "$sandbox/$source" -o "$binary" >/dev/null 2>&1 ||
+    # `dto_fru_probe` keeps this invocation std-only. The persistence oracles in the same
+    # file need the s3s dev-dependency, which this probe must not start.
+    if ! rustc --edition=2024 --cfg dto_fru_probe --test "$sandbox/$source" -o "$binary" >/dev/null 2>&1 ||
         ! "$binary" "$test_name" --exact >/dev/null 2>&1; then
         rm -f "$binary"
         fail_msg "${source} rejects its unmodified compiler control: ${test_name}"
@@ -1148,7 +1150,7 @@ expect_rustc_test_fail_with_diagnostic() {
     (cd "$sandbox" && "$mutate" >/dev/null)
     stage_sandbox_changes "$sandbox" >/dev/null 2>&1
     output="$({
-        rustc --edition=2024 --test "$sandbox/$source" -o "$binary" &&
+        rustc --edition=2024 --cfg dto_fru_probe --test "$sandbox/$source" -o "$binary" &&
             "$binary" "$test_name" --exact --nocapture
     } 2>&1)" || rc=$?
     rm -f "$binary"

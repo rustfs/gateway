@@ -87,7 +87,7 @@ tower-http = { version = "0.6", default-features = false }
 tracing = "0.1"
 # Dev-only: a test subscriber answers `current_span`, whose `Current` type `tracing` does not re-export.
 tracing-core = "0.1"
-url = "2.5.8"
+url = "2.5.9"
 # MIT. The three S3 XXHash checksum algorithms (XXH64, XXH3-64, XXH3-128); `alloc` is what the XXH3
 # streaming constructors need, and nothing else is enabled.
 twox-hash = { version = "2.1", default-features = false, features = ["alloc", "xxhash64", "xxhash3_64", "xxhash3_128"] }
@@ -106,7 +106,9 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem
 unsafe_code = "forbid"
 # `gateway_tsan` is set only by scripts/run_gateway_tsan.sh: it compiles the gateway test binary's
 # `dhat::Alloc` global allocator out, so ThreadSanitizer observes the system allocator (#958).
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(gateway_tsan)"] }
+# `dto_fru_probe` is set only by the std-only rustc invocation in scripts/test_guard_scripts.sh.
+# It drops the s3s persistence oracles out of that probe so the compiler control does not need them.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(gateway_tsan)", "cfg(dto_fru_probe)"] }
 missing_docs = "deny"
 unreachable_pub = "warn"
 
