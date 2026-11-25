@@ -81,6 +81,17 @@ fn header<'a>(request: &'a RawRequest, name: &str) -> Option<&'a str> {
 /// A payload mode the replay cannot sign (chunk signatures, SigV4a), or a request head the signer
 /// cannot canonicalise.
 pub(crate) fn signed(request: &RawRequest) -> Result<RawRequest, String> {
+    signed_with(request, ACCESS_KEY, SECRET_KEY, REGION)
+}
+
+/// `request`, signed now with caller-supplied credentials and region under the payload mode its
+/// `x-amz-content-sha256` names.
+///
+/// # Errors
+///
+/// A payload mode the replay cannot sign (chunk signatures, SigV4a), or a request head the signer
+/// cannot canonicalise.
+pub(crate) fn signed_with(request: &RawRequest, access_key: &str, secret_key: &str, region: &str) -> Result<RawRequest, String> {
     let trailer = match header(request, "x-amz-trailer") {
         Some(names) => {
             let names = names
@@ -120,9 +131,9 @@ pub(crate) fn signed(request: &RawRequest) -> Result<RawRequest, String> {
     let raw_host = RawHost::from_host_header(host_bytes).map_err(|error| format!("host: {error:?}"))?;
 
     let stamp = AmzDate::parse(&amz_date(RequestNow::capture().unix_seconds())).map_err(|error| format!("stamp: {error:?}"))?;
-    let scope = SigningScope::new(stamp.day(), REGION, SigService::S3).map_err(|error| format!("scope: {error:?}"))?;
+    let scope = SigningScope::new(stamp.day(), region, SigService::S3).map_err(|error| format!("scope: {error:?}"))?;
     let credentials =
-        SigningCredentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credentials: {error:?}"))?;
+        SigningCredentials::new(access_key, secret_key.as_bytes()).map_err(|error| format!("credentials: {error:?}"))?;
     let mut signer = SigV4Signer::new(credentials, scope);
 
     let (path, query) = request.target.split_once('?').unwrap_or((request.target.as_str(), ""));

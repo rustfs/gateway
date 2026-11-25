@@ -28,6 +28,10 @@ path = "src/bin/shadow-proxy.rs"
 name = "fuzz-to-case"
 path = "src/bin/fuzz-to-case.rs"
 
+[[bin]]
+name = "fuzz-endpoint-replay"
+path = "src/bin/fuzz-endpoint-replay.rs"
+
 [package.metadata.gateway]
 # Ring 1 by the workspace rule (every package under `crates/` is ring 0/1 and links no RustFS
 # crate). "RING 2 — migration-only" in README.md names its lifetime, not a dependency on RustFS:

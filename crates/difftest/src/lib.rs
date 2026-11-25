@@ -47,6 +47,7 @@ mod xmltree;
 
 pub mod decode;
 pub mod encode;
+pub mod endpoint_replay;
 pub mod fuzz;
 pub mod fuzz_case;
 pub mod known;

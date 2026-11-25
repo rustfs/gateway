@@ -8,8 +8,14 @@ name: Fuzz nightly
 #   runs (rustfs/backlog#1766 a-pf-0008, the long-run lane the PR-side seed
 #   replays deliberately leave out).
 #
+#   A second job (`rustfs-endpoint-replay`, rustfs/backlog#2781) checks out,
+#   builds, and starts a live RustFS candidate out-of-process and replays the
+#   `decode_diff` and `encode_diff` seed and cached corpora over real HTTP/1.1
+#   via `fuzz-endpoint-replay --endpoint http://127.0.0.1:19000`.
+#
 #   A crash fails the job. The crashing input and its `cargo fuzz tmin`
-#   minimisation are uploaded as an artifact. Per the 2026-08-12 Decision on
+#   minimisation (or endpoint replay crash input and candidate log) are
+#   uploaded as an artifact. Per the 2026-08-12 Decision on
 #   rustfs/backlog#1766 (a-pf-0018), a crash becomes a committed regression
 #   seed under fuzz/seeds/<target>/ in the fix PR, and a conformance case only
 #   when a human has tied the behaviour to protocol evidence; nothing here
@@ -17,9 +23,10 @@ name: Fuzz nightly
 #
 # WHY NOT THE PR GATE
 #
-#   Seventeen targets for five minutes each is well past the ten-minute PR
-#   budget, and libFuzzer's coverage search is not reproducible run to run.
-#   The PR gate replays the committed seeds instead.
+#   Twenty-three targets for five minutes each plus a live RustFS candidate
+#   build is well past the ten-minute PR budget, and libFuzzer's coverage
+#   search is not reproducible run to run. The PR gate replays the committed
+#   seeds instead.
 # ---------------------------------------------------------------------------
 
 on:
@@ -31,6 +38,12 @@ on:
       seconds:
         description: "Fuzzing budget per target, in seconds."
         default: "300"
+      rustfs_ref:
+        description: "RustFS candidate ref (branch, tag, or commit) to replay against."
+        default: "main"
+      endpoint:
+        description: "Optional external http://host:port candidate endpoint; leave empty to build and launch rustfs/rustfs."
+        default: ""
 
 permissions:
   contents: read
@@ -146,3 +159,192 @@ jobs:
             fuzz/artifacts/${{ matrix.target }}
             ${{ runner.temp }}/fuzz.log
           if-no-files-found: warn
+
+  rustfs-endpoint-replay:
+    name: Replay decode_diff/encode_diff against RustFS candidate
+    needs: [fuzz]
+    if: ${{ !cancelled() }}
+    runs-on: sm-standard-4
+    timeout-minutes: 60
+    env:
+      CANDIDATE_ENDPOINT: http://127.0.0.1:19000
+      ACCESS_KEY: AKIAIOSFODNN7EXAMPLE
+      SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+      - name: Checkout RustFS candidate
+        if: ${{ !inputs.endpoint }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: rustfs/rustfs
+          ref: ${{ inputs.rustfs_ref || 'main' }}
+          path: candidate/rustfs
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+      - name: Cache gateway replay build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: fuzz-endpoint-replay-gateway
+      - name: Cache RustFS candidate build
+        if: ${{ !inputs.endpoint }}
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: candidate/rustfs -> target
+          shared-key: fuzz-endpoint-replay-rustfs
+      - name: Install RustFS build dependencies
+        if: ${{ !inputs.endpoint }}
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            apt-get update && apt-get install -y --no-install-recommends cmake libssl-dev
+          else
+            sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends cmake libssl-dev
+          fi
+      - name: Build fuzz-endpoint-replay
+        run: cargo build --locked --release -p rustfs-gateway-difftest --bin fuzz-endpoint-replay
+      - name: Build RustFS candidate
+        if: ${{ !inputs.endpoint }}
+        working-directory: candidate/rustfs
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > "$RUNNER_TEMP/candidate-rev.txt"
+          cargo build --locked -p rustfs --bin rustfs
+      - name: Restore decode_diff corpus
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: fuzz/corpus/decode_diff
+          key: fuzz-corpus-decode_diff-${{ github.run_id }}
+          restore-keys: fuzz-corpus-decode_diff-
+      - name: Restore encode_diff corpus
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: fuzz/corpus/encode_diff
+          key: fuzz-corpus-encode_diff-${{ github.run_id }}
+          restore-keys: fuzz-corpus-encode_diff-
+      - name: Start RustFS candidate
+        if: ${{ !inputs.endpoint }}
+        id: candidate
+        env:
+          RUSTFS_UNSAFE_BYPASS_DISK_CHECK: "true"
+          RUSTFS_CONSOLE_ENABLE: "false"
+          RUSTFS_SERVER_DOMAINS: s3.example.com,s3.us-east-1.example.com
+          RUST_LOG: info
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/endpoint-replay"
+          host="$RUNNER_TEMP/rustfs-candidate"
+          mkdir -p "$out" "$host"/data/rustfs{0..3}
+          candidate/rustfs/target/debug/rustfs --version | tee "$out/candidate-version.txt"
+          candidate/rustfs/target/debug/rustfs \
+            --address "${CANDIDATE_ENDPOINT#http://}" \
+            --access-key "$ACCESS_KEY" \
+            --secret-key "$SECRET_KEY" \
+            "$host"/data/rustfs{0..3} \
+            > "$out/rustfs.log" 2>&1 &
+          pid=$!
+          echo "$pid" > "$host/rustfs.pid"
+          for _ in $(seq 120); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              status=0
+              wait "$pid" || status=$?
+              echo "did not start: exit ${status}: $(grep -v '^[[:space:]]*$' "$out/rustfs.log" | tail -n 1)" | tee "$out/startup.txt"
+              exit 1
+            fi
+            if curl -sf "$CANDIDATE_ENDPOINT/health/ready" >/dev/null; then
+              echo ready > "$out/startup.txt"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "did not start: /health/ready did not answer within 120 seconds" | tee "$out/startup.txt"
+          exit 1
+      - name: Replay decode_diff and encode_diff corpora against endpoint
+        env:
+          EXTERNAL_ENDPOINT: ${{ inputs.endpoint }}
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/endpoint-replay"
+          mkdir -p "$out/artifacts/decode_diff" "$out/artifacts/encode_diff" \
+            fuzz/corpus/decode_diff fuzz/corpus/encode_diff
+          if [ -n "${EXTERNAL_ENDPOINT:-}" ]; then
+            endpoint="$EXTERNAL_ENDPOINT"
+            auth_args=()
+          else
+            endpoint="$CANDIDATE_ENDPOINT"
+            auth_args=(--access-key "$ACCESS_KEY" --secret-key "$SECRET_KEY")
+          fi
+          status=0
+          target/release/fuzz-endpoint-replay \
+            --endpoint "$endpoint" \
+            --target decode_diff \
+            --corpus-dir fuzz/corpus/decode_diff \
+            --corpus-dir fuzz/seeds/decode_diff \
+            "${auth_args[@]}" \
+            --health-path /health/ready \
+            --artifacts-dir "$out/artifacts/decode_diff" \
+            2>&1 | tee "$out/decode_diff.log"
+          decode_status=${PIPESTATUS[0]}
+          if [ "$decode_status" -ne 0 ]; then
+            status=1
+          fi
+          target/release/fuzz-endpoint-replay \
+            --endpoint "$endpoint" \
+            --target encode_diff \
+            --corpus-dir fuzz/corpus/encode_diff \
+            --corpus-dir fuzz/seeds/encode_diff \
+            "${auth_args[@]}" \
+            --health-path /health/ready \
+            --artifacts-dir "$out/artifacts/encode_diff" \
+            2>&1 | tee "$out/encode_diff.log"
+          encode_status=${PIPESTATUS[0]}
+          if [ "$encode_status" -ne 0 ]; then
+            status=1
+          fi
+          pid_file="$RUNNER_TEMP/rustfs-candidate/rustfs.pid"
+          if [ -f "$pid_file" ]; then
+            if kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+              echo alive > "$out/candidate-alive.txt"
+            else
+              echo exited > "$out/candidate-alive.txt"
+              status=1
+            fi
+          fi
+          exit "$status"
+      - name: Stop RustFS candidate
+        if: always()
+        run: |
+          pid_file="$RUNNER_TEMP/rustfs-candidate/rustfs.pid"
+          if [ -f "$pid_file" ]; then
+            kill "$(cat "$pid_file")" 2>/dev/null || true
+          fi
+      - name: Record endpoint replay summary
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/endpoint-replay"
+          {
+            echo "## RustFS candidate endpoint replay"
+            if [ -f "$RUNNER_TEMP/candidate-rev.txt" ]; then
+              echo "- Candidate commit: \`$(cat "$RUNNER_TEMP/candidate-rev.txt")\`"
+            fi
+            if [ -f "$out/candidate-alive.txt" ]; then
+              echo "- Candidate after replay: \`$(cat "$out/candidate-alive.txt")\`"
+            fi
+            echo '```'
+            head -n 20 "$out/decode_diff.log" 2>/dev/null || echo "no decode_diff replay output"
+            head -n 20 "$out/encode_diff.log" 2>/dev/null || echo "no encode_diff replay output"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Upload endpoint replay crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          name: fuzz-endpoint-replay-crash-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/endpoint-replay
+          if-no-files-found: warn
+          retention-days: 30

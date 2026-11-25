@@ -28,6 +28,7 @@ mod census;
 mod controls;
 mod encode_controls;
 mod encoding;
+mod endpoint_replay;
 mod fuzz;
 mod matrix;
 mod register;

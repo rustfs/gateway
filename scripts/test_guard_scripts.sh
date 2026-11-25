@@ -17481,6 +17481,66 @@ expect_fail check_fuzz_nightly.sh \
     "the guard's own subject deleted, which must fail rather than skip" mut_fuzz_nightly_deleted \
     'required input is missing'
 
+mut_fuzz_nightly_drops_endpoint_replay_job() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+marker = "\n  rustfs-endpoint-replay:\n"
+if text.count(marker) != 1:
+    raise SystemExit("fuzz-nightly endpoint-replay anchor drifted")
+path.write_text(text.split(marker, 1)[0] + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'the RustFS candidate endpoint replay job removed' mut_fuzz_nightly_drops_endpoint_replay_job \
+    'has no rustfs-endpoint-replay job'
+
+mut_fuzz_nightly_drops_endpoint_flag() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = '            --endpoint "$endpoint" \\\n'
+if text.count(old) < 1:
+    raise SystemExit("fuzz-nightly --endpoint anchor drifted")
+path.write_text(text.replace(old, ""), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'endpoint replay running without --endpoint' mut_fuzz_nightly_drops_endpoint_flag \
+    'must invoke fuzz-endpoint-replay with --endpoint'
+
+mut_fuzz_nightly_drops_encode_diff_replay() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = "            --target encode_diff \\\n"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly encode_diff replay anchor drifted")
+path.write_text(text.replace(old, "            --target decode_diff \\\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'endpoint replay omitting encode_diff' mut_fuzz_nightly_drops_encode_diff_replay \
+    'must replay --target encode_diff against --endpoint'
+
+mut_fuzz_nightly_drops_replay_artifact_upload() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+marker = "      - name: Upload endpoint replay crash artifacts\n"
+if text.count(marker) != 1:
+    raise SystemExit("fuzz-nightly replay upload anchor drifted")
+path.write_text(text.split(marker, 1)[0], encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'endpoint replay omitting crash artifact upload' mut_fuzz_nightly_drops_replay_artifact_upload \
+    'must upload crash artifacts on failure()'
+
 mut_time_gate_rule_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path

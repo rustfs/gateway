@@ -179,7 +179,16 @@ Two cargo-fuzz targets drive the same differential with generated inputs (`fuzz/
 
 ```bash
 cargo +nightly fuzz run decode_diff fuzz/corpus/decode_diff fuzz/seeds/decode_diff
-cargo +nightly fuzz run encode_diff fuzz/corpus/encode_diff
+cargo +nightly fuzz run encode_diff fuzz/corpus/encode_diff fuzz/seeds/encode_diff
+```
+
+To replay the `decode_diff` or `encode_diff` seed and cached corpora out-of-process over real HTTP/1.1 against a live RustFS candidate (`--endpoint`), use `fuzz-endpoint-replay` (wired into `.github/workflows/fuzz-nightly.yml`):
+
+```bash
+cargo run -p rustfs-gateway-difftest --bin fuzz-endpoint-replay -- \
+  --endpoint http://127.0.0.1:19000 --target decode_diff \
+  --corpus-dir fuzz/corpus/decode_diff --corpus-dir fuzz/seeds/decode_diff \
+  --health-path /health/ready --artifacts-dir /tmp/fuzz-replay-artifacts
 ```
 
 A decode finding becomes a conformance case draft with `fuzz-to-case` (`conformance/cases/_from_fuzz/README.md` has the steps); `conformance/cases/naming/c-naming-0033.toml` is the first case made that way.
