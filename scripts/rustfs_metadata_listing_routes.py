@@ -418,9 +418,9 @@ def native_claimed_routes(routes_src, authority_src, blob, has_lambda_fallback, 
         fail("native authority: unsupported permission match structure")
     arms_text = perm_match[1].strip()
     arm_pattern = re.compile(
-        r"((?:ops::[a-z0-9_]+::NAME(?:\s*\|\s*)?)+)\s*=>\s*"
-        r"(?:\{\s*\(AdminAction::(\w+),\s*ResourceShape::(\w+)\)\s*\}(?:\s*,)?"
-        r"|\(AdminAction::(\w+),\s*ResourceShape::(\w+)\)\s*,?)\s*"
+        r"(ops::[a-z0-9_]+::NAME(?:\s*\|\s*ops::[a-z0-9_]+::NAME)*)\s*=>\s*"
+        r"(?:\{\s*\(\s*AdminAction::(\w+),\s*ResourceShape::(\w+),?\s*\)\s*\}(?:\s*,)?"
+        r"|\(\s*AdminAction::(\w+),\s*ResourceShape::(\w+),?\s*\)\s*,?)\s*"
     )
     cursor = 0
     while cursor < len(arms_text):
@@ -445,7 +445,265 @@ def native_claimed_routes(routes_src, authority_src, blob, has_lambda_fallback, 
     return set(op_specs)
 
 
-def control_bindings(host, dialect, assemble, split, fail, published=None, has_native_routes=False):
+FALLBACK_CALL_RE = (
+    r"assemble_object_lambda_fallback\(\s*"
+    r"&assembly,\s*"
+    r"(?:Arc::clone\(&iam\)|iam),\s*"
+    r"(?:Arc::clone\(&root\)|root),\s*"
+    r"(?:Arc::clone\(&router\)|router),\s*"
+    r"(?:Arc::clone\(&host\)|&?host),?\s*"
+    r"\)\?"
+)
+FALLBACK_BIND_RE = r"let object_lambda_fallback = " + FALLBACK_CALL_RE + r";"
+
+
+def _registration_pattern(registered, allow_cloned_last=False, allow_borrowed_host=False):
+    host_ref = r"&?host" if allow_borrowed_host else r"&host"
+    parts = [rf"\.register::<{t},\s*_>\(Arc::clone\({host_ref}\)\)" for t in registered[:-1]]
+    last_arg = rf"(?:Arc::clone\({host_ref}\)|host)" if allow_cloned_last else r"host"
+    parts.append(rf"\.register::<{registered[-1]},\s*_>\({last_arg}\)")
+    return r"\s*".join(parts)
+
+
+def gateway_stack_lambda_field(stack, close, split, fail):
+    """Return True iff `struct GatewayStack` declares `object_lambda_fallback: Option<S3Service>`."""
+    match = one(r"\bstruct\s+GatewayStack\s*\{", stack, "GatewayStack struct", fail)
+    body = stack[match.end():close(stack, match.end() - 1, "{", "}")]
+    fields = split(body)
+    lambda_fields = [field for field in fields if re.search(r"\bobject_lambda_fallback\b", field)]
+    if not lambda_fields:
+        return False
+    if len(lambda_fields) != 1:
+        fail("gateway stack: duplicate object_lambda_fallback field")
+    if not re.fullmatch(
+        r"(?:pub(?:\([^)]*\))?\s+)?object_lambda_fallback\s*:\s*Option<\s*(?:rustfs_gateway::)?S3Service\s*>",
+        " ".join(lambda_fields[0].split()),
+    ):
+        fail("gateway stack: unsupported object_lambda_fallback field declaration")
+    return True
+
+
+def verify_gateway_stack_call_lambda_fallback(stack, close, split, fail):
+    """Verify `GatewayStack::call` selects `object_lambda_fallback` on `object_lambda_target`."""
+    impl_match = direct_item(stack, r"\bimpl\s+GatewayStack\s*\{", "GatewayStack impl", close, fail)
+    impl_body = stack[impl_match.end():close(stack, impl_match.end() - 1, "{", "}")]
+    call_match = direct_item(
+        impl_body,
+        r"(?:pub(?:\([^)]*\))?\s+)?fn\s+call\b[^;{}]*\{",
+        "GatewayStack::call",
+        close,
+        fail,
+    )
+    call_start = call_match.end()
+    call_body = " ".join(impl_body[call_start:close(impl_body, call_start - 1, "{", "}")].split())
+    if re.search(r"\bfn\s+object_lambda_target\b|\bas\s+object_lambda_target\b", stack):
+        fail("gateway stack: local object_lambda_target shadows admin router classifier")
+    attach_pattern = r"if\s+self\.control_plane\s*\{\s*control_plane::attach_head\(\s*&mut\s+request,?\s*\);\s*\}"
+    attach = re.search(attach_pattern, call_body)
+    if not attach:
+        fail("gateway stack: GatewayStack::call must attach control-plane head before dispatch")
+    dispatch_pattern = (
+        r"let\s+service\s*=\s*match\s+self\s*\.object_lambda_fallback\s*\.as_ref\(\)\s*\{\s*"
+        r"Some\(fallback\)\s+if\s+(?P<prefix>crate::admin::router::)?object_lambda_target\(\s*"
+        r"request\s*\.method\(\),\s*request\s*\.uri\(\),?\s*\)\s*\.is_some\(\)\s*=>\s*"
+        r"(?:\{\s*fallback\s*\.clone\(\)\s*\}\s*,?|fallback\s*\.clone\(\)\s*,)\s*"
+        r"_\s*=>\s*(?:\{\s*self\s*\.service\s*\.clone\(\)\s*\}\s*,?|self\s*\.service\s*\.clone\(\)\s*,?)\s*"
+        r"\};"
+    )
+    dispatches = list(re.finditer(dispatch_pattern, call_body))
+    if len(dispatches) != 1:
+        fail("gateway stack: GatewayStack::call must select object_lambda_fallback via object_lambda_target")
+    dispatch = dispatches[0]
+    if dispatch.start() < attach.end():
+        fail("gateway stack: GatewayStack::call must attach control-plane head before selecting object_lambda_fallback")
+    if not dispatch.group("prefix"):
+        imported = bool(re.search(r"\buse\s+crate::admin::router::object_lambda_target\s*;", stack))
+        if not imported:
+            for use_match in re.finditer(r"\buse\s+crate::admin::router::\{([^{}]*)\}\s*;", stack):
+                if "object_lambda_target" in split(use_match[1]):
+                    imported = True
+                    break
+        if not imported:
+            fail("gateway stack: unqualified object_lambda_target must be imported from crate::admin::router")
+    after_dispatch = call_body[dispatch.end():]
+    if re.search(r"\blet\s+service\b|\bservice\s*=|\bself\s*\.service\s*\.call\(", after_dispatch):
+        fail("gateway stack: GatewayStack::call overwrites or bypasses selected service")
+    if not re.search(r"(?<!\.)\bservice\s*\.call\(\s*request,?\s*\)\s*\.await\b", after_dispatch):
+        fail("gateway stack: GatewayStack::call must invoke the selected service")
+
+
+def verify_object_lambda_dialect(control, close, fail):
+    """Verify `control_plane::object_lambda_dialect` builds the base control-plane dialect without `native_routes`."""
+    match = direct_item(
+        control,
+        r"(?:pub(?:\([^)]*\))?\s+)?fn\s+object_lambda_dialect\s*\(\s*\)\s*->\s*Result<Dialect,\s*GatewayAssemblyError>\s*\{",
+        "object_lambda_dialect",
+        close,
+        fail,
+    )
+    body = " ".join(control[match.end():close(control, match.end() - 1, "{", "}")].split())
+    if re.search(r"\bnative_routes\b", body):
+        fail("control plane: object_lambda_dialect must not include native_routes")
+    cache_decl = re.compile(r"static (\w+): OnceLock<(Vec<OverlayRow>|String|DialectOverlay)> = OnceLock::new\(\); ")
+    cursor = 0
+    caches = {"Vec<OverlayRow>": set(), "String": set(), "DialectOverlay": set()}
+    for _ in range(6):
+        found = cache_decl.match(body, cursor)
+        if not found:
+            fail("control plane: unsupported object_lambda_dialect declaration caches")
+        caches[found[2]].add(found[1])
+        cursor = found.end()
+    if (len(caches["Vec<OverlayRow>"]) != 1
+            or len(caches["String"]) != 4
+            or len(caches["DialectOverlay"]) != 1):
+        fail("control plane: object_lambda_dialect requires six distinct OnceLock caches")
+    rest = body[cursor:]
+    claimed_chain = (
+        r"Dialect::assemble\(record\)\s*"
+        r"\.declare_claimed::<ControlPlane>\(ROUTE\)\s*"
+        r"\.declare_claimed::<PostV3SpeedtestClientDevnull>\(ClaimedRoute \{\s*"
+        r"precedence: PostV3SpeedtestClientDevnull::PRECEDENCE,\s*"
+        r"rows: PostV3SpeedtestClientDevnull::rows\(\),\s*"
+        r"shadows: SPEEDTEST_SHADOWS,\s*"
+        r"bucket_param: PostV3SpeedtestClientDevnull::BUCKET,?\s*"
+        r"\}\)\s*"
+        r"\.declare_form::<StsForm>\(STS_ROUTE\)"
+    )
+    pattern = (
+        r"let mut rows = vec!\[OverlayRow \{\s*"
+        r"name: NAME,\s*"
+        r"precedence: ROUTE\.precedence,\s*"
+        r"selector: (\w+)\s*\.get_or_init\(\|\| render_claimed_route\(&ROUTE\)\),\s*"
+        r"action: (\w+)\s*\.get_or_init\(\|\| SPEC\.auth\s*\.map\(\|auth\| auth\.render\(\)\)\s*\.unwrap_or_default\(\)\),\s*"
+        r"resource: ResourceShape::Service,\s*"
+        r"success_status: 200,\s*"
+        r"anonymous: true,\s*"
+        r"evidence: &\[ROUTER\],?\s*"
+        r"\}\];\s*"
+        r"rows\.push\(OverlayRow \{\s*"
+        r"name: STS_NAME,\s*"
+        r"precedence: STS_ROUTE\.precedence,\s*"
+        r"selector: (\w+)\s*\.get_or_init\(\|\| STS_CLAIM\.render\(\)\),\s*"
+        r"action: (\w+)\s*\.get_or_init\(\|\| STS_SPEC\.auth\s*\.map\(\|auth\| auth\.render\(\)\)\s*\.unwrap_or_default\(\)\),\s*"
+        r"resource: ResourceShape::Service,\s*"
+        r"success_status: 200,\s*"
+        r"anonymous: true,\s*"
+        r"evidence: &\[ROUTER\],?\s*"
+        r"\}\);\s*"
+        r"rows\.push\(\s*OVERLAY\s*\.row\(PostV3SpeedtestClientDevnull::NAME\)\s*\.copied\(\)\s*"
+        r"\.ok_or\(GatewayAssemblyError::AdminOverlayMissing\)\?,?\s*\);\s*"
+        r"rows\.extend_from_slice\(control_plane::ROWS\);\s*"
+        r"let record = (\w+)\s*\.get_or_init\(\|\| DialectOverlay \{\s*"
+        r'name: "[^"]+",\s*'
+        r"vendor: OVERLAY\.vendor,\s*"
+        r"claims: CLAIMS,\s*"
+        r"operations: (\w+)\s*\.get_or_init\(\|\| rows\),?\s*"
+        r"\}\);\s*"
+        r"(?:"
+        r"let builder = " + claimed_chain + r";\s*"
+        r"(?:control_plane::declare\(builder\)|let builder = control_plane::declare\(builder\);\s*builder)"
+        r"|"
+        r"control_plane::declare\(\s*" + claimed_chain + r",?\s*\)"
+        r")\s*\.build\(\)\s*\.map_err\(GatewayAssemblyError::AdminDialect\)"
+    )
+    matched = re.fullmatch(pattern, rest)
+    if not matched:
+        fail("control plane: unsupported object_lambda_dialect installation")
+    s1, s2, s3, s4, rec_cache, rows_cache = matched.groups()
+    if ({s1, s2, s3, s4} != caches["String"]
+            or {rec_cache} != caches["DialectOverlay"]
+            or {rows_cache} != caches["Vec<OverlayRow>"]):
+        fail("control plane: object_lambda_dialect cache bindings disagree")
+
+
+def verify_assemble_object_lambda_fallback(control, registered, close, fail):
+    """Verify `control_plane::assemble_object_lambda_fallback` builds the fallback service without `native_routes`."""
+    match = direct_item(
+        control,
+        r"(?:pub(?:\([^)]*\))?\s+)?fn\s+assemble_object_lambda_fallback\s*\(\s*"
+        r"assembly:\s*&?GatewayAssembly,\s*"
+        r"iam:\s*Arc<dyn IamKeyLookup>,\s*"
+        r"root:\s*Arc<dyn RootSource>,\s*"
+        r"router:\s*Arc<(?:crate::admin::router::)?S3Router<(?:crate::admin::router::)?AdminOperation>>,\s*"
+        r"host:\s*&?Arc<Host>,?\s*"
+        r"\)\s*->\s*Result<(?:rustfs_gateway::)?S3Service,\s*GatewayAssemblyError>\s*\{",
+        "assemble_object_lambda_fallback",
+        close,
+        fail,
+    )
+    body = " ".join(control[match.end():close(control, match.end() - 1, "{", "}")].split())
+    if re.search(r"\bnative_routes\b", body):
+        fail("control plane: assemble_object_lambda_fallback must not include native_routes")
+    regs_pat = _registration_pattern(registered, allow_cloned_last=True, allow_borrowed_host=True)
+    chain = (
+        r"builder\s*\.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report\(\)\s*"
+        r"\.dialect\(&object_lambda_dialect\(\)\?\)\s*"
+        + regs_pat
+        + r"\s*\.build\(\)\s*\.map_err\(GatewayAssemblyError::Service\)"
+    )
+    pattern = (
+        r"let gate = Admission \{\s*(?:router:\s*Arc::clone\(&router\)|router),?\s*\};\s*"
+        r"let authenticator = \|authenticator: SigV4Authenticator\| \{\s*"
+        r"authenticator\s*\.hand_caller_secret_to_handlers\(\)\s*"
+        r"\.verify_paths_double_encoded_under\(TABLE_CATALOG_PREFIXES\)\s*"
+        r"\};\s*"
+        r"let \(builder, _settings\) = GatewayStack::configured_builder\(\s*"
+        r"&?assembly,\s*iam,\s*root,\s*gate,\s*authenticator,?\s*\)\?\s*"
+        r"\.config\(\s*super::service_config\(\s*assembly\.body_read_timeout,\s*CLAIMED_ROUTE_BODY_BYTES,?\s*\),?\s*\);\s*"
+        r"(?:" + chain + r"|let service = " + chain + r"\?;\s*Ok\(service\))"
+    )
+    if not re.fullmatch(pattern, body):
+        fail("control plane: unsupported assemble_object_lambda_fallback implementation")
+
+
+def verify_control_assemble_prefix(assembly, has_native_routes, has_lambda_fallback, fail):
+    """Verify the control-plane assembly prefix; return True iff `object_lambda_fallback` is bound before `let service`."""
+    prefix_part = assembly.split("let service = builder", 1)[0].strip()
+    if not has_lambda_fallback:
+        prefix = """let gate = Admission { router: Arc::clone(&router), }; let authenticator = |authenticator: SigV4Authenticator| {
+            authenticator .hand_caller_secret_to_handlers() .verify_paths_double_encoded_under(TABLE_CATALOG_PREFIXES) };
+            let host = Arc::new(Host { router, server_ctx: Arc::clone(&assembly.server_ctx), });
+            let (builder, _settings) = GatewayStack::configured_builder(&assembly, iam, root, gate, authenticator)?
+            .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));"""
+        if has_native_routes:
+            prefix += " let builder = native_routes::register(builder, &host);"
+        if prefix_part != " ".join(prefix.split()):
+            fail("control plane: service must install the host admission and handlers")
+        return False
+
+    gate_stmt = r"let gate = Admission \{\s*router: Arc::clone\(&router\),?\s*\};"
+    auth_stmt = (
+        r"let authenticator = \|authenticator: SigV4Authenticator\| \{\s*"
+        r"authenticator\s*\.hand_caller_secret_to_handlers\(\)\s*"
+        r"\.verify_paths_double_encoded_under\(TABLE_CATALOG_PREFIXES\)\s*"
+        r"\};"
+    )
+    host_stmt = (
+        r"let host = Arc::new\(\s*Host \{\s*"
+        r"(?:router: Arc::clone\(&router\)|router),\s*"
+        r"server_ctx: Arc::clone\(&assembly\.server_ctx\),?\s*"
+        r"\},?\s*\);"
+    )
+    builder_stmt = (
+        r"let \(builder, _settings\) = GatewayStack::configured_builder\(\s*"
+        r"&assembly,\s*(?:Arc::clone\(&iam\)|iam),\s*(?:Arc::clone\(&root\)|root),\s*gate,\s*authenticator,?\s*\)\?\s*"
+        r"\.config\(\s*super::service_config\(\s*assembly\.body_read_timeout,\s*CLAIMED_ROUTE_BODY_BYTES,?\s*\),?\s*\);"
+    )
+    stmts = [gate_stmt, auth_stmt, host_stmt, builder_stmt]
+    if has_native_routes:
+        stmts.append(r"let builder = native_routes::register\(\s*builder,\s*&host,?\s*\);")
+    if re.fullmatch(r"\s*".join(stmts), prefix_part):
+        return False
+    for index in range(3, len(stmts) + 1):
+        with_fallback = [*stmts[:index], FALLBACK_BIND_RE, *stmts[index:]]
+        if re.fullmatch(r"\s*".join(with_fallback), prefix_part):
+            return True
+    fail("control plane: service must install the host admission and handlers")
+
+
+def control_bindings(
+    host, dialect, assemble, split, fail, published=None, has_native_routes=False, has_lambda_fallback=False, fallback_in_prefix=False
+):
     """Match the extension types in the installed dialect, overlay, and returned service builder."""
     def exactly(pattern, text, label):
         return one(pattern, text, label, fail)
@@ -509,14 +767,40 @@ def control_bindings(host, dialect, assemble, split, fail, published=None, has_n
     all_borrowed = ["PostV3SpeedtestClientDevnull", *types]
     if names != [t + "::NAME" for t in all_borrowed] or set(all_borrowed) != modules.keys():
         fail("control plane: imported and borrowed operations disagree with the declarations")
-    regs = exactly(r"let service = builder \.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report\(\) "
-                   r"\.dialect\(&dialect\(\)\?\) (.*?) \.build\(\) \.map_err\(GatewayAssemblyError::Service\)\?; "
-                   r"Ok\(GatewayStack \{ service, keystone_auth: assembly.keystone_auth, control_plane: true, \}\)$",
-                   assemble, "returned control service")[1]
     registered = ["ControlPlane", all_borrowed[0], "StsForm", *types]
-    expected = [f".register::<{t}, _>(Arc::clone(&host))" for t in registered[:-1]]
-    if regs != " ".join([*expected, f".register::<{registered[-1]}, _>(host)"]):
-        fail("control plane: installed handlers disagree with the declarations")
+    if has_lambda_fallback:
+        if fallback_in_prefix:
+            return_pat = (
+                r"Ok\(GatewayStack \{\s*service,\s*keystone_auth: assembly\.keystone_auth,\s*control_plane: true,\s*"
+                r"object_lambda_fallback: Some\(object_lambda_fallback\),?\s*\}\)$"
+            )
+        else:
+            return_pat = (
+                r"(?:"
+                + FALLBACK_BIND_RE
+                + r"\s*Ok\(GatewayStack \{\s*service,\s*keystone_auth: assembly\.keystone_auth,\s*control_plane: true,\s*"
+                r"object_lambda_fallback: Some\(object_lambda_fallback\),?\s*\}\)"
+                r"|Ok\(GatewayStack \{\s*service,\s*keystone_auth: assembly\.keystone_auth,\s*control_plane: true,\s*"
+                r"object_lambda_fallback: Some\(\s*" + FALLBACK_CALL_RE + r"\s*\),?\s*\}\)"
+                r")$"
+            )
+        regs = exactly(
+            r"let service = builder\s*\.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report\(\)\s*"
+            r"\.dialect\(&dialect\(\)\?\)\s*(.*?)\s*\.build\(\)\s*\.map_err\(GatewayAssemblyError::Service\)\?;\s*"
+            + return_pat,
+            assemble,
+            "returned control service",
+        )[1]
+        if not re.fullmatch(_registration_pattern(registered, allow_cloned_last=True, allow_borrowed_host=False), regs):
+            fail("control plane: installed handlers disagree with the declarations")
+    else:
+        regs = exactly(r"let service = builder \.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report\(\) "
+                       r"\.dialect\(&dialect\(\)\?\) (.*?) \.build\(\) \.map_err\(GatewayAssemblyError::Service\)\?; "
+                       r"Ok\(GatewayStack \{ service, keystone_auth: assembly.keystone_auth, control_plane: true, \}\)$",
+                       assemble, "returned control service")[1]
+        expected = [f".register::<{t}, _>(Arc::clone(&host))" for t in registered[:-1]]
+        if regs != " ".join([*expected, f".register::<{registered[-1]}, _>(host)"]):
+            fail("control plane: installed handlers disagree with the declarations")
     return [(modules[t], t) for t in types]
 
 
@@ -567,6 +851,7 @@ def native_tables(root, repository, actions, strip, close, split, fail, admin_ac
     host = read(NATIVE_HANDLER)
     # Only the fully assembled, returned S3 service establishes that these declarations are enabled.
     stack = read(NATIVE_STACK)
+    stack_declares_lambda_fallback = gateway_stack_lambda_field(stack, close, split, fail)
     assembly = function(stack, "assemble_with")
     wrappers = (("assemble", "Self::assemble_with(assembly, iam, root, early_gate(OPERATIONS, server_ctx))"),
                 ("assemble_control_plane", "control_plane::assemble(assembly, iam, root, router)"))
@@ -590,13 +875,18 @@ def native_tables(root, repository, actions, strip, close, split, fail, admin_ac
     router_src = read(ADMIN_ROUTER)
     shapes(r"s3_extension::route_key\(method, uri\)\.is_some\(\) \|\| parse_object_lambda_request\(method, uri\)\.is_some\(\) "
            r"\|\| is_control_plane_route\(method, uri, headers\)", function(router_src, "claims_route"), "edge claims")
+    assemble_with_return = (
+        r"Ok\(Self \{ service, keystone_auth: assembly\.keystone_auth, control_plane: false, object_lambda_fallback: None,? \}\)"
+        if stack_declares_lambda_fallback
+        else r"Ok\(Self \{ service, keystone_auth: assembly\.keystone_auth, control_plane: false, \}\)"
+    )
     shapes(r"let listings = metadata_listing::dialect\(\)\.map_err\(GatewayAssemblyError::MetadataListingDialect\)\?; "
            r"let builder = Self::configured_builder\(&assembly, iam, root, authorizer, std::convert::identity\)\? "
            r"\.answer_nul_torrent_keys_as_missing\(\) \.dialect\(&listings\); "
            r"let backend = Arc::new\(GatewayBackend::new\(Arc::clone\(&assembly.server_ctx\)\)\); "
            r"let builder = metadata_listing::register\(register\(OPERATIONS, builder, &backend\), &assembly.server_ctx\); "
            r"let service = builder.build\(\).map_err\(GatewayAssemblyError::Service\)\?; "
-           r"Ok\(Self \{ service, keystone_auth: assembly.keystone_auth, control_plane: false, \}\)", assembly, "S3 service assembly")
+           + assemble_with_return, assembly, "S3 service assembly")
     bindings = re.findall(r"use rustfs_gateway_dialect_rustfs_admin::ops::(\w+)::\{\s*self as (\w+),\s*(\w+),?\s*\};", host)
     if len(bindings) != 2 or any(len({b[i] for b in bindings}) != 2 for i in range(3)):
         fail("metadata listings: expected two distinct typed dialect imports")
@@ -695,14 +985,43 @@ def native_tables(root, repository, actions, strip, close, split, fail, admin_ac
         or (root / NATIVE_ROUTES).is_file()
         or (root / NATIVE_AUTHORITY).is_file()
     )
-    if has_native_routes:
+    if has_native_routes and control_table is None:
+        fail("control plane: native routes require the published control_plane table")
+    control_dialect = function(control, "dialect")
+    control_assemble = function(control, "assemble")
+    if stack_declares_lambda_fallback:
         if control_table is None:
-            fail("control plane: native routes require the published control_plane table")
+            fail("control plane: object_lambda_fallback requires the published control_plane table")
+        verify_gateway_stack_call_lambda_fallback(stack, close, split, fail)
+        verify_object_lambda_dialect(control, close, fail)
+        fallback_in_prefix = verify_control_assemble_prefix(control_assemble, has_native_routes, True, fail)
+        bindings = control_bindings(
+            control,
+            control_dialect,
+            control_assemble,
+            split,
+            fail,
+            control_table,
+            has_native_routes,
+            has_lambda_fallback=True,
+            fallback_in_prefix=fallback_in_prefix,
+        )
+        registered = ["ControlPlane", "PostV3SpeedtestClientDevnull", "StsForm", *[kind for _, kind in bindings]]
+        verify_assemble_object_lambda_fallback(control, registered, close, fail)
+        has_lambda_fallback = True
+    else:
+        if re.search(r"\b(?:object_lambda_dialect|assemble_object_lambda_fallback)\b", control):
+            fail("control plane: unexpected object_lambda_fallback helper without GatewayStack field")
+        if control_table is not None:
+            verify_control_assemble_prefix(control_assemble, has_native_routes, False, fail)
+        bindings = control_bindings(control, control_dialect, control_assemble, split, fail, control_table, has_native_routes)
+        has_lambda_fallback = False
+
+    if has_native_routes:
         direct_item(control, r"\bmod\s+native_authority\s*;", "control native_authority module", close, fail)
         direct_item(control, r"\bmod\s+native_routes\s*;", "control native_routes module", close, fail)
         routes_src = read(NATIVE_ROUTES)
         authority_src = read(NATIVE_AUTHORITY)
-        has_lambda_fallback = bool(re.search(r"\bobject_lambda_fallback\b\s*:", stack))
         mounted_modules = native_claimed_routes(
             routes_src, authority_src, blob, has_lambda_fallback, admin_actions, strip, close, split, fail
         )
@@ -715,16 +1034,6 @@ def native_tables(root, repository, actions, strip, close, split, fail, admin_ac
                 "notification target parameter check",
             )
     if control_table is not None:
-        assembly = function(control, "assemble")
-        prefix = """let gate = Admission { router: Arc::clone(&router), }; let authenticator = |authenticator: SigV4Authenticator| {
-            authenticator .hand_caller_secret_to_handlers() .verify_paths_double_encoded_under(TABLE_CATALOG_PREFIXES) };
-            let host = Arc::new(Host { router, server_ctx: Arc::clone(&assembly.server_ctx), });
-            let (builder, _settings) = GatewayStack::configured_builder(&assembly, iam, root, gate, authenticator)?
-            .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));"""
-        if has_native_routes:
-            prefix += " let builder = native_routes::register(builder, &host);"
-        if assembly.split("let service = builder", 1)[0].strip() != " ".join(prefix.split()):
-            fail("control plane: service must install the host admission and handlers")
         if has_native_routes:
             shapes(
                 r"\[NAME, STS_NAME\]\.contains\(&operation\) \|\| BORROWED\.contains\(&operation\) "
@@ -785,9 +1094,6 @@ def native_tables(root, repository, actions, strip, close, split, fail, admin_ac
                function(control, "routed"), "admitted control inputs")
         shapes(r"let stage = routed\(request.route\(\)\); let decisions = request.decide_all\(stage, \|_\| stage\); "
                r"Box::pin\(async move \{ decisions \}\)", function(control, "authorize_input"), "control input decisions")
-    bindings = control_bindings(
-        control, function(control, "dialect"), function(control, "assemble"), split, fail, control_table, has_native_routes
-    )
     control_rows = []
     for index, (module, kind) in enumerate(bindings):
         path = f"{DIALECT_DIR}/src/ops/{module}.rs"

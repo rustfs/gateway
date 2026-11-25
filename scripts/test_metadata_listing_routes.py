@@ -234,7 +234,9 @@ class NativeMetadataTests(unittest.TestCase):
                 read(source.replace(old, new))
 
     @staticmethod
-    def _host_fixture_files(pin, with_native_routes=False):
+    def _host_fixture_files(pin, with_native_routes=False, with_get_native_routes=False, with_lambda_fallback=False):
+        if with_get_native_routes:
+            with_native_routes = True
         http_host = """
             fn assemble_s3_stack() -> Result<S3StackService, Error> {
                 let control_plane = GatewayEdgeService(GatewayStack::assemble_control_plane(assembly.clone(), Arc::new(router)).map_err(Error::other)?);
@@ -272,20 +274,47 @@ class NativeMetadataTests(unittest.TestCase):
                 Ok(())
             }
         """
-        native_stack = """
-            pub(crate) struct GatewayStack {
+        lambda_field = "\n                object_lambda_fallback: Option<rustfs_gateway::S3Service>," if with_lambda_fallback else ""
+        assemble_with_lambda = "\n                        object_lambda_fallback: None," if with_lambda_fallback else ""
+        stack_call = (
+            """
+                pub(crate) fn call<B>(&self, mut request: Request<B>) -> impl Future<Output = Response<rustfs_gateway::Body>> + Send + 'static
+                where
+                    B: http_body::Body + Send + 'static,
+                {
+                    if self.control_plane {
+                        control_plane::attach_head(&mut request);
+                    }
+                    let service = match self.object_lambda_fallback.as_ref() {
+                        Some(fallback) if crate::admin::router::object_lambda_target(request.method(), request.uri()).is_some() => {
+                            fallback.clone()
+                        }
+                        _ => self.service.clone(),
+                    };
+                    async move {
+                        let response = service.call(request).await;
+                        response
+                    }
+                }
+            """
+            if with_lambda_fallback
+            else ""
+        )
+        native_stack = f"""
+            #[derive(Clone)]
+            pub(crate) struct GatewayStack {{
                 service: S3Service,
                 keystone_auth: Option<Arc<KeystoneAuth>>,
-                control_plane: bool,
-            }
-            impl GatewayStack {
-                fn assemble(assembly: GatewayAssembly) -> Result<Self, GatewayAssemblyError> {
+                control_plane: bool,{lambda_field}
+            }}
+            impl GatewayStack {{
+                fn assemble(assembly: GatewayAssembly) -> Result<Self, GatewayAssemblyError> {{
                     Self::assemble_with(assembly, iam, root, early_gate(OPERATIONS, server_ctx))
-                }
-                fn assemble_control_plane(assembly: GatewayAssembly, router: Arc<S3Router<AdminOperation>>) -> Result<Self, GatewayAssemblyError> {
+                }}
+                fn assemble_control_plane(assembly: GatewayAssembly, router: Arc<S3Router<AdminOperation>>) -> Result<Self, GatewayAssemblyError> {{
                     control_plane::assemble(assembly, iam, root, router)
-                }
-                fn assemble_with() -> Result<Self, GatewayAssemblyError> {
+                }}
+                fn assemble_with() -> Result<Self, GatewayAssemblyError> {{
                     let listings = metadata_listing::dialect().map_err(GatewayAssemblyError::MetadataListingDialect)?;
                     let builder = Self::configured_builder(&assembly, iam, root, authorizer, std::convert::identity)?
                         .answer_nul_torrent_keys_as_missing()
@@ -293,13 +322,13 @@ class NativeMetadataTests(unittest.TestCase):
                     let backend = Arc::new(GatewayBackend::new(Arc::clone(&assembly.server_ctx)));
                     let builder = metadata_listing::register(register(OPERATIONS, builder, &backend), &assembly.server_ctx);
                     let service = builder.build().map_err(GatewayAssemblyError::Service)?;
-                    Ok(Self {
+                    Ok(Self {{
                         service,
                         keystone_auth: assembly.keystone_auth,
-                        control_plane: false,
-                    })
-                }
-            }
+                        control_plane: false,{assemble_with_lambda}
+                    }})
+                }}{stack_call}
+            }}
         """
         native_handler = """
             use rustfs_gateway_dialect_rustfs_admin::native::extensions::s3;
@@ -461,6 +490,108 @@ class NativeMetadataTests(unittest.TestCase):
                     }
                 }
             """
+        lambda_helpers = (
+            """
+            fn object_lambda_dialect() -> Result<Dialect, GatewayAssemblyError> {
+                static ROWS: OnceLock<Vec<OverlayRow>> = OnceLock::new();
+                static SELECTOR: OnceLock<String> = OnceLock::new();
+                static ACTION: OnceLock<String> = OnceLock::new();
+                static STS_SELECTOR: OnceLock<String> = OnceLock::new();
+                static STS_ACTION: OnceLock<String> = OnceLock::new();
+                static RECORD: OnceLock<DialectOverlay> = OnceLock::new();
+                let mut rows = vec![OverlayRow {
+                    name: NAME,
+                    precedence: ROUTE.precedence,
+                    selector: SELECTOR.get_or_init(|| render_claimed_route(&ROUTE)),
+                    action: ACTION.get_or_init(|| SPEC.auth.map(|auth| auth.render()).unwrap_or_default()),
+                    resource: ResourceShape::Service,
+                    success_status: 200,
+                    anonymous: true,
+                    evidence: &[ROUTER],
+                }];
+                rows.push(OverlayRow {
+                    name: STS_NAME,
+                    precedence: STS_ROUTE.precedence,
+                    selector: STS_SELECTOR.get_or_init(|| STS_CLAIM.render()),
+                    action: STS_ACTION.get_or_init(|| STS_SPEC.auth.map(|auth| auth.render()).unwrap_or_default()),
+                    resource: ResourceShape::Service,
+                    success_status: 200,
+                    anonymous: true,
+                    evidence: &[ROUTER],
+                });
+                rows.push(
+                    OVERLAY
+                        .row(PostV3SpeedtestClientDevnull::NAME)
+                        .copied()
+                        .ok_or(GatewayAssemblyError::AdminOverlayMissing)?,
+                );
+                rows.extend_from_slice(control_plane::ROWS);
+                let record = RECORD.get_or_init(|| DialectOverlay {
+                    name: "rustfs-control-plane-object-lambda",
+                    vendor: OVERLAY.vendor,
+                    claims: CLAIMS,
+                    operations: ROWS.get_or_init(|| rows),
+                });
+                let builder = Dialect::assemble(record)
+                    .declare_claimed::<ControlPlane>(ROUTE)
+                    .declare_claimed::<PostV3SpeedtestClientDevnull>(ClaimedRoute {
+                        precedence: PostV3SpeedtestClientDevnull::PRECEDENCE,
+                        rows: PostV3SpeedtestClientDevnull::rows(),
+                        shadows: SPEEDTEST_SHADOWS,
+                        bucket_param: PostV3SpeedtestClientDevnull::BUCKET,
+                    })
+                    .declare_form::<StsForm>(STS_ROUTE);
+                control_plane::declare(builder)
+                    .build()
+                    .map_err(GatewayAssemblyError::AdminDialect)
+            }
+            fn assemble_object_lambda_fallback(
+                assembly: &GatewayAssembly,
+                iam: Arc<dyn IamKeyLookup>,
+                root: Arc<dyn RootSource>,
+                router: Arc<S3Router<AdminOperation>>,
+                host: Arc<Host>,
+            ) -> Result<rustfs_gateway::S3Service, GatewayAssemblyError> {
+                let gate = Admission { router };
+                let authenticator = |authenticator: SigV4Authenticator| {
+                    authenticator
+                        .hand_caller_secret_to_handlers()
+                        .verify_paths_double_encoded_under(TABLE_CATALOG_PREFIXES)
+                };
+                let (builder, _settings) = GatewayStack::configured_builder(assembly, iam, root, gate, authenticator)?
+                    .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));
+                builder
+                    .hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()
+                    .dialect(&object_lambda_dialect()?)
+                    .register::<ControlPlane, _>(Arc::clone(&host))
+                    .register::<PostV3SpeedtestClientDevnull, _>(Arc::clone(&host))
+                    .register::<StsForm, _>(Arc::clone(&host))
+                    .register::<ResetBucketReplication, _>(Arc::clone(&host))
+                    .register::<GetReplicationResetStatus, _>(Arc::clone(&host))
+                    .register::<GetReplicationMetricsV2, _>(Arc::clone(&host))
+                    .register::<GetReplicationMetrics, _>(Arc::clone(&host))
+                    .register::<CheckReplication, _>(Arc::clone(&host))
+                    .register::<InvokeObjectLambda, _>(Arc::clone(&host))
+                    .register::<ListenNotification, _>(Arc::clone(&host))
+                    .register::<ListenBucketNotification, _>(host)
+                    .build()
+                    .map_err(GatewayAssemblyError::Service)
+            }
+            """
+            if with_lambda_fallback
+            else ""
+        )
+        host_router_field = "router: Arc::clone(&router)" if with_lambda_fallback else "router"
+        iam_arg = "Arc::clone(&iam)" if with_lambda_fallback else "iam"
+        root_arg = "Arc::clone(&root)" if with_lambda_fallback else "root"
+        last_host_arg = "Arc::clone(&host)" if with_lambda_fallback else "host"
+        lambda_construct = (
+            "\n                let object_lambda_fallback = assemble_object_lambda_fallback("
+            "&assembly, Arc::clone(&iam), Arc::clone(&root), Arc::clone(&router), Arc::clone(&host))?;"
+            if with_lambda_fallback
+            else ""
+        )
+        control_return_lambda = "\n                    object_lambda_fallback: Some(object_lambda_fallback)," if with_lambda_fallback else ""
         control_host = f"""
             {mod_header}
             use rustfs_gateway_dialect_rustfs_admin::native::extensions::control_plane;
@@ -532,7 +663,7 @@ class NativeMetadataTests(unittest.TestCase):
                     }})
                     .declare_form::<StsForm>(STS_ROUTE);
                 {declare_tail}
-            }}
+            }}{lambda_helpers}
             pub(super) fn assemble(
                 assembly: GatewayAssembly,
                 iam: Arc<dyn IamKeyLookup>,
@@ -548,10 +679,10 @@ class NativeMetadataTests(unittest.TestCase):
                         .verify_paths_double_encoded_under(TABLE_CATALOG_PREFIXES)
                 }};
                 let host = Arc::new(Host {{
-                    router,
+                    {host_router_field},
                     server_ctx: Arc::clone(&assembly.server_ctx),
                 }});
-                let (builder, _settings) = GatewayStack::configured_builder(&assembly, iam, root, gate, authenticator)?
+                let (builder, _settings) = GatewayStack::configured_builder(&assembly, {iam_arg}, {root_arg}, gate, authenticator)?
                     .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));{register_native}
                 let service = builder
                     .hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()
@@ -566,13 +697,13 @@ class NativeMetadataTests(unittest.TestCase):
                     .register::<CheckReplication, _>(Arc::clone(&host))
                     .register::<InvokeObjectLambda, _>(Arc::clone(&host))
                     .register::<ListenNotification, _>(Arc::clone(&host))
-                    .register::<ListenBucketNotification, _>(host)
+                    .register::<ListenBucketNotification, _>({last_host_arg})
                     .build()
-                    .map_err(GatewayAssemblyError::Service)?;
+                    .map_err(GatewayAssemblyError::Service)?;{lambda_construct}
                 Ok(GatewayStack {{
                     service,
                     keystone_auth: assembly.keystone_auth,
-                    control_plane: true,
+                    control_plane: true,{control_return_lambda}
                 }})
             }}
             fn served(operation: &str) -> bool {{
@@ -597,46 +728,36 @@ class NativeMetadataTests(unittest.TestCase):
             metadata.CONTROL_HOST: control_host,
         }
         if with_native_routes:
-            files[metadata.NATIVE_ROUTES] = """
-                use super::{Host, NAME, ROUTER};
-                use rustfs_gateway::ServiceBuilder;
-                use rustfs_gateway_core::dialect::{ClaimedRoute, DialectBuilder, OverlayRow};
-                use rustfs_gateway_core::route::ShadowingDecl;
-                use rustfs_gateway_dialect_rustfs_admin::{AdminOperation, native::ops};
-                use std::sync::Arc;
-
-                const fn shadows_control_plane(winner: &'static str) -> ShadowingDecl {
-                    ShadowingDecl {
-                        winner,
-                        shadowed: NAME,
-                        reason: "The registered admin handler precedes the control-plane catch-all.",
-                        evidence: &[ROUTER],
-                    }
-                }
-
-                macro_rules! native_routes {
-                    ($($module:ident::$operation:ident),+ $(,)?) => {
-                        const ROWS: &[OverlayRow] = &[$(ops::$module::OVERLAY_ROW),+];
-
-                        pub(super) fn declare(builder: DialectBuilder) -> DialectBuilder {
-                            $(
-                                let builder = builder.declare_claimed::<ops::$module::$operation>(ClaimedRoute {
-                                    precedence: ops::$module::$operation::PRECEDENCE,
-                                    rows: ops::$module::$operation::rows(),
-                                    shadows: const { &[shadows_control_plane(ops::$module::NAME)] },
-                                    bucket_param: ops::$module::$operation::BUCKET,
-                                });
-                            )+
-                            builder
-                        }
-
-                        pub(super) fn register(builder: ServiceBuilder, host: &Arc<Host>) -> ServiceBuilder {
-                            builder$(.register::<ops::$module::$operation, _>(Arc::clone(host)))+
-                        }
-                    };
-                }
-
-                native_routes!(
+            if with_get_native_routes:
+                native_route_entries = """
+                    delete_v3_bucket_etag_by_bucket::DeleteV3BucketEtagByBucket,
+                    delete_v3_target_by_target_type_by_target_name::DeleteV3TargetByTargetTypeByTargetName,
+                    get_v3_bucket_etag_by_bucket::GetV3BucketEtagByBucket,
+                    get_v3_site_replication_remove_v2_capabilities::GetV3SiteReplicationRemoveV2Capabilities,
+                    get_v4_heal_mrf_cluster::GetV4HealMrfCluster,
+                    get_v4_heal_mrf_cluster_responsibilities::GetV4HealMrfClusterResponsibilities,
+                    get_v4_heal_mrf_cluster_responsibilities_by_node_id_by_id::GetV4HealMrfClusterResponsibilitiesByNodeIdById,
+                    post_v4_account_permissions::PostV4AccountPermissions,
+                    post_v4_heal_mrf_cluster_responsibilities_actions::PostV4HealMrfClusterResponsibilitiesActions,
+                    put_v3_bucket_etag_by_bucket::PutV3BucketEtagByBucket,
+                    put_v3_site_replication_peer_remove_v2::PutV3SiteReplicationPeerRemoveV2,
+                    put_v3_site_replication_remove_v2::PutV3SiteReplicationRemoveV2,
+                """
+                permission_arms = """
+                        ops::delete_v3_bucket_etag_by_bucket::NAME
+                        | ops::get_v3_bucket_etag_by_bucket::NAME
+                        | ops::put_v3_bucket_etag_by_bucket::NAME => (AdminAction::ConfigUpdateAdminAction, ResourceShape::Bucket),
+                        ops::get_v3_site_replication_remove_v2_capabilities::NAME
+                        | ops::put_v3_site_replication_peer_remove_v2::NAME
+                        | ops::put_v3_site_replication_remove_v2::NAME => (AdminAction::SiteReplicationRemoveAction, ResourceShape::Service),
+                        ops::delete_v3_target_by_target_type_by_target_name::NAME => (AdminAction::SetBucketTargetAction, ResourceShape::Service),
+                        ops::get_v4_heal_mrf_cluster::NAME
+                        | ops::get_v4_heal_mrf_cluster_responsibilities::NAME
+                        | ops::get_v4_heal_mrf_cluster_responsibilities_by_node_id_by_id::NAME
+                        | ops::post_v4_heal_mrf_cluster_responsibilities_actions::NAME => (AdminAction::HealAdminAction, ResourceShape::Service),
+                """
+            else:
+                native_route_entries = """
                     delete_v3_bucket_etag_by_bucket::DeleteV3BucketEtagByBucket,
                     delete_v3_target_by_target_type_by_target_name::DeleteV3TargetByTargetTypeByTargetName,
                     post_v4_account_permissions::PostV4AccountPermissions,
@@ -644,21 +765,69 @@ class NativeMetadataTests(unittest.TestCase):
                     put_v3_bucket_etag_by_bucket::PutV3BucketEtagByBucket,
                     put_v3_site_replication_peer_remove_v2::PutV3SiteReplicationPeerRemoveV2,
                     put_v3_site_replication_remove_v2::PutV3SiteReplicationRemoveV2,
-                );
+                """
+                permission_arms = """
+                        ops::delete_v3_bucket_etag_by_bucket::NAME
+                        | ops::put_v3_bucket_etag_by_bucket::NAME => (AdminAction::ConfigUpdateAdminAction, ResourceShape::Bucket),
+                        ops::put_v3_site_replication_peer_remove_v2::NAME
+                        | ops::put_v3_site_replication_remove_v2::NAME => (AdminAction::SiteReplicationRemoveAction, ResourceShape::Service),
+                        ops::delete_v3_target_by_target_type_by_target_name::NAME => (AdminAction::SetBucketTargetAction, ResourceShape::Service),
+                        ops::post_v4_heal_mrf_cluster_responsibilities_actions::NAME => (AdminAction::HealAdminAction, ResourceShape::Service),
+                """
+            files[metadata.NATIVE_ROUTES] = f"""
+                use super::{{Host, NAME, ROUTER}};
+                use rustfs_gateway::ServiceBuilder;
+                use rustfs_gateway_core::dialect::{{ClaimedRoute, DialectBuilder, OverlayRow}};
+                use rustfs_gateway_core::route::ShadowingDecl;
+                use rustfs_gateway_dialect_rustfs_admin::{{AdminOperation, native::ops}};
+                use std::sync::Arc;
 
-                pub(super) fn append_rows(rows: &mut Vec<OverlayRow>) {
+                const fn shadows_control_plane(winner: &'static str) -> ShadowingDecl {{
+                    ShadowingDecl {{
+                        winner,
+                        shadowed: NAME,
+                        reason: "The registered admin handler precedes the control-plane catch-all.",
+                        evidence: &[ROUTER],
+                    }}
+                }}
+
+                macro_rules! native_routes {{
+                    ($($module:ident::$operation:ident),+ $(,)?) => {{
+                        const ROWS: &[OverlayRow] = &[$(ops::$module::OVERLAY_ROW),+];
+
+                        pub(super) fn declare(builder: DialectBuilder) -> DialectBuilder {{
+                            $(
+                                let builder = builder.declare_claimed::<ops::$module::$operation>(ClaimedRoute {{
+                                    precedence: ops::$module::$operation::PRECEDENCE,
+                                    rows: ops::$module::$operation::rows(),
+                                    shadows: const {{ &[shadows_control_plane(ops::$module::NAME)] }},
+                                    bucket_param: ops::$module::$operation::BUCKET,
+                                }});
+                            )+
+                            builder
+                        }}
+
+                        pub(super) fn register(builder: ServiceBuilder, host: &Arc<Host>) -> ServiceBuilder {{
+                            builder$(.register::<ops::$module::$operation, _>(Arc::clone(host)))+
+                        }}
+                    }};
+                }}
+
+                native_routes!({native_route_entries});
+
+                pub(super) fn append_rows(rows: &mut Vec<OverlayRow>) {{
                     rows.extend_from_slice(ROWS);
-                }
+                }}
 
-                pub(super) fn contains(name: &str) -> bool {
+                pub(super) fn contains(name: &str) -> bool {{
                     ROWS.iter().any(|row| row.name == name)
-                }
+                }}
             """
-            files[metadata.NATIVE_AUTHORITY] = """
+            files[metadata.NATIVE_AUTHORITY] = f"""
                 use super::ClaimedHead;
                 use rustfs_gateway_dialect_rustfs_admin::native::ops;
 
-                pub(super) async fn authorize(context: &RequestContext<'_>, request: &AuthzRequest<'_>, head: &ClaimedHead) -> S3Result<()> {
+                pub(super) async fn authorize(context: &RequestContext<'_>, request: &AuthzRequest<'_>, head: &ClaimedHead) -> S3Result<()> {{
                     let identity = request
                         .identity
                         .filter(|identity| context.auth_scheme() == AuthSchemeRef::SigV4Header && identity.origin() == IdentityOrigin::AccessKey)
@@ -667,74 +836,68 @@ class NativeMetadataTests(unittest.TestCase):
                         .headers()
                         .ok_or_else(|| s3_error!(InternalError, "accepted admin headers are unavailable"))?;
                     let mut headers = HeaderMap::new();
-                    for (name, value) in accepted.iter_raw() {
+                    for (name, value) in accepted.iter_raw() {{
                         headers.append(name.clone(), value.clone());
-                    }
+                    }}
                     if !headers.contains_key(header::HOST)
                         && let Some(authority) = head.uri.authority()
-                    {
+                    {{
                         headers.insert(
                             header::HOST,
                             HeaderValue::from_str(authority.as_str())
                                 .map_err(|_| s3_error!(InternalError, "invalid accepted admin authority"))?,
                         );
-                    }
+                    }}
                     let session = get_session_token(&head.uri, &headers).map(str::to_owned);
                     let credentials = RequestCredentials::without_secret_key(identity.access_key_id().to_owned(), session);
                     let (credentials, owner) = authenticate_envelope_credentials(&credentials).await?;
-                    let Permission::Admin { action, bucket } = permission(request)? else {
+                    let Permission::Admin {{ action, bucket }} = permission(request)? else {{
                         return Ok(());
-                    };
+                    }};
                     let extensions = context.server_extensions();
                     let peer = extensions.get::<Option<RemoteAddr>>().copied().flatten().map(|peer| peer.0);
                     let source = RequestEnvelope::policy_source_addr_from(peer, extensions.get::<ClientInfo>());
-                    match bucket {
-                        Some(bucket) => {
+                    match bucket {{
+                        Some(bucket) => {{
                             validate_admin_request_with_bucket(&headers, &credentials, owner, false, vec![action], source, bucket).await?
-                        }
+                        }}
                         None => validate_admin_request(&headers, &credentials, owner, false, vec![action], source).await?,
-                    }
-                    if request.operation == ops::put_v3_site_replication_remove_v2::NAME {
+                    }}
+                    if request.operation == ops::put_v3_site_replication_remove_v2::NAME {{
                         reject_site_replicator_on_public_admin(&credentials)?;
-                    }
+                    }}
                     Ok(())
-                }
+                }}
 
-                fn permission<'a>(request: &AuthzRequest<'a>) -> S3Result<Permission<'a>> {
-                    if request.operation == ops::post_v4_account_permissions::NAME {
+                fn permission<'a>(request: &AuthzRequest<'a>) -> S3Result<Permission<'a>> {{
+                    if request.operation == ops::post_v4_account_permissions::NAME {{
                         if request.action == ops::post_v4_account_permissions::AUTH.action
                             && request.resource == ResourceShape::Service
                             && matches!(request.subject, Some(Subject::Caller))
-                        {
+                        {{
                             return Ok(Permission::Caller);
-                        }
+                        }}
                         return Err(s3_error!(AccessDenied, "permission queries require the caller subject"));
-                    }
-                    let (action, shape) = match request.operation {
-                        ops::delete_v3_bucket_etag_by_bucket::NAME
-                        | ops::put_v3_bucket_etag_by_bucket::NAME => (AdminAction::ConfigUpdateAdminAction, ResourceShape::Bucket),
-                        ops::put_v3_site_replication_peer_remove_v2::NAME
-                        | ops::put_v3_site_replication_remove_v2::NAME => (AdminAction::SiteReplicationRemoveAction, ResourceShape::Service),
-                        ops::delete_v3_target_by_target_type_by_target_name::NAME => (AdminAction::SetBucketTargetAction, ResourceShape::Service),
-                        ops::post_v4_heal_mrf_cluster_responsibilities_actions::NAME => (AdminAction::HealAdminAction, ResourceShape::Service),
+                    }}
+                    let (action, shape) = match request.operation {{{permission_arms}
                         _ => return Err(s3_error!(InternalError, "unregistered native admin operation")),
-                    };
+                    }};
                     let action = Action::AdminAction(action);
-                    if request.action != <&str>::from(&action) || request.resource != shape || request.subject.is_some() {
+                    if request.action != <&str>::from(&action) || request.resource != shape || request.subject.is_some() {{
                         return Err(s3_error!(AccessDenied, "unexpected admin authorization requirement"));
-                    }
-                    let bucket = if shape == ResourceShape::Bucket {
+                    }}
+                    let bucket = if shape == ResourceShape::Bucket {{
                         Some(
                             request
                                 .bucket
                                 .ok_or_else(|| s3_error!(AccessDenied, "admin bucket is unavailable"))?
                                 .as_str(),
                         )
-                    } else {
+                    }} else {{
                         None
-                    };
-                    Ok(Permission::Admin { action, bucket })
-                }
+                    }};
+                    Ok(Permission::Admin {{ action, bucket }})
+                }}
             """
         return files
 
@@ -892,6 +1055,351 @@ class NativeMetadataTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(inventory.InventoryError, "GET native route requires GatewayStack Object Lambda fallback"):
             self._run_extension_inventory(with_get)
+
+    def test_twelve_native_routes_with_object_lambda_fallback_pass_across_formatting_variants(self):
+        repo = Path(__file__).resolve().parents[1]
+        pin = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+        base = self._host_fixture_files(pin, with_native_routes=True, with_get_native_routes=True, with_lambda_fallback=True)
+        bindings, authorities = self._run_extension_inventory(base)
+        self.assertEqual(len(bindings["extension_tables"]["s3"]), 2)
+        self.assertEqual(len(bindings["extension_tables"]["control_plane"]), 8)
+        self.assertIn(metadata.NATIVE_ROUTES, authorities)
+        self.assertIn(metadata.NATIVE_AUTHORITY, authorities)
+
+        # 4-field GatewayStack with valid fallback wiring is also accepted when only the 7 non-GET routes are mounted.
+        seven_with_fallback = self._host_fixture_files(
+            pin, with_native_routes=True, with_get_native_routes=False, with_lambda_fallback=True
+        )
+        self._run_extension_inventory(seven_with_fallback)
+
+        # Short `S3Service` type, unbraced fallback arm, imported `object_lambda_target`, and sibling `TestGateway::call`.
+        short_variant = dict(base)
+        short_variant[metadata.NATIVE_STACK] = (
+            "use crate::admin::router::object_lambda_target;\n"
+            + short_variant[metadata.NATIVE_STACK]
+            .replace("Option<rustfs_gateway::S3Service>", "Option<S3Service>", 1)
+            .replace(
+                "Some(fallback) if crate::admin::router::object_lambda_target(request.method(), request.uri()).is_some() => {\n"
+                "                            fallback.clone()\n"
+                "                        }",
+                "Some(fallback) if object_lambda_target(request.method(), request.uri()).is_some() => fallback.clone(),",
+                1,
+            )
+            + "\nimpl TestGateway { pub(crate) async fn call(&self, request: Request<Body>) -> Response<Body> { self.0.call(request).await } }\n"
+        )
+        short_variant[metadata.CONTROL_HOST] = short_variant[metadata.CONTROL_HOST].replace(
+            "-> Result<rustfs_gateway::S3Service, GatewayAssemblyError>",
+            "-> Result<S3Service, GatewayAssemblyError>",
+            1,
+        )
+        self._run_extension_inventory(short_variant)
+
+        # Rustfmt-wrapped `configured_builder`, fallback built before `let service`, moved `iam`/`root`/`host`,
+        # single-line `object_lambda_dialect` build, `let service = ...; Ok(service)` in fallback builder,
+        # and multiline wrapped tuple arms in `native_authority::permission`.
+        before_service = dict(base)
+        before_service[metadata.NATIVE_STACK] = before_service[metadata.NATIVE_STACK].replace(
+            "crate::admin::router::object_lambda_target(request.method(), request.uri()).is_some()",
+            "crate::admin::router::object_lambda_target(\n"
+            "                            request.method(),\n"
+            "                            request.uri(),\n"
+            "                        )\n"
+            "                        .is_some()",
+            1,
+        )
+        before_service[metadata.CONTROL_HOST] = (
+            before_service[metadata.CONTROL_HOST]
+            .replace(
+                "control_plane::declare(builder)\n"
+                "                    .build()\n"
+                "                    .map_err(GatewayAssemblyError::AdminDialect)",
+                "control_plane::declare(builder).build().map_err(GatewayAssemblyError::AdminDialect)",
+                1,
+            )
+            .replace(
+                "builder\n"
+                "                    .hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()",
+                "let service = builder\n"
+                "                    .hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()",
+                1,
+            )
+            .replace(
+                ".map_err(GatewayAssemblyError::Service)\n"
+                "            }",
+                ".map_err(GatewayAssemblyError::Service)?;\n"
+                "                Ok(service)\n"
+                "            }",
+                1,
+            )
+            .replace(
+                "let (builder, _settings) = GatewayStack::configured_builder(&assembly, Arc::clone(&iam), Arc::clone(&root), gate, authenticator)?",
+                "let object_lambda_fallback = assemble_object_lambda_fallback(\n"
+                "                    &assembly,\n"
+                "                    Arc::clone(&iam),\n"
+                "                    Arc::clone(&root),\n"
+                "                    Arc::clone(&router),\n"
+                "                    Arc::clone(&host),\n"
+                "                )?;\n"
+                "                let (builder, _settings) = GatewayStack::configured_builder(\n"
+                "                    &assembly,\n"
+                "                    iam,\n"
+                "                    root,\n"
+                "                    gate,\n"
+                "                    authenticator,\n"
+                "                )?",
+                1,
+            )
+            .replace(
+                ".register::<ListenBucketNotification, _>(Arc::clone(&host))",
+                ".register::<ListenBucketNotification, _>(host)",
+                1,
+            )
+            .replace(
+                "\n                let object_lambda_fallback = assemble_object_lambda_fallback("
+                "&assembly, Arc::clone(&iam), Arc::clone(&root), Arc::clone(&router), Arc::clone(&host))?;",
+                "",
+                1,
+            )
+        )
+        before_service[metadata.NATIVE_AUTHORITY] = before_service[metadata.NATIVE_AUTHORITY].replace(
+            "=> (AdminAction::SiteReplicationRemoveAction, ResourceShape::Service),",
+            "=> (\n                            AdminAction::SiteReplicationRemoveAction,\n                            ResourceShape::Service,\n                        ),",
+            1,
+        )
+        self._run_extension_inventory(before_service)
+
+        # Inline `Some(assemble_object_lambda_fallback(...)?)` with moved final arguments.
+        inline_fallback = dict(base)
+        inline_fallback[metadata.CONTROL_HOST] = (
+            inline_fallback[metadata.CONTROL_HOST]
+            .replace(
+                "\n                let object_lambda_fallback = assemble_object_lambda_fallback("
+                "&assembly, Arc::clone(&iam), Arc::clone(&root), Arc::clone(&router), Arc::clone(&host))?;",
+                "",
+                1,
+            )
+            .replace(
+                "object_lambda_fallback: Some(object_lambda_fallback),",
+                "object_lambda_fallback: Some(assemble_object_lambda_fallback(&assembly, iam, root, router, host)?),",
+                1,
+            )
+        )
+        self._run_extension_inventory(inline_fallback)
+
+    def test_get_native_routes_and_object_lambda_fallback_fail_closed(self):
+        repo = Path(__file__).resolve().parents[1]
+        pin = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+        base = self._host_fixture_files(pin, with_native_routes=True, with_get_native_routes=True, with_lambda_fallback=True)
+        self._run_extension_inventory(base)
+
+        # 5 GET routes with only an unused `object_lambda_fallback` field (missing `GatewayStack::call` dispatch) must fail.
+        unused_field = self._host_fixture_files(
+            pin, with_native_routes=True, with_get_native_routes=True, with_lambda_fallback=False
+        )
+        unused_field[metadata.NATIVE_STACK] = unused_field[metadata.NATIVE_STACK].replace(
+            "control_plane: bool,",
+            "control_plane: bool,\n                object_lambda_fallback: Option<rustfs_gateway::S3Service>,",
+            1,
+        )
+        unused_field[metadata.NATIVE_STACK] = unused_field[metadata.NATIVE_STACK].replace(
+            "control_plane: false,",
+            "control_plane: false,\n                        object_lambda_fallback: None,",
+            1,
+        )
+        with self.assertRaises(inventory.InventoryError):
+            self._run_extension_inventory(unused_field)
+
+        # Unrelated struct naming `object_lambda_fallback` on a 3-field GatewayStack must fail closed on GET routes.
+        decoy_struct = self._host_fixture_files(
+            pin, with_native_routes=True, with_get_native_routes=True, with_lambda_fallback=False
+        )
+        decoy_struct[metadata.NATIVE_STACK] += "\nstruct Decoy { object_lambda_fallback: Option<rustfs_gateway::S3Service> }\n"
+        with self.assertRaisesRegex(inventory.InventoryError, "GET native route requires GatewayStack Object Lambda fallback"):
+            self._run_extension_inventory(decoy_struct)
+
+        # Mismatch: 3-field GatewayStack cannot carry `object_lambda_fallback: None` in `assemble_with`.
+        three_field_mismatch = self._host_fixture_files(pin, with_native_routes=True, with_lambda_fallback=False)
+        three_field_mismatch[metadata.NATIVE_STACK] = three_field_mismatch[metadata.NATIVE_STACK].replace(
+            "control_plane: false,",
+            "control_plane: false,\n                        object_lambda_fallback: None,",
+            1,
+        )
+        with self.assertRaises(inventory.InventoryError):
+            self._run_extension_inventory(three_field_mismatch)
+
+        # Orphan fallback helpers in control_plane.rs on a 3-field GatewayStack must fail closed.
+        orphan_helpers = self._host_fixture_files(pin, with_native_routes=True, with_lambda_fallback=False)
+        orphan_helpers[metadata.CONTROL_HOST] += "\nfn object_lambda_dialect() -> Result<Dialect, GatewayAssemblyError> { dialect() }\n"
+        with self.assertRaises(inventory.InventoryError):
+            self._run_extension_inventory(orphan_helpers)
+
+        # Duplicate fallback construction (both before and after `let service`) must fail closed.
+        double_fallback = dict(base)
+        double_fallback[metadata.CONTROL_HOST] = double_fallback[metadata.CONTROL_HOST].replace(
+            "let builder = native_routes::register(builder, &host);",
+            "let builder = native_routes::register(builder, &host);\n"
+            "                let object_lambda_fallback = assemble_object_lambda_fallback("
+            "&assembly, Arc::clone(&iam), Arc::clone(&root), Arc::clone(&router), Arc::clone(&host))?;",
+            1,
+        )
+        with self.assertRaises(inventory.InventoryError):
+            self._run_extension_inventory(double_fallback)
+
+        mutations = [
+            # Wrong `object_lambda_fallback` field type on `GatewayStack`.
+            (metadata.NATIVE_STACK, "Option<rustfs_gateway::S3Service>", "Option<String>"),
+            # Mismatch: 4-field `GatewayStack` missing `object_lambda_fallback: None` in `assemble_with`.
+            (metadata.NATIVE_STACK, "object_lambda_fallback: None,", ""),
+            # `assemble_with` setting `Some(...)` instead of `None`.
+            (metadata.NATIVE_STACK, "object_lambda_fallback: None,", "object_lambda_fallback: Some(service.clone()),"),
+            # Missing `object_lambda_target` check in `GatewayStack::call`.
+            (
+                metadata.NATIVE_STACK,
+                "Some(fallback) if crate::admin::router::object_lambda_target(request.method(), request.uri()).is_some() => {",
+                "Some(fallback) => {",
+            ),
+            # Inverted `object_lambda_target` guard in `GatewayStack::call`.
+            (metadata.NATIVE_STACK, ".is_some() => {", ".is_none() => {"),
+            # `GatewayStack::call` ignores fallback and always clones `self.service`.
+            (metadata.NATIVE_STACK, "fallback.clone()", "self.service.clone()"),
+            # `GatewayStack::call` overwrites `service` after dispatch.
+            (
+                metadata.NATIVE_STACK,
+                "let response = service.call(request).await;",
+                "let service = self.service.clone();\n                        let response = service.call(request).await;",
+            ),
+            # `GatewayStack::call` invokes `self.service` instead of selected `service`.
+            (
+                metadata.NATIVE_STACK,
+                "let response = service.call(request).await;",
+                "let response = self.service.call(request).await;",
+            ),
+            # `GatewayStack::call` missing `control_plane::attach_head` before fallback selection.
+            (
+                metadata.NATIVE_STACK,
+                "if self.control_plane {\n                        control_plane::attach_head(&mut request);\n                    }",
+                "",
+            ),
+            # Unqualified `object_lambda_target` without `use crate::admin::router::object_lambda_target`.
+            (
+                metadata.NATIVE_STACK,
+                "crate::admin::router::object_lambda_target(",
+                "object_lambda_target(",
+            ),
+            # `control_plane::assemble` returns `object_lambda_fallback: None`.
+            (
+                metadata.CONTROL_HOST,
+                "object_lambda_fallback: Some(object_lambda_fallback),",
+                "object_lambda_fallback: None,",
+            ),
+            # `control_plane::assemble` returns `Some(service.clone())` instead of fallback.
+            (
+                metadata.CONTROL_HOST,
+                "object_lambda_fallback: Some(object_lambda_fallback),",
+                "object_lambda_fallback: Some(service.clone()),",
+            ),
+            # `object_lambda_dialect` accidentally appends `native_routes` overlay rows.
+            (
+                metadata.CONTROL_HOST,
+                "rows.extend_from_slice(control_plane::ROWS);\n"
+                "                let record = RECORD.get_or_init(|| DialectOverlay {\n"
+                '                    name: "rustfs-control-plane-object-lambda",',
+                "rows.extend_from_slice(control_plane::ROWS);\n"
+                "                native_routes::append_rows(&mut rows);\n"
+                "                let record = RECORD.get_or_init(|| DialectOverlay {\n"
+                '                    name: "rustfs-control-plane-object-lambda",',
+            ),
+            # `object_lambda_dialect` accidentally calls `native_routes::declare`.
+            (
+                metadata.CONTROL_HOST,
+                "control_plane::declare(builder)\n"
+                "                    .build()\n"
+                "                    .map_err(GatewayAssemblyError::AdminDialect)",
+                "let builder = control_plane::declare(builder);\n"
+                "                native_routes::declare(builder)\n"
+                "                    .build()\n"
+                "                    .map_err(GatewayAssemblyError::AdminDialect)",
+            ),
+            # `assemble_object_lambda_fallback` accidentally calls `native_routes::register`.
+            (
+                metadata.CONTROL_HOST,
+                "let (builder, _settings) = GatewayStack::configured_builder(assembly, iam, root, gate, authenticator)?\n"
+                "                    .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));",
+                "let (builder, _settings) = GatewayStack::configured_builder(assembly, iam, root, gate, authenticator)?\n"
+                "                    .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));\n"
+                "                let builder = native_routes::register(builder, &host);",
+            ),
+            # `assemble_object_lambda_fallback` uses `dialect()?` instead of `object_lambda_dialect()?`.
+            (metadata.CONTROL_HOST, ".dialect(&object_lambda_dialect()?)", ".dialect(&dialect()?)"),
+            # `assemble_object_lambda_fallback` omits a control-plane extension registration.
+            (
+                metadata.CONTROL_HOST,
+                ".dialect(&object_lambda_dialect()?)\n"
+                "                    .register::<ControlPlane, _>(Arc::clone(&host))\n"
+                "                    .register::<PostV3SpeedtestClientDevnull, _>(Arc::clone(&host))\n"
+                "                    .register::<StsForm, _>(Arc::clone(&host))\n"
+                "                    .register::<ResetBucketReplication, _>(Arc::clone(&host))\n"
+                "                    .register::<GetReplicationResetStatus, _>(Arc::clone(&host))\n"
+                "                    .register::<GetReplicationMetricsV2, _>(Arc::clone(&host))\n"
+                "                    .register::<GetReplicationMetrics, _>(Arc::clone(&host))\n"
+                "                    .register::<CheckReplication, _>(Arc::clone(&host))\n"
+                "                    .register::<InvokeObjectLambda, _>(Arc::clone(&host))",
+                ".dialect(&object_lambda_dialect()?)\n"
+                "                    .register::<ControlPlane, _>(Arc::clone(&host))\n"
+                "                    .register::<PostV3SpeedtestClientDevnull, _>(Arc::clone(&host))\n"
+                "                    .register::<StsForm, _>(Arc::clone(&host))\n"
+                "                    .register::<ResetBucketReplication, _>(Arc::clone(&host))\n"
+                "                    .register::<GetReplicationResetStatus, _>(Arc::clone(&host))\n"
+                "                    .register::<GetReplicationMetricsV2, _>(Arc::clone(&host))\n"
+                "                    .register::<GetReplicationMetrics, _>(Arc::clone(&host))\n"
+                "                    .register::<CheckReplication, _>(Arc::clone(&host))",
+            ),
+            # `#[cfg(test)]` on `GatewayStack::call` or `object_lambda_fallback` field must fail closed.
+            (metadata.NATIVE_STACK, "pub(crate) fn call<B>(", "#[cfg(test)] pub(crate) fn call<B>("),
+            (
+                metadata.NATIVE_STACK,
+                "object_lambda_fallback: Option<rustfs_gateway::S3Service>,",
+                "#[cfg(test)] object_lambda_fallback: Option<rustfs_gateway::S3Service>,",
+            ),
+            # `#[cfg(test)]` on `object_lambda_dialect` or `assemble_object_lambda_fallback`.
+            (metadata.CONTROL_HOST, "fn object_lambda_dialect()", "#[cfg(test)] fn object_lambda_dialect()"),
+            (metadata.CONTROL_HOST, "fn assemble_object_lambda_fallback(", "#[cfg(test)] fn assemble_object_lambda_fallback("),
+            # `replicator_guard` must apply ONLY to `put_v3_site_replication_remove_v2`, not GET capabilities.
+            (
+                metadata.NATIVE_AUTHORITY,
+                "if request.operation == ops::put_v3_site_replication_remove_v2::NAME {",
+                "if matches!(request.operation, ops::put_v3_site_replication_remove_v2::NAME | ops::get_v3_site_replication_remove_v2_capabilities::NAME) {",
+            ),
+            # Missing one of the 5 GET ops in `native_authority::permission`.
+            (metadata.NATIVE_AUTHORITY, "| ops::get_v3_bucket_etag_by_bucket::NAME", ""),
+            # Wrong resource shape for `get_v3_bucket_etag_by_bucket` (must be Bucket, not Service).
+            (
+                metadata.NATIVE_AUTHORITY,
+                "ops::delete_v3_bucket_etag_by_bucket::NAME\n"
+                "                        | ops::get_v3_bucket_etag_by_bucket::NAME\n"
+                "                        | ops::put_v3_bucket_etag_by_bucket::NAME => (AdminAction::ConfigUpdateAdminAction, ResourceShape::Bucket),",
+                "ops::delete_v3_bucket_etag_by_bucket::NAME\n"
+                "                        | ops::put_v3_bucket_etag_by_bucket::NAME => (AdminAction::ConfigUpdateAdminAction, ResourceShape::Bucket),\n"
+                "                        ops::get_v3_bucket_etag_by_bucket::NAME => (AdminAction::ConfigUpdateAdminAction, ResourceShape::Service),",
+            ),
+        ]
+        for path, old, new in mutations:
+            with self.subTest(path=path, old=old, new=new):
+                self.assertIn(old, base[path])
+                mutated = dict(base)
+                mutated[path] = mutated[path].replace(old, new, 1)
+                with self.assertRaises(inventory.InventoryError):
+                    self._run_extension_inventory(mutated)
+
+        # Local `fn object_lambda_target` even when `use crate::admin::router::object_lambda_target;` is present must fail.
+        shadowed_target = dict(base)
+        shadowed_target[metadata.NATIVE_STACK] = (
+            "use crate::admin::router::object_lambda_target;\n"
+            + shadowed_target[metadata.NATIVE_STACK].replace("crate::admin::router::object_lambda_target(", "object_lambda_target(", 1)
+            + "\nfn object_lambda_target(_m: &Method, _u: &Uri) -> Option<()> { None }\n"
+        )
+        with self.assertRaises(inventory.InventoryError):
+            self._run_extension_inventory(shadowed_target)
 
 
 if __name__ == "__main__":
