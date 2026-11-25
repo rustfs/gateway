@@ -17541,6 +17541,21 @@ expect_fail check_fuzz_nightly.sh \
     'endpoint replay omitting crash artifact upload' mut_fuzz_nightly_drops_replay_artifact_upload \
     'must upload crash artifacts on failure()'
 
+mut_fuzz_nightly_drops_protoc() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = " protobuf-compiler"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly protobuf-compiler anchor drifted")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'endpoint replay building RustFS without protobuf-compiler' mut_fuzz_nightly_drops_protoc \
+    'must install protobuf-compiler before building the RustFS candidate'
+
 mut_time_gate_rule_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path

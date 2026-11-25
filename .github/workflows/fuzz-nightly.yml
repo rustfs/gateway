@@ -198,18 +198,24 @@ jobs:
           shared-key: fuzz-endpoint-replay-rustfs
       - name: Install RustFS build dependencies
         if: ${{ !inputs.endpoint }}
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
+          pkgs=(build-essential cmake pkg-config libssl-dev protobuf-compiler flatbuffers-compiler)
           if [ "$(id -u)" -eq 0 ]; then
-            apt-get update && apt-get install -y --no-install-recommends cmake libssl-dev
+            apt-get update && apt-get install -y --no-install-recommends "${pkgs[@]}"
           else
-            sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends cmake libssl-dev
+            sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends "${pkgs[@]}"
           fi
+          protoc --version
       - name: Build fuzz-endpoint-replay
         run: cargo build --locked --release -p rustfs-gateway-difftest --bin fuzz-endpoint-replay
       - name: Build RustFS candidate
         if: ${{ !inputs.endpoint }}
         working-directory: candidate/rustfs
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
         run: |
           set -euo pipefail
           git rev-parse HEAD > "$RUNNER_TEMP/candidate-rev.txt"

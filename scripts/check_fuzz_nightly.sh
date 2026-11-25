@@ -105,6 +105,11 @@ end
 unless replay_runs.include?("candidate/rustfs/target/debug/rustfs")
   fail_check("rustfs-endpoint-replay must launch the out-of-process RustFS candidate binary")
 end
+%w[build-essential cmake pkg-config libssl-dev protobuf-compiler flatbuffers-compiler].each do |pkg|
+  unless replay_runs.match?(/\b#{Regexp.escape(pkg)}\b/)
+    fail_check("rustfs-endpoint-replay must install #{pkg} before building the RustFS candidate (run 45575867039)")
+  end
+end
 upload_step = replay_steps.find do |step|
   step["uses"].to_s.start_with?("actions/upload-artifact@") && step["if"].to_s.include?("failure()")
 end
