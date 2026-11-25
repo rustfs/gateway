@@ -39,7 +39,7 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_core::route::{Predicate, TargetKind, generated_entries};
+use rustfs_gateway_core::route::{Predicate, TargetKind};
 use serde::Deserialize;
 
 use super::render::doc_paragraph;
@@ -204,12 +204,14 @@ impl Discriminator {
 }
 
 /// A later operation this row stands in front of, with the reason.
+#[derive(Clone)]
 pub(super) struct Shadowed {
     pub(super) op: String,
     pub(super) reason: String,
 }
 
 /// One extension operation to generate.
+#[derive(Clone)]
 pub(super) struct Extended {
     /// The RustFS variant the inventory names.
     pub(super) name: String,
@@ -233,7 +235,7 @@ pub(super) struct Extended {
     /// The action a request naming one object version is asked instead, when a ruling names one
     /// ([`admit_versioned`]).
     pub(super) version_action: Option<String>,
-    router_url: String,
+    pub(super) router_url: String,
 }
 
 impl Extended {
@@ -360,7 +362,7 @@ impl Extended {
     }
 
     /// Whether a standard row's selector can be satisfied together with this row's.
-    fn overlaps_standard(&self, predicates: &[Predicate]) -> bool {
+    pub(super) fn overlaps_standard(&self, predicates: &[Predicate]) -> bool {
         let mut same_method = false;
         let mut same_target = false;
         for predicate in predicates {
@@ -382,7 +384,7 @@ impl Extended {
     }
 
     /// Whether another extension row's selector can be satisfied together with this row's.
-    fn overlaps_extension(&self, other: &Self) -> bool {
+    pub(super) fn overlaps_extension(&self, other: &Self) -> bool {
         self.method == other.method
             && self.target == other.target
             && self
@@ -764,35 +766,30 @@ pub(super) fn admit_versioned(extended: &mut [Extended], rulings: &[(&str, &str)
 /// table), and every later extension row of the same cell, in RustFS's order. An extension row
 /// behind a standard row of its cell is refused: RustFS's router is asked first.
 pub(super) fn shadowing(extended: &mut [Extended]) -> Result<(), String> {
-    let entries = generated_entries().map_err(|error| format!("the generated route table cannot be read: {error}"))?;
-    for index in 0..extended.len() {
-        let mut standard: Vec<(u16, &str)> = entries
+    super::native::table_shadows(extended, Extended::claim, Extended::order_reason)
+}
+
+pub(super) fn plan_routes(routes: &[ExtensionRoute], extensions: &[(&str, &str)], commit: &str) -> Result<Vec<Extended>, String> {
+    // The S3-shaped extension routes: each needs a ruling naming its operation, every ruling needs
+    // its route, and the rows take the inventory's order, which is RustFS's router's.
+    let mut extended = Vec::new();
+    let mut extensions_used = std::collections::BTreeSet::new();
+    for (index, route) in routes.iter().enumerate() {
+        let at = format!("extension route {}", route.name);
+        let ruling = extensions
             .iter()
-            .filter(|entry| extended[index].overlaps_standard(entry.selector.predicates()))
-            .map(|entry| (entry.precedence, entry.op_name))
-            .collect();
-        standard.sort_unstable();
-        let claim = extended[index].claim();
-        for (precedence, op) in standard {
-            if precedence <= extended[index].precedence {
-                return Err(format!(
-                    "{}: its row at {} is behind the standard row {op} at {precedence}; an extension row is ahead of every \
-                     standard row of its method and target",
-                    extended[index].operation, extended[index].precedence
-                ));
-            }
-            extended[index].shadows.push(Shadowed {
-                op: op.to_owned(),
-                reason: claim.clone(),
-            });
-        }
-        for later in index + 1..extended.len() {
-            if extended[index].overlaps_extension(&extended[later]) {
-                let reason = extended[index].order_reason(&extended[later]);
-                let op = extended[later].operation.clone();
-                extended[index].shadows.push(Shadowed { op, reason });
-            }
-        }
+            .position(|(name, _)| *name == route.name)
+            .ok_or_else(|| format!("{at}: an extension route the generator has no ruling for"))?;
+        extensions_used.insert(ruling);
+        let precedence = u16::try_from(index)
+            .ok()
+            .and_then(|index| FIRST_PRECEDENCE.checked_add(index))
+            .ok_or_else(|| format!("{at}: out of precedences"))?;
+        extended.push(Extended::of(route, extensions[ruling].1, &at, commit, precedence)?);
     }
-    Ok(())
+    if let Some(stale) = (0..extensions.len()).find(|index| !extensions_used.contains(index)) {
+        return Err(format!("the extension route {} is not in the inventory", extensions[stale].0));
+    }
+    shadowing(&mut extended)?;
+    Ok(extended)
 }

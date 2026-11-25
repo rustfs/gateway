@@ -24,8 +24,8 @@ WHAT THIS DOES
   whether a body is sealed with the caller's secret, and whether a body is streamed or buffered.
   The query-discriminated routes the admin router claims before its path table
   (`parse_replication_extension_request`, `parse_misc_extension_request`) are recorded beside them,
-  after the two listing routes RustFS's metadata route claims ahead of the admin router
-  (`rustfs/src/app/metadata_route.rs`, read by `rustfs_metadata_listing_routes.py`).
+  in selector order on legacy hosts. For native hosts the two services have separate ordered
+  tables, read from their installations and the gateway dependency locked by that host.
   Every count in the output is computed from the rows; nothing is typed in by hand.
 WHY
   The historical "318" was a hand-copied snapshot. The inventory must be regenerated, not edited.
@@ -147,7 +147,7 @@ def matching_close(text, open_index, open_char, close_char):
     fail(f"unbalanced {open_char}{close_char} at offset {open_index}: {text[open_index:open_index + 80]!r}")
 
 
-def split_args(text):
+def split_args(text, separator=","):
     args, depth, start, index = [], 0, 0, 0
     while index < len(text):
         end = literal_end(text, index)
@@ -159,7 +159,7 @@ def split_args(text):
             depth += 1
         elif char in ")]}":
             depth -= 1
-        elif char == "," and depth == 0:
+        elif char == separator and depth == 0:
             args.append(text[start:index].strip())
             start = index + 1
         index += 1
@@ -350,17 +350,91 @@ def read_matrix(source):
 # ── authority 3: the insert sites, and what each handler does ─────────────────────────────────
 
 
+def registration_module(source, relative, module_path):
+    """Resolve the child modules and grouped imports used by route registration."""
+    if not module_path:
+        return relative
+    caller = pathlib.PurePosixPath(relative)
+    base = caller.parent if caller.name == "mod.rs" else caller.with_suffix("")
+    first, *tail = module_path.split("::")
+    text = source.files[relative]
+    imports = []
+    for parent, entries in re.findall(r"\buse (\w+)::\{([^{}]*)\};", text):
+        for entry in split_args(entries):
+            name, _, alias = entry.partition(" as ")
+            if (alias or name) == first:
+                imports.append((parent, name))
+    if len(imports) > 1:
+        fail(f"{relative}: ambiguous registration module {first}")
+
+    def module_file(path):
+        paths = [p.as_posix() for p in (path.with_suffix(".rs"), path / "mod.rs") if p.as_posix() in source.files]
+        if len(paths) != 1:
+            fail(f"{relative}: cannot resolve registration module {module_path}")
+        return paths[0]
+
+    if imports:
+        parent, name = imports[0]
+        if parent == "super":
+            base, chunks = base.parent, [name, *tail]
+            relative = module_file(base)
+        else:
+            chunks = [parent, name, *tail]
+    else:
+        chunks = [first, *tail]
+    for child in chunks:
+        decls = re.findall(rf"((?:#\[[^\]]+\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+{child}\s*;", source.files[relative])
+        if len(decls) != 1 or re.search(r"#\[\s*(?:cfg|cfg_attr|path)\b", decls[0]):
+            fail(f"{relative}: unresolved declaration for registration module {child}")
+        base /= child
+        relative = module_file(base)
+    return relative
+
+
 def register_graph(source):
-    """Maps every `register_*` function to the files and names it calls, and the insert sites."""
-    mod_text = source.text((ADMIN / "mod.rs").as_posix())
-    top = re.search(r"fn register_admin_routes\([^)]*\)\s*->[^{]*\{", mod_text)
-    if not top:
-        fail("rustfs/src/admin/mod.rs: register_admin_routes not found")
-    body = mod_text[top.end():matching_close(mod_text, top.end() - 1, "{", "}")]
-    groups = re.findall(r"\b([a-z_]+)::(register_[a-z_]+)\(r\)\?", body)
+    """Trace direct router registration calls from the entry point to (file, function) sites."""
+    def calls(relative, name):
+        text = source.files[relative]
+        defs = list(re.finditer(rf"\bfn\s+{name}\s*\([^)]*\)[^;{{}}]*\{{", text))
+        exports = re.findall(rf"\bpub use (\w+)::{name};", text)
+        if len(defs) + len(exports) != 1:
+            fail(f"{relative}: expected one registration function {name}")
+        if exports:
+            yield "", (registration_module(source, relative, exports[0]), name)
+            return
+        start = defs[0].end()
+        body = text[start:matching_close(text, start - 1, "{", "}")]
+        # A nonempty literal prefix loop calls its same-file helper on this router.
+        prefix_loop = (r"for (\w+) in \[\s*[A-Z][A-Z_0-9]*(?:\s*,\s*[A-Z][A-Z_0-9]*)*\s*,?\]\s*\{"
+                       r"\s*(register_[a-z0-9_]+)\(r,\s*\1\)\?;\s*\}(?:\s*Ok\(\(\)\))?")
+        target = r"((?:\w+::)*)(register(?:_[a-z0-9_]+)?)\(r\)\?"
+        for stmt in split_args(body, ";"):
+            loop = re.fullmatch(prefix_loop, stmt)
+            if loop:
+                yield "", (relative, loop[2])
+            if re.search(rf"\b{target}", stmt):
+                call = re.fullmatch(target, stmt)
+                if not call:
+                    fail(f"{relative}: non-direct registration call in {name}")
+                module = call[1].removesuffix("::")
+                yield module, (registration_module(source, relative, module), call[2])
+
+    groups = list(calls((ADMIN / "mod.rs").as_posix(), "register_admin_routes"))
     if not groups:
         fail("rustfs/src/admin/mod.rs: no registration groups found")
-    return groups
+    owners = {}
+    for module, entry in groups:
+        group = module.split("::")[-1]
+        stack = [entry]
+        while stack:
+            site = stack.pop()
+            if site in owners:
+                if owners[site] != group:
+                    fail(f"{site}: registration reached from both {group} and {owners[site]}")
+                continue
+            owners[site] = group
+            stack.extend(target for _, target in calls(*site))
+    return groups, owners
 
 
 def insert_sites(source):
@@ -371,6 +445,12 @@ def insert_sites(source):
         spans = functions(text)
         test_module = re.search(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{", text)
         test_start = test_module.start() if test_module else -1
+        production = text[:test_start] if test_module else text
+        for offset, method, path, handler, variant, defining in variants.enum_array_sites(
+            source, relative, production, matching_close, split_args, resolve_path, registration_module, fail
+        ):
+            sites.append({"method": method, "path": path, "handler": handler, "variant": variant,
+                          "file": relative, "function": enclosing_function(spans, offset), "defining_file": defining})
         loop = re.search(r"for prefix in \[([A-Z_,\s]+)\]", text)
         for loop_match in re.finditer(r"for \((\w+),\s*(\w+),\s*(\w+)\) in \[", text):
             if test_start != -1 and loop_match.start() > test_start:
@@ -444,8 +524,8 @@ def handler_type(source, name, relative):
     return variants.handler_type(source, name, relative, fail)
 
 
-def handler_body(source, type_name, variant=None):
-    return variants.handler_body(source, type_name, variant, ADMIN, matching_close, split_args, fail, SECRET_REQUEST + SECRET_RESPONSE)
+def handler_body(source, type_name, variant=None, defining_file=None):
+    return variants.handler_body(source, type_name, variant, ADMIN, matching_close, split_args, fail, SECRET_REQUEST + SECRET_RESPONSE, defining_file)
 
 
 def body_facts(text, stream_types):
@@ -470,99 +550,6 @@ def body_facts(text, stream_types):
     )
     response_body = "streamed" if streamed else "buffered"
     return caller_secret, request_body, response_body
-
-
-# ── out-of-table routes the admin router claims first ─────────────────────────────────────────
-
-
-def extension_routes(source):
-    relative = (ADMIN / "router.rs").as_posix()
-    text = source.text(relative)
-    rows = []
-    for function, enum, target_rule in (
-        ("parse_replication_extension_request", "ReplicationExtRoute", "bucket"),
-        ("parse_misc_extension_request", "MiscExtRoute", None),
-    ):
-        match = re.search(rf"fn {function}\([^)]*\)\s*->[^{{]*\{{", text)
-        if not match:
-            fail(f"{relative}: {function} not found")
-        body = text[match.end():matching_close(text, match.end() - 1, "{", "}")]
-        methods = [(m.start(), m.group(1)) for m in re.finditer(r"method\s*[!=]=\s*Method::(\w+)", body)]
-        for variant in re.finditer(rf"{enum}::(\w+)(\s*\{{[^}}]*\}})?", body):
-            before = body[:variant.start()]
-            keys = re.findall(r'query_value_exact\(uri,\s*"([^"]+)"\)', before)
-            if not keys:
-                fail(f"{relative}: {enum}::{variant.group(1)} has no preceding query key")
-            key = keys[-1]
-            conditions = [c for c in re.findall(r"\bif\s+(.*?)\{", before, re.S) if f'"{key}"' in c or "value" in c]
-            if not conditions:
-                fail(f"{relative}: {enum}::{variant.group(1)} has no condition naming {key}")
-            condition = conditions[-1]
-            equals = re.search(r'value\s*==\s*"([^"]*)"|as_deref\(\)\s*==\s*Some\("([^"]*)"\)', condition)
-            if equals:
-                value_rule = f"equals:{equals.group(1) if equals.group(1) is not None else equals.group(2)}"
-            elif "value.is_empty()" in condition:
-                value_rule = "equals:"
-            elif ".is_some()" in condition:
-                value_rule = "present"
-            else:
-                fail(f"{relative}: unreadable discriminator condition {squash(condition)!r}")
-            method = [name for start, name in methods if start < variant.start() and "!=" not in body[start:start + 12]]
-            negated = [name for start, name in methods if "!=" in body[start:start + 12]]
-            method_name = (method[-1] if method else negated[0] if negated else None)
-            if method_name is None:
-                fail(f"{relative}: {enum}::{variant.group(1)} has no method")
-            fields = variant.group(2) or ""
-            if target_rule:
-                target = target_rule
-            elif "object" in fields:
-                target = "object"
-            elif "None" in fields:
-                target = "service"
-            else:
-                target = "bucket"
-            rows.append({
-                "name": f"{enum}::{variant.group(1)}" + ("" if not fields else f"[{target}]"),
-                "variant": variant.group(1),
-                "fields": fields,
-                "method": method_name,
-                "target": target,
-                "query_discriminator": {"key": key, "rule": value_rule},
-                "auth_mode": "custom",
-                "auth_detail": "SignatureRequiredThenHandlerCheck",
-            })
-    actions = {}
-    for function in ("replication_extension_policy_action", "authorize_misc_extension_request"):
-        match = re.search(rf"fn {function}\([^)]*\)[^{{]*\{{", text)
-        if not match:
-            fail(f"{relative}: {function} not found")
-        body = text[match.end():matching_close(text, match.end() - 1, "{", "}")]
-        for arm in re.finditer(r"((?:\w+Route::\w+(?:\s*\{[^}]*\})?\s*\|?\s*)+)=>(.*?)(?=\w+Route::\w+(?:\s*\{[^}]*\})?\s*(?:\||=>)|\Z)", body, re.S):
-            action = re.search(r"Action::\w+\((\w+)::(\w+)\)", arm.group(2))
-            if not action:
-                continue
-            for route in re.finditer(r"(\w+)Route::(\w+)(\s*\{[^}]*\})?", arm.group(1)):
-                actions.setdefault((route.group(2), squash(route.group(3) or "")), (action.group(1), action.group(2)))
-    for row in rows:
-        variant, fields = row.pop("variant"), squash(row.pop("fields"))
-        found = actions.get((variant, fields)) or actions.get((variant, ""))
-        if found is None:
-            candidates = [a for (v, f), a in actions.items() if v == variant and (("None" in f) == ("None" in fields))]
-            found = candidates[0] if len(candidates) == 1 else None
-        if found is None:
-            fail(f"{relative}: no authorisation action for {row['name']}")
-        row["iam_action_enum"], row["iam_action"] = found
-    return rows
-
-
-def metadata_routes(root):
-    """The listing routes RustFS's metadata route claims ahead of its admin router (rustfs/gateway#1588)."""
-    relative = metadata_listing.METADATA_ROUTE
-    path = root / relative
-    if not path.is_file():
-        fail(f"RustFS source file {relative} is missing")
-    text = strip_comments(path.read_text(encoding="utf-8"))
-    return metadata_listing.metadata_listing_routes(text, relative, fail, matching_close)
 
 
 # ── the policy wire spelling of each action ───────────────────────────────────────────────────
@@ -663,34 +650,16 @@ def generate(root):
             only_right = sorted(right - left)[:5]
             fail(f"{left_name} and {right_name} disagree: only in {left_name} {only_left}; only in {right_name} {only_right}")
 
-    groups = register_graph(source)
-    group_of_function = {}
-    for module, function in groups:
-        group_of_function.setdefault(function, module)
-    calls = {}
-    for relative, text in source.files.items():
-        for name, ranges in functions(text).items():
-            if name.startswith("register_"):
-                for start, end in ranges:
-                    calls.setdefault(name, set()).update(re.findall(r"\b(register_[a-z_]+)\(", text[start:end]))
-    owner = {}
-    for module, function in groups:
-        stack, seen = [function], set()
-        while stack:
-            current = stack.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            owner.setdefault(current, module)
-            stack.extend(calls.get(current, ()))
+    groups, owner = register_graph(source)
 
     routes = []
     for key in sorted(registered):
         site = registered[key]
-        if site["function"] not in owner:
+        location = (site["file"], site["function"])
+        if location not in owner:
             fail(f"{site['file']}: {key} is inserted by {site['function']}, which no registration group reaches")
         type_name = handler_type(source, site["handler"], site["file"])
-        handler_file, body, stream_types = handler_body(source, type_name, site.get("variant"))
+        handler_file, body, stream_types = handler_body(source, type_name, site.get("variant"), site.get("defining_file"))
         caller_secret, request_body, response_body = body_facts(body, stream_types)
         row = policy[key]
         method, path = key.split(" ", 1)
@@ -698,7 +667,7 @@ def generate(root):
         routes.append({
             "method": method,
             "path": path,
-            "group": owner[site["function"]],
+            "group": owner[location],
             "surface": surface(path, source),
             "path_params": re.findall(r"\{([^}]+)\}", path),
             "minio_admin_alias": path.startswith(admin_prefix + "/"),
@@ -719,12 +688,12 @@ def generate(root):
     names = action_wire_names(root)
     for row in routes:
         row["iam_action_wire"] = wire_name(row["iam_action"], names, "AdminAction")
-    # RustFS asks its metadata route before its admin router, so its rows come first.
-    extensions = metadata_routes(root) + extension_routes(source)
-    for row in extensions:
-        row["iam_action_wire"] = wire_name(row["iam_action"], names, row.pop("iam_action_enum"))
+    bindings, extension_authorities = metadata_listing.extension_inventory(
+        root, pathlib.Path(__file__).resolve().parents[1], source, names, strip_comments, matching_close, split_args, wire_name, fail)
+    separate = "extension_tables" in bindings
+    extensions = [row for table in bindings["extension_tables"].values() for row in table] if separate else bindings["extension_routes"]
     return {
-        "format": FORMAT,
+        "format": "rustfs-admin-route-inventory/2" if separate else FORMAT,
         "source": {
             "repository": "https://github.com/rustfs/rustfs",
             "commit": commit,
@@ -732,15 +701,14 @@ def generate(root):
                 "rustfs/src/admin/route_policy.rs",
                 "rustfs/src/admin/route_registration_test.rs",
                 "rustfs/src/admin/**/*.rs insert sites",
-                "rustfs/src/admin/router.rs extension parsers",
-                f"{metadata_listing.METADATA_ROUTE} metadata listing selector",
+                *extension_authorities,
             ],
             "registration_groups": len(groups),
             "matrix_helper_calls": dict(sorted(helpers.items())),
         },
         "census": census(routes, extensions),
         "routes": routes,
-        "extension_routes": extensions,
+        **bindings,
     }
 
 
@@ -776,13 +744,21 @@ def render(document):
     lines = ["{"]
     for field in ("format", "source", "census"):
         lines.append(f"  {json.dumps(field)}: {json.dumps(document[field], sort_keys=False)},")
-    for field in ("routes", "extension_routes"):
+    for field in ("routes", "extension_routes") if "extension_routes" in document else ("routes",):
         rows = document[field]
         lines.append(f"  {json.dumps(field)}: [")
         for index, row in enumerate(rows):
             comma = "," if index + 1 < len(rows) else ""
             lines.append(f"    {json.dumps(row, sort_keys=False)}{comma}")
         lines.append("  ]" + ("," if field == "routes" else ""))
+    if "extension_tables" in document:
+        tables = document["extension_tables"]
+        lines.append('  "extension_tables": {')
+        for index, (table, rows) in enumerate(tables.items()):
+            lines.append(f'    "{table}": [')
+            lines.extend("      " + json.dumps(row) + ("," if i + 1 < len(rows) else "") for i, row in enumerate(rows))
+            lines.append("    ]" + ("," if index + 1 < len(tables) else ""))
+        lines.append("  }")
     lines.append("}")
     return "\n".join(lines) + "\n"
 

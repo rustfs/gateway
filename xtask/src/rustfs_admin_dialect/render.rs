@@ -20,6 +20,11 @@
 //! files (`super`).
 //! Upstream: `super::plan`. Downstream: `super::generate`.
 
+#[path = "native_render.rs"]
+mod native_render;
+
+pub(super) use native_render::render_native_extensions;
+
 use std::fmt::Write as _;
 
 use super::rulings::{About, Absent};
@@ -93,8 +98,13 @@ fn request(declared: &Declared) -> String {
 }
 
 /// The module documentation's paragraph on whose account the operation acts on.
-fn subject_doc(about: About, actions: &[&str]) -> String {
+fn subject_doc(about: About, actions: &[&str], native: bool) -> String {
     match about {
+        About::Caller if native => format!(
+            "//! The route authorizer checks the vendor action `{}` on the authenticated caller's own account\n\
+             //! (`SubjectRule::Caller`). The handler retains its own policy checks.\n",
+            actions.first().copied().unwrap_or_default()
+        ),
         About::Caller => format!(
             "//! It acts only on the caller's own account (`SubjectRule::Caller`): the request cannot name another.\n\
              //! RustFS evaluates no IAM action here, so its action is the vendor label `{}`, which the\n\
@@ -154,7 +164,7 @@ fn core_root_imports(about: Option<About>) -> &'static str {
     }
 }
 
-fn evidence(d: &Declared) -> String {
+pub(super) fn evidence(d: &Declared) -> String {
     let mut cited = vec![format!("{:?}", d.handler_url)];
     if d.ruled.is_some() {
         cited.push("record::ADR_0025".to_owned());
@@ -267,6 +277,14 @@ pub(super) fn doc_paragraph(text: &str) -> String {
 }
 
 pub(super) fn render_operation(declared: &Declared) -> String {
+    operation(declared, false)
+}
+
+pub(super) fn render_native_operation(declared: &Declared) -> String {
+    operation(declared, true)
+}
+
+fn operation(declared: &Declared, native: bool) -> String {
     let mut out = String::from(LICENSE);
     let d = declared;
     let has_shadows = !d.shadows.is_empty() || super::fallback::shadowed_by(d).next().is_some();
@@ -280,14 +298,21 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     let _ = writeln!(out, "//! and a deployment that registers a handler for [`{}`].", d.type_name);
     if let Some(class) = &d.ruled {
         out.push_str("//!\n");
-        let _ = writeln!(
-            out,
-            "//! The inventory records this route as custom-auth (`{class}`); its action is ADR-0025's ruling."
-        );
+        if native {
+            let _ = writeln!(
+                out,
+                "//! The inventory records custom authentication (`{class}`); its route action follows ADR-0025's rules."
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "//! The inventory records this route as custom-auth (`{class}`); its action is ADR-0025's ruling."
+            );
+        }
     }
     if let Some(about) = d.rule.about {
         out.push_str("//!\n");
-        out.push_str(&subject_doc(about, &d.rule.actions()));
+        out.push_str(&subject_doc(about, &d.rule.actions(), native));
     }
     if !d.note.is_empty() {
         out.push_str("//!\n");
@@ -324,6 +349,12 @@ pub(super) fn render_operation(declared: &Declared) -> String {
             "Streaming",
             "admin::streamed(body)",
             "The live body, handed on unread: RustFS buffers it, but only after a check the handler keeps.",
+        ),
+        "NotRead" if native && super::native_pack::buffers_unused_control_plane_body(d) => (
+            "()",
+            "Full",
+            "admin::buffered(body).map(drop)",
+            "The native listener checks the buffered payload before this handler discards it.",
         ),
         "NotRead" => ("()", "None", "Ok(())", "RustFS reads no request body."),
         "Buffered" => (
@@ -526,7 +557,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
 }};
 ",
         ty = d.type_name,
-        body = if input == "()" { "_body" } else { "body" },
+        body = if mode == "None" { "_body" } else { "body" },
         precedence = d.precedence,
         group = d.group,
         selector = format!("{}{}", rendered_selector(d), d.bucket.as_ref().map(Bound::rendered).unwrap_or_default()),
@@ -620,6 +651,20 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
         out,
         "/// The RustFS commit the inventory was recorded from.\npub const RUSTFS_SOURCE_COMMIT: &str = {commit:?};\n"
     );
+    render_inventory_lists(&mut out, plan);
+    out.push_str(
+        "/// Every S3-shaped extension route served as an S3-table row rather than inside a claim\n\
+         /// (rustfs/backlog#2753), in the inventory's order, which is the order RustFS's router tries them in.\n",
+    );
+    out.push_str("pub static EXTENSION_ROUTES: &[ExtensionRouteRecord] = &[\n");
+    for extended in &plan.extensions {
+        let _ = writeln!(out, "    ops::{}::RECORD,", extended.stem);
+    }
+    out.push_str("];\n");
+    out
+}
+
+pub(super) fn render_inventory_lists(out: &mut String, plan: &Plan) {
     out.push_str("/// Every registration group RustFS still serves itself, with its route count.\n");
     out.push_str("pub static PENDING: &[PendingGroup] = &[\n");
     for (group, order, routes) in &plan.pending {
@@ -641,16 +686,6 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
         let _ = writeln!(out, "    ops::{}::RECORD,", super::form::STEM);
     }
     out.push_str("];\n\n");
-    out.push_str(
-        "/// Every S3-shaped extension route served as an S3-table row rather than inside a claim\n\
-         /// (rustfs/backlog#2753), in the inventory's order, which is the order RustFS's router tries them in.\n",
-    );
-    out.push_str("pub static EXTENSION_ROUTES: &[ExtensionRouteRecord] = &[\n");
-    for extended in &plan.extensions {
-        let _ = writeln!(out, "    ops::{}::RECORD,", extended.stem);
-    }
-    out.push_str("];\n");
-    out
 }
 
 /// A table file that lists one `ops::<stem>::<ITEM>` per operation.

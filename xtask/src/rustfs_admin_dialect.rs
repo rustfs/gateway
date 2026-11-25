@@ -51,6 +51,8 @@ use crate::repo_root::repo_root;
 mod extension;
 mod fallback;
 mod form;
+mod native;
+mod native_pack;
 mod render;
 mod rule;
 mod rulings;
@@ -62,7 +64,7 @@ const FORMAT: &str = "rustfs-admin-route-inventory/1";
 /// other file.
 const OUTPUT: &str = "crates/dialect-rustfs-admin/src";
 /// The directories under [`OUTPUT`] that hold nothing but generated files.
-const GENERATED_DIRS: [&str; 2] = ["ops", "table"];
+const GENERATED_DIRS: [&str; 4] = ["ops", "table", "native", "native/ops"];
 /// RustFS's admin router, whose `matchit` matcher tries a literal segment before a parameter.
 const RUSTFS_ROUTER: &str = "rustfs/src/admin/router.rs";
 /// One prefix RustFS serves admin routes under, its compat prefix, and how the inventory records
@@ -168,6 +170,8 @@ const MIGRATED_THROUGH: u8 = 8;
 
 #[derive(Deserialize)]
 struct Inventory {
+    #[serde(skip)]
+    native: bool,
     format: String,
     source: Source,
     routes: Vec<Route>,
@@ -391,7 +395,12 @@ fn plan_through(
     if inventory.format != FORMAT {
         return Err(format!("the inventory is {:?}, not {FORMAT:?}", inventory.format));
     }
-    let order_of = |group: &str| PLAN.iter().find(|(name, _)| *name == group).map(|(_, order)| *order);
+    let order_of = |group: &str| {
+        PLAN.iter()
+            .find(|(name, _)| *name == group)
+            .map(|(_, order)| *order)
+            .or_else(|| native::group_order(inventory, group))
+    };
     let mut used = BTreeSet::new();
     let mut used_query_buckets = BTreeSet::new();
     let mut declared = Vec::new();
@@ -520,33 +529,7 @@ fn plan_through(
         declared[winner].shadows.push(shadow);
     }
     let _ = twins_used;
-    // The S3-shaped extension routes: each needs a ruling naming its operation, every ruling needs
-    // its route, and the rows take the inventory's order, which is RustFS's router's.
-    let mut extended = Vec::new();
-    let mut extensions_used = BTreeSet::new();
-    for (index, route) in inventory.extension_routes.iter().enumerate() {
-        let at = format!("extension route {}", route.name);
-        let ruling = extensions
-            .iter()
-            .position(|(name, _)| *name == route.name)
-            .ok_or_else(|| format!("{at}: an extension route the generator has no ruling for"))?;
-        extensions_used.insert(ruling);
-        let precedence = u16::try_from(index)
-            .ok()
-            .and_then(|index| extension::FIRST_PRECEDENCE.checked_add(index))
-            .ok_or_else(|| format!("{at}: out of precedences"))?;
-        extended.push(extension::Extended::of(
-            route,
-            extensions[ruling].1,
-            &at,
-            &inventory.source.commit,
-            precedence,
-        )?);
-    }
-    if let Some(stale) = (0..extensions.len()).find(|index| !extensions_used.contains(index)) {
-        return Err(format!("the extension route {} is not in the inventory", extensions[stale].0));
-    }
-    extension::shadowing(&mut extended)?;
+    let extended = extension::plan_routes(&inventory.extension_routes, extensions, &inventory.source.commit)?;
     // A staying route the inventory no longer records is refused only once every group is
     // migrated: until then its group may simply be pending.
     if pending.is_empty()
@@ -573,13 +556,7 @@ fn plan_through(
         let (method, path, _) = query_buckets[stale];
         return Err(format!("the query bucket for {method} {path} names no route of a migrated group"));
     }
-    let mut names = BTreeSet::new();
-    if let Some(twice) = declared.iter().find(|declared| !names.insert(declared.stem.clone())) {
-        return Err(format!("two routes derive the operation {}", twice.name));
-    }
-    if let Some(twice) = extended.iter().find(|extended| !names.insert(extended.stem.clone())) {
-        return Err(format!("two routes derive the operation {}", twice.operation));
-    }
+    unique_operations(&declared, &extended)?;
     Ok(Plan {
         staying,
         forms: formed,
@@ -590,6 +567,17 @@ fn plan_through(
             .map(|(group, (order, routes))| (group, order, routes))
             .collect(),
     })
+}
+
+fn unique_operations(declared: &[Declared], extended: &[extension::Extended]) -> Result<(), String> {
+    let mut names = BTreeSet::new();
+    if let Some(twice) = declared.iter().find(|declared| !names.insert(declared.stem.clone())) {
+        return Err(format!("two routes derive the operation {}", twice.name));
+    }
+    if let Some(twice) = extended.iter().find(|extended| !names.insert(extended.stem.clone())) {
+        return Err(format!("two routes derive the operation {}", twice.operation));
+    }
+    Ok(())
 }
 
 /// `source` as the repository's rustfmt writes it.
@@ -671,18 +659,30 @@ fn retain(declared: &mut [Declared], retained: &[Retained]) -> Result<(), String
     Ok(())
 }
 
-/// Every generated file, by its path under the repository root.
-fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
+/// The pinned legacy operation types, independent of native host placement.
+fn legacy_plan(root: &Path) -> Result<(String, Plan), String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
     let mut plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS)?;
     retain(&mut plan.declared, RETAINED)?;
     extension::admit_presigned(&mut plan.extensions, PRESIGNED_EXTENSIONS)?;
     extension::admit_versioned(&mut plan.extensions, VERSIONED_EXTENSIONS)?;
+    Ok((inventory.source.commit, plan))
+}
+
+fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
+    let (commit, plan) = legacy_plan(root)?;
+    let mut files = modules(&plan, &commit, render_operation);
+    let text = std::fs::read_to_string(root.join(native_pack::INVENTORY)).map_err(|e| e.to_string())?;
+    files.extend(native::generate(root, &text, true)?);
+    format_all(root, files)
+}
+
+fn modules(plan: &Plan, commit: &str, render_op: fn(&Declared) -> String) -> BTreeMap<PathBuf, String> {
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {
-        files.insert(output.join("ops").join(format!("{}.rs", declared.stem)), render_operation(declared));
+        files.insert(output.join("ops").join(format!("{}.rs", declared.stem)), render_op(declared));
     }
     for fallback in fallback::FALLBACKS {
         files.insert(output.join("ops").join(format!("{}.rs", fallback.stem)), fallback.render(render::LICENSE));
@@ -693,11 +693,11 @@ fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     for extended in &plan.extensions {
         files.insert(output.join("ops").join(format!("{}.rs", extended.stem)), extended.render(render::LICENSE));
     }
-    files.insert(output.join("ops/mod.rs"), render_mod(&plan));
-    for (path, source) in render_tables(&plan, &inventory.source.commit) {
+    files.insert(output.join("ops/mod.rs"), render_mod(plan));
+    for (path, source) in render_tables(plan, commit) {
         files.insert(output.join(path), source);
     }
-    format_all(root, files)
+    files
 }
 
 /// Every generated file that differs from the committed one, is missing, or is committed without
@@ -716,7 +716,7 @@ fn drift(root: &Path, files: &BTreeMap<PathBuf, String>) -> Vec<String> {
         if let Ok(entries) = std::fs::read_dir(root.join(&dir)) {
             for entry in entries.flatten() {
                 let path = dir.join(entry.file_name());
-                if !files.contains_key(&path) {
+                if path != Path::new(OUTPUT).join("native/ops") && !files.contains_key(&path) {
                     drifted.push(format!("{} is not generated", path.display()));
                 }
             }
@@ -728,6 +728,9 @@ fn drift(root: &Path, files: &BTreeMap<PathBuf, String>) -> Vec<String> {
 
 /// `cargo xtask rustfs-admin-dialect [--check]`.
 pub(crate) fn command(args: &[String]) -> ExitCode {
+    if args.first().is_some_and(|arg| arg == "--native-inventory") {
+        return native::command(&repo_root(), args);
+    }
     let check = match args {
         [] => false,
         [flag] if flag == "--check" => true,
@@ -763,16 +766,9 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    for (path, source) in &files {
-        let target = root.join(path);
-        let written = target
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&target, source));
-        if let Err(error) = written {
-            eprintln!("rustfs-admin-dialect: cannot write {}: {error}", path.display());
-            return ExitCode::FAILURE;
-        }
+    if let Err(error) = native::write(&root, &files) {
+        eprintln!("rustfs-admin-dialect: {error}");
+        return ExitCode::FAILURE;
     }
     println!("rustfs-admin-dialect: wrote {} file(s)", files.len());
     ExitCode::SUCCESS

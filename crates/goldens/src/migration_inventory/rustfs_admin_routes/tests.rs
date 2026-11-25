@@ -396,3 +396,49 @@ impl From<&super::InventoryCensus> for CensusJson {
         }
     }
 }
+
+#[test]
+fn native_tables_preserve_independent_precedence_and_require_the_expected_host() {
+    let mut value = recorded();
+    value["format"] = Value::from("rustfs-admin-route-inventory/2");
+    value.as_object_mut().unwrap().remove("extension_routes");
+    let native = |name, query, floor| {
+        serde_json::json!({
+            "name": name, "method": "GET", "target": "bucket", "precedence": 80,
+            "query_discriminator": {"key": query, "rule": "present"},
+            "query_requires": [], "iam_action_wire": "s3:ListBucket", "floor": floor,
+            "source": format!("{}:crates/dialect-rustfs-admin/src/ops/sample.rs", "1".repeat(40))
+        })
+    };
+    let mut listing = native("rustfs:Listing", "versions", "listing_floor");
+    listing["query_requires"] = serde_json::json!([{"key":"metadata","rule":"equals:true"}]);
+    let mut lambda = native("rustfs:InvokeObjectLambda", "lambdaArn", "presigned_floor");
+    lambda["target"] = Value::from("object");
+    value["extension_tables"] = serde_json::json!({
+        "s3": [listing], "control_plane": [lambda]
+    });
+    value["census"]["extension_routes"] = Value::from(2);
+    let parse = |v: &Value, pin: &str| super::RustfsAdminRouteInventory::parse_native_at(&v.to_string(), pin);
+    let inventory = parse(&value, RUSTFS_SOURCE_COMMIT).unwrap();
+    let tables = inventory.tables();
+    assert_eq!(tables.s3[0].name, "rustfs:Listing");
+    assert_eq!(tables.control_plane[0].precedence, tables.s3[0].precedence);
+    assert!(matches!(parse(&value, &"0".repeat(40)), Err(RouteInventoryError::Shape(_))));
+    for (pointer, replacement) in [
+        ("/extension_tables/s3/0/floor", Value::from("floor")),
+        ("/extension_tables/control_plane/0/source", Value::from("../origin.rs")),
+        ("/extension_tables/control_plane/0/query_discriminator/key", Value::from("")),
+        ("/extension_tables/control_plane/0/query_discriminator/key", Value::from("events")),
+        ("/census/extension_routes", Value::from(1)),
+    ] {
+        let mut bad = value.clone();
+        *bad.pointer_mut(pointer).unwrap() = replacement;
+        assert!(parse(&bad, RUSTFS_SOURCE_COMMIT).is_err(), "{pointer}");
+    }
+    let mut mixed = value.clone();
+    mixed["extension_routes"] = serde_json::json!([]);
+    assert!(parse(&mixed, RUSTFS_SOURCE_COMMIT).is_err());
+    let mut duplicate = value.clone();
+    duplicate["extension_tables"]["s3"].as_array_mut().unwrap().push(listing);
+    assert!(parse(&duplicate, RUSTFS_SOURCE_COMMIT).is_err());
+}

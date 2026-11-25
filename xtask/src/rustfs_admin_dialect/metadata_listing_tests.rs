@@ -295,3 +295,50 @@ fn n_a_presigned_ruling_on_a_listing_row_is_refused() {
     .expect_err("refused");
     assert!(refused.contains("is on the standard listing floor"), "{refused}");
 }
+
+/// Each native extension fold receives its table's route, including the local precedence and
+/// shadows, even when the two tables use the same numeric precedence.
+#[test]
+fn native_extension_tables_render_independent_rows_and_typed_folds() {
+    let mut listings = recorded_plan().extensions;
+    let mut control = listings.split_off(2);
+    // The native listeners can choose the same band independently of the combined API.
+    listings[0].precedence = 64;
+    control[0].precedence = 64;
+    for table in [&mut listings, &mut control] {
+        for row in &mut *table {
+            row.shadows.clear();
+        }
+        super::extension::shadowing(table).expect("valid table");
+    }
+    let output = super::render::render_native_extensions(&listings, &control, "example-commit");
+    let (listing, admin) = output.split_once("pub mod control_plane {").expect("control-plane module");
+    assert!(listing.contains("pub mod s3 {"));
+    assert!(listing.contains("example-commit"));
+    for (module, own, other) in [(listing, &listings, &control), (admin, &control, &listings)] {
+        for row in own {
+            assert!(module.contains(&format!(
+                "precedence: {}, evidence: &[{:?}], ..ops::{}::OVERLAY_ROW",
+                row.precedence, row.router_url, row.stem
+            )));
+            assert!(module.contains(&format!("step::<ops::{}::{}>(carry, {}::ROUTE)", row.stem, row.type_name, row.stem)));
+        }
+        for row in other {
+            assert!(!module.contains(&format!("ops::{}::", row.stem)), "{}", row.operation);
+            assert!(!module.contains(&format!("{:?}", row.operation)), "{}", row.operation);
+        }
+        assert!(!module.contains("fold_every_extension"));
+    }
+    assert!(listing.contains("\"ListObjectVersions\""));
+    assert!(listing.contains("\"rustfs:ListObjectsV2WithMetadata\""));
+}
+
+/// No combined rows or folds are used as defaults when a host table has no members.
+#[test]
+fn empty_native_extension_tables_generate_empty_folds() {
+    let output = super::render::render_native_extensions(&[], &[], "empty");
+    assert_eq!(output.matches("pub fn fold<").count(), 2);
+    assert_eq!(output.matches("pub static ROWS: &[OverlayRow] = &[\n];").count(), 2);
+    assert!(!output.contains("step::<"));
+    assert!(!output.contains("ops::"));
+}

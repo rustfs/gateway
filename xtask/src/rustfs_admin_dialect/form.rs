@@ -39,7 +39,7 @@ const MEDIA_TYPE: &str = "application/x-www-form-urlencoded";
 pub(super) const EVIDENCE: &str =
     "https://github.com/rustfs/gateway/blob/main/docs/adr/0041-form-claims-and-the-rustfs-sts-endpoint.md";
 /// The action-admission and claimed-signing refinement of the form contract.
-const AUTH_EVIDENCE: &str =
+pub(super) const AUTH_EVIDENCE: &str =
     "https://github.com/rustfs/gateway/blob/main/docs/adr/0044-sts-action-credentials-and-claimed-signing.md";
 
 /// One inventory route served behind a form claim, with the facts its module is rendered from.
@@ -49,9 +49,9 @@ pub(super) struct Formed {
     pub(super) path: String,
     pub(super) group: String,
     pub(super) handler: String,
-    handler_url: String,
-    layer_url: String,
-    router_url: String,
+    pub(super) handler_url: String,
+    pub(super) layer_url: String,
+    pub(super) router_url: String,
     /// Why the handler is handed the caller's secret, when the ruling says it is.
     pub(super) caller_secret: Option<String>,
 }

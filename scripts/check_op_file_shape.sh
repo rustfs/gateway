@@ -10,8 +10,9 @@ set -euo pipefail
 #   1. One operation per file.
 #      Every `crates/core/src/ops/<stem>.rs` declares exactly one
 #      `impl Operation`, its type's snake_case name is the file stem, and
-#      `ops/mod.rs` mounts it. Every `crates/dialect-*/src/ops/<stem>.rs` is
-#      held to the same three facts against its own `ops/mod.rs`: a dialect
+#      `ops/mod.rs` mounts it. Every `crates/dialect-*/src/ops/<stem>.rs` and
+#      `crates/dialect-*/src/native/ops/<stem>.rs` is held to the same three
+#      facts against its own `ops/mod.rs` or sibling `ops.rs`: a dialect
 #      crate registers extension operations as first-class Operations
 #      (rustfs/gateway#769's `minio:PutObjectReplica`), so it is in scope, not
 #      exempted. No other file under `crates/*/src/**` declares one, and no
@@ -312,11 +313,15 @@ op_stems = {path.stem for path in op_files}
 mod_text = mask(mod_file.read_text())
 mounted = set(re.findall(r"^\s*pub mod\s+([a-z_][a-z0-9_]*)\s*;", mod_text, re.M))
 
-# Dialect crates keep their operations in `src/ops/`, one per file, mounted by
-# that tree's own `mod.rs` — the core rule, one directory over. A dialect crate
-# with no operations has no ops tree and nothing to check.
+# Dialect crates keep their operations in `src/ops/` (and, when a host-native
+# inventory coexists with a frozen snapshot, `src/native/ops/`), one per file,
+# mounted by that tree's own `mod.rs` or sibling `ops.rs` — the core rule, one
+# directory over. A dialect crate with no operations has no ops tree.
 dialect_ops_dirs = sorted(
-    path for path in pathlib.Path("crates").glob("dialect-*/src/ops") if path.is_dir()
+    path
+    for pattern in ("dialect-*/src/ops", "dialect-*/src/native/ops")
+    for path in pathlib.Path("crates").glob(pattern)
+    if path.is_dir()
 )
 
 # -- Rule 1 -------------------------------------------------------------------
@@ -351,11 +356,24 @@ for path in op_files:
             file=sys.stderr,
         )
 
+dialect_mod_files: list[pathlib.Path] = []
 for dialect_ops in dialect_ops_dirs:
-    dialect_mod = dialect_ops / "mod.rs"
-    if not dialect_mod.exists():
-        fail(f"{dialect_ops}: a dialect ops tree has no mod.rs, so nothing compiles it")
+    mod_rs = dialect_ops / "mod.rs"
+    sibling_rs = dialect_ops.with_suffix(".rs")
+    if mod_rs.exists() and sibling_rs.exists():
+        fail(
+            f"{dialect_ops}: has both {mod_rs} and {sibling_rs}; a dialect ops tree "
+            f"has exactly one module root"
+        )
         continue
+    dialect_mod = mod_rs if mod_rs.exists() else sibling_rs
+    if not dialect_mod.exists():
+        fail(
+            f"{dialect_ops}: a dialect ops tree has no mod.rs or {sibling_rs.name}, "
+            f"so nothing compiles it"
+        )
+        continue
+    dialect_mod_files.append(dialect_mod)
     dialect_mounted = set(
         re.findall(r"^\s*pub mod\s+([a-z_][a-z0-9_]*)\s*;", mask(dialect_mod.read_text()), re.M)
     )
@@ -573,7 +591,13 @@ for family in ("lifecycle", "replication"):
 
 # -- Rule 3 -------------------------------------------------------------------
 
-for path in sorted([*ops_dir.rglob("*.rs"), *(p for d in dialect_ops_dirs for p in d.rglob("*.rs"))]):
+for path in sorted(
+    {
+        *ops_dir.rglob("*.rs"),
+        *(p for d in dialect_ops_dirs for p in d.rglob("*.rs")),
+        *dialect_mod_files,
+    }
+):
     lines = len(path.read_text().splitlines())
     if lines > CEILING:
         fail(f"{path}: {lines} lines, over the {CEILING}-line ceiling")
@@ -588,8 +612,11 @@ for line in allowances.read_text().splitlines():
     if not entry:
         continue
     path = entry.split()[0]
-    if path == str(ops_dir) or path.startswith(f"{ops_dir}/") or any(
-        path == str(d) or path.startswith(f"{d}/") for d in dialect_ops_dirs
+    if (
+        path == str(ops_dir)
+        or path.startswith(f"{ops_dir}/")
+        or any(path == str(d) or path.startswith(f"{d}/") for d in dialect_ops_dirs)
+        or any(path == str(m) for m in dialect_mod_files)
     ):
         fail(
             f"{allowances}: names {path}; the ops tree has no ceiling exemption"

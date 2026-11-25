@@ -63,10 +63,47 @@ class Source:
         if shared is not None:
             self.files[SHARED] = inventory.strip_comments(shared)
 
+    def text(self, relative):
+        return self.files[relative]
+
     def const(self, name, relative):
         if name != "ADMIN_PREFIX" or relative != FILE:
             raise inventory.InventoryError("unknown fixture constant")
         return "/admin"
+
+
+def array_source(old="", new=""):
+    registration = '''
+    mod choices;
+    use choices::{ITEMS, Kind};
+    fn register_example_routes(router: &mut S3Router<AdminOperation>) {
+        for item in &ITEMS {
+            let key = item.kind();
+            router.insert(key.verb(), &format!("?{}/{{item}}", key.selector()), AdminOperation(item))?;
+        }
+    }
+    '''
+    definitions = '''
+    static ITEMS: [Handler; 3] = [
+        Handler(Kind::Update), Handler(Kind::Inspect), Handler(Kind::Probe),
+    ];
+    enum Kind { Probe, Update, Inspect }
+    struct Handler(Kind);
+    impl Handler {
+        fn kind(&self) -> Kind { self.0 }
+    }
+    impl Kind {
+        fn verb(self) -> Method {
+            match self { Self::Probe | Self::Inspect => Method::GET, Self::Update => Method::PATCH, }
+        }
+        fn selector(self) -> &'static str {
+            match self { Self::Probe | Self::Update => "first", Self::Inspect => "second=2", }
+        }
+    }
+    '''
+    source = Source(registration.replace(old, new) if old else registration)
+    source.files[FILE.replace("example.rs", "example/choices.rs")] = definitions.replace(old, new) if old else definitions
+    return source
 
 
 def facts(variant, text=FIXTURE, shared=None):
@@ -86,6 +123,111 @@ class VariantTests(unittest.TestCase):
             [("GET", "/admin/probe", "Handler", ("Kind", "Probe")),
              ("POST", "/admin/write", "Handler", ("Kind", "Write"))],
         )
+
+    def test_registration_groups_follow_each_called_module_file(self):
+        root = inventory.ADMIN.as_posix() + "/"
+        source = Source()
+        source.files = {
+            root + "mod.rs": "mod first; mod second; fn register_admin_routes(r: R) -> R {"
+                             "first::register_routes(r)?; second::register_v2(r)?; }",
+            root + "first.rs": "mod shared; mod unused; fn register_routes(r: R) { shared::register(r)?; }",
+            root + "second/mod.rs": "mod shared; fn register_v2(r: R) { shared::register(r)?; }",
+            root + "first/shared.rs": "fn register(r: R) {}",
+            root + "second/shared/mod.rs": "fn register(r: R) {}",
+            root + "first/unused.rs": "fn register(r: R) {}",
+        }
+        _, owners = inventory.register_graph(source)
+        self.assertEqual(owners[(root + "first/shared.rs", "register")], "first")
+        self.assertEqual(owners[(root + "second/shared/mod.rs", "register")], "second")
+        self.assertNotIn((root + "first/unused.rs", "register"), owners)
+        original = source.files[root + "first.rs"]
+        for declaration in ("", '#[path = "other.rs"] mod shared;', "#[cfg(test)] mod shared;"):
+            with self.subTest(declaration=declaration), self.assertRaises(inventory.InventoryError):
+                source.files[root + "first.rs"] = original.replace("mod shared;", declaration)
+                inventory.register_graph(source)
+        source.files[root + "first.rs"] = original
+        source.files[root + "mod.rs"] = source.files[root + "mod.rs"].replace(
+            "mod first;", "mod first; use first::{shared as another};"
+        ).replace("second::register_v2(r)?;", "another::register(r)?;")
+        with self.assertRaisesRegex(inventory.InventoryError, "reached from both"):
+            inventory.register_graph(source)
+
+    def test_array_registration_follows_the_bound_methods_and_paths(self):
+        sites = inventory.insert_sites(array_source())
+        self.assertEqual(
+            [(s["method"], s["path"], s["handler"], s["variant"], s["function"]) for s in sites],
+            [("PATCH", "?first/{item}", "Handler", ("Kind", "Update"), "register_example_routes"),
+             ("GET", "?second=2/{item}", "Handler", ("Kind", "Inspect"), "register_example_routes"),
+             ("GET", "?first/{item}", "Handler", ("Kind", "Probe"), "register_example_routes")],
+        )
+
+    def test_array_handlers_use_only_their_defining_module(self):
+        source = array_source()
+        site = inventory.insert_sites(source)[0]
+        defining = FILE.replace("example.rs", "example/choices.rs")
+        operation = "impl Operation for Handler { fn call(&self) { RESPONSE } }"
+        source.files = {FILE.replace("example.rs", "another.rs"): FIXTURE, **source.files}
+        source.files[defining] += operation.replace("RESPONSE", 'json_response("ready")')
+
+        def read():
+            return inventory.handler_body(source, site["handler"], site["variant"], site.get("defining_file"))
+
+        _, other, other_streams = inventory.handler_body(source, site["handler"], site["variant"])
+        self.assertEqual(inventory.body_facts(other, other_streams), ("request-on-minio-alias", "buffered", "buffered"))
+        relative, body, streams = read()
+        self.assertEqual(relative, defining)
+        self.assertEqual(inventory.body_facts(body, streams), ("none", "not-read", "buffered"))
+        source.files[defining] += operation.replace("RESPONSE", "read_compatible_admin_body(req.input)")
+        with self.assertRaisesRegex(inventory.InventoryError, "impl Operation"):
+            read()
+        source.files[defining] = source.files[defining].split("impl Operation", 1)[0]
+        with self.assertRaisesRegex(inventory.InventoryError, "impl Operation"):
+            read()
+
+    def test_array_registration_rejects_unproven_bindings(self):
+        for old, new in (
+            ("router.insert(", "scratch.insert("),
+            ("for item in &ITEMS {", "let router = scratch(); for item in &ITEMS {"),
+            ("AdminOperation(item)", "AdminOperation(other)"),
+            ("let key = item.kind();", "if enabled { continue; } let key = item.kind();"),
+            ("use choices::{ITEMS, Kind};", "use other::ITEMS;"),
+            ("mod choices;", '#[path = "elsewhere.rs"] mod choices;'),
+            ("Handler(Kind::Update),", "different(),"),
+            ("struct Handler(Kind);", "struct Handler(Elsewhere);"),
+            ("enum Kind { Probe, Update, Inspect }", "enum Kind { Probe, Update, Extra }"),
+            ("{ self.0 }", "{ Kind::Probe }"),
+            ("Self::Probe | Self::Inspect => Method::GET", "_ => Method::GET"),
+            ('Self::Inspect => "second=2"', 'Self::Inspect if enabled() => "second=2"'),
+            ('Self::Inspect => "second=2",', ''),
+        ):
+            with self.subTest(change=new), self.assertRaises(inventory.InventoryError):
+                inventory.insert_sites(array_source(old, new))
+
+    def test_a_conditional_array_loop_is_not_an_unconditional_registration(self):
+        source = array_source()
+        source.files[FILE] = source.files[FILE].replace("for item in &ITEMS", "if false { for item in &ITEMS")
+        source.files[FILE] = source.files[FILE].replace("AdminOperation(item))?;", "AdminOperation(item))?; }")
+        with self.assertRaises(inventory.InventoryError):
+            inventory.insert_sites(source)
+
+    def test_an_immutable_alias_keeps_only_its_registered_match_arm(self):
+        text = FIXTURE.replace("authorize(permission(self.0))?;", "let choice = self.0; authorize(permission(choice))?;")
+        text = text.replace("match self.0 {", "match choice {")
+        for variant in ("Read", "Probe", "Inspect"):
+            self.assertEqual(facts(variant, text), ("none", "not-read", "buffered"))
+        for variant in ("Write", "Update"):
+            self.assertEqual(facts(variant, text), ("request-on-minio-alias", "buffered", "buffered"))
+
+    def test_unproven_dispatch_aliases_are_refused(self):
+        text = FIXTURE.replace("authorize(permission(self.0))?;", "let choice = self.0;")
+        text = text.replace("match self.0 {", "match choice {")
+        for binding in ("let mut choice = self.0;", "let choice = &self.0;", "let choice = copy_kind(self.0);",
+                        "let choice = self.0; let choice = other();", "let choice = self.0; let alias = choice;",
+                        "let choice = self.0; let (marker, choice) = other();"):
+            with self.subTest(binding=binding), self.assertRaises(inventory.InventoryError):
+                facts("Read", text.replace("let choice = self.0;", binding))
+        with self.assertRaises(inventory.InventoryError):
+            facts("Read", text.replace("match choice {", "match transform(choice) {"))
 
     def test_selected_writes_read_the_sealed_body(self):
         for variant in ("Write", "Update"):
@@ -157,6 +299,44 @@ class VariantTests(unittest.TestCase):
     def test_path_qualified_static_handler_type_is_read(self):
         source = Source(FIXTURE + "static EXAMPLE_HANDLER: crate::admin::handlers::example::Handler = Handler(Kind::Read);\n")
         self.assertEqual(inventory.handler_type(source, "EXAMPLE_HANDLER", FILE), "Handler")
+
+    def test_child_removal_handler_reads_plain_body_via_parent(self):
+        parent = "rustfs/src/admin/handlers/site_replication.rs"
+        child = parent[:-3] + "/removal.rs"
+        call = 'read_site_replication_json(req, "", false).await?'
+        reader = """
+mod removal;
+async fn read_site_replication_json<T>(req: AdminRequest, secret_key: &str, compat_encrypted: bool) -> Result<T> {
+    let body = read_site_replication_body(req, secret_key, compat_encrypted).await?;
+    parse_site_replication_json(&body)
+}
+async fn read_site_replication_body(mut req: AdminRequest, secret_key: &str, compat_encrypted: bool) -> Result<Vec<u8>> {
+    let body = if compat_encrypted {
+        read_compatible_admin_body(req.take_body(), LIMIT, req.uri().path(), secret_key).await?
+    } else {
+        read_plain_admin_body(req.take_body()).await?
+    };
+    Ok(body)
+}
+async fn read_plain_admin_body(mut input: Body) -> Result<Vec<u8>> {
+    let body = input.store_all_limited(LIMIT).await?;
+    Ok(body.to_vec())
+}
+"""
+        def facts(body, definitions):
+            source = Source()
+            source.files = {parent: definitions, child: "use super::*;\nimpl Operation for Removal { "
+                            "async fn call(&self, req: AdminRequest) { " + body + "; } }"}
+            _, code, streams = inventory.handler_body(source, "Removal")
+            return inventory.body_facts(code, streams)
+        self.assertEqual(facts(call, reader), ("none", "buffered", "buffered"))
+        self.assertEqual(facts("answer()", reader), ("none", "not-read", "buffered"))
+        for body, definitions in ((call.replace("false", "condition"), reader),
+                                  (call, reader.replace("read_plain_admin_body(req.take_body())", "drop_body(req)")),
+                                  (call, reader.replace("input.store_all_limited", "other.store_all_limited")),
+                                  (call, reader.replace("mod removal;", ""))):
+            with self.subTest(body=body, definitions=definitions), self.assertRaises(inventory.InventoryError):
+                facts(body, definitions)
 
     def test_a_shared_sealing_helper_seals_the_response(self):
         for call in ("super::owned_admin_json_response(path, &secret, &payload)",

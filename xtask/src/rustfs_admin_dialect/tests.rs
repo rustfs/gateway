@@ -63,6 +63,7 @@ pub(super) fn templated(method: &str, path: &str, params: &[&str]) -> Route {
 
 pub(super) fn inventory(routes: Vec<Route>) -> Inventory {
     Inventory {
+        native: false,
         format: FORMAT.to_owned(),
         source: Source { commit: "c".to_owned() },
         routes,
@@ -107,23 +108,24 @@ pub(super) fn service_route() -> Route {
     route("POST", "/rustfs/admin/v3/service", "system", "custom", None)
 }
 
-/// Positive — every committed generated file is exactly what the recorded inventory generates,
-/// and no file under `ops/` is committed without being generated. This is the drift check.
+/// Both pinned inventories reproduce their committed files and reject extra generated modules.
 #[test]
 fn the_committed_dialect_is_what_the_inventory_generates() {
     let root = repo_root();
     let files = generate(&root).expect("the recorded inventory generates");
     assert_eq!(drift(&root, &files), Vec::<String>::new());
+    let native_dir = std::path::Path::new(super::OUTPUT).join("native");
+    let native = files.keys().filter(|path| path.starts_with(&native_dir)).count();
+    assert_eq!(native, 20);
     assert_eq!(
-        files.len(),
+        files.len() - native,
         354,
         "336 native operations, two fallbacks, the form-claimed STS operation (ADR-0041), the ten S3-shaped extension \
          operations (rustfs/backlog#2753, rustfs/gateway#1588), the module list and four table files"
     );
 }
 
-/// Negative — a file committed under a wholly generated directory without being generated, in
-/// `table/` as in `ops/`, is drift.
+/// Extra files in the legacy and native output directories are drift.
 #[test]
 fn n_an_extra_file_in_a_generated_directory_is_drift() {
     let root = repo_root();
@@ -131,6 +133,8 @@ fn n_an_extra_file_in_a_generated_directory_is_drift() {
     for dropped in [
         "crates/dialect-rustfs-admin/src/table/fold.rs",
         "crates/dialect-rustfs-admin/src/ops/get_v3_info.rs",
+        "crates/dialect-rustfs-admin/src/native/fold.rs",
+        "crates/dialect-rustfs-admin/src/native/ops/post_v4_account_permissions.rs",
     ] {
         let source = files.remove(std::path::Path::new(dropped)).expect("a generated file");
         assert_eq!(drift(&root, &files), [format!("{dropped} is not generated")]);

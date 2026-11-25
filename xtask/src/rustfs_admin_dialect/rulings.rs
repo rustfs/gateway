@@ -77,6 +77,7 @@ pub(super) struct Form {
 }
 
 /// ADR-0025's ruling for a custom-auth route, which the inventory records without an action.
+#[derive(Clone, Copy)]
 pub(super) struct Ruling {
     pub(super) method: &'static str,
     pub(super) path: &'static str,
@@ -356,6 +357,59 @@ pub(super) const RETAINED: &[Retained] = &[
         note: ISSUE_ATTEMPT_NOTE,
     },
 ];
+
+/// Native inventory only. The handler authenticates the caller and reports their effective
+/// permissions. Actions in the request body are advisory checks performed by the handler.
+pub(super) const ACCOUNT_PERMISSIONS: Ruling = ruling(
+    "POST",
+    "/rustfs/admin/v4/account/permissions",
+    "CredentialOnly",
+    &[own("rustfs:AccountPermissions")],
+);
+
+const fn mfa_mutation(path: &'static str, hand_on_body: bool) -> Retained {
+    Retained {
+        method: "POST",
+        path,
+        checks: &["deny-only:admin:ManageOwnMFA"],
+        hand_on_body,
+        note: "The route-stage label selects the caller. RustFS's handler checks credential eligibility and explicit denials of admin:ManageOwnMFA before handling the mutation.",
+    }
+}
+
+const NATIVE_MUTATIONS: &[Retained] = &[
+    Retained {
+        method: "POST",
+        path: "/rustfs/admin/v3/account/password",
+        checks: &["deny-only:admin:ChangeOwnPassword", "deny-only:admin:CreateUser"],
+        hand_on_body: true,
+        note: "The route-stage label selects the caller. RustFS's handler checks credential eligibility and explicit denials of both admin:ChangeOwnPassword and admin:CreateUser before reading the body and verifying the current credential.",
+    },
+    mfa_mutation("/rustfs/admin/v3/account/mfa/activate", true),
+    mfa_mutation("/rustfs/admin/v3/account/mfa/disable", true),
+    mfa_mutation("/rustfs/admin/v3/account/mfa/enroll", false),
+    mfa_mutation("/rustfs/admin/v3/account/mfa/recovery-codes", true),
+];
+
+/// The native inventory distinguishes self-service mutations that retain contextual checks.
+pub(super) fn native_rulings() -> Vec<Ruling> {
+    let mut rulings = RULINGS.to_vec();
+    for rule in &mut rulings {
+        if NATIVE_MUTATIONS
+            .iter()
+            .any(|entry| entry.method == rule.method && entry.path == rule.path)
+        {
+            rule.auth_detail = "ContextualAuthorization";
+        }
+    }
+    rulings.push(ACCOUNT_PERMISSIONS);
+    rulings
+}
+
+/// Checks enforced by the handlers in the native inventory.
+pub(super) fn native_retained() -> Vec<Retained> {
+    [RETAINED, NATIVE_MUTATIONS].concat()
+}
 
 /// The rulings for the migrated groups' custom-auth routes, in the inventory's order within each
 /// migrated order.

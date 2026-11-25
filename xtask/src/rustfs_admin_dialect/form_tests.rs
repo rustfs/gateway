@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The generator's form routes (ADR-0041): a listed route is planned behind its form claim and
-//! rendered from the inventory's facts, and every way the inventory can stop matching the ruling is
-//! refused.
+//! The generator's account-permission rule and form routes (ADR-0041). The inventory supplies the
+//! authorization class for both and the facts needed to render each form route.
 //!
 //! Responsible for: those assertions. NOT responsible for: the fixtures (`tests.rs`), or what the
 //! generated operation does (the dialect crate's `sts_form` tests and goldens'
@@ -239,5 +238,64 @@ fn n_a_sealed_form_row_is_refused_under_either_ruling() {
             refused.contains("no longer records a buffered request and response with no secret"),
             "{refused}"
         );
+    }
+}
+
+/// Permission checks in the JSON body report decisions for the caller. No action in that
+/// body is a prerequisite to asking the question.
+#[test]
+fn native_account_permissions_is_about_the_authenticated_caller() {
+    let mut route = route("POST", "/rustfs/admin/v4/account/permissions", "account_permissions", "custom", None);
+    route.auth_detail = Some("CredentialOnly".to_owned());
+    let (forms, _) = super::forms(&route, &route.path, &super::rulings::native_rulings(), &mut Default::default())
+        .expect("the native account permission rule");
+    let [(None, rule, _)] = forms.as_slice() else {
+        panic!("one unconditional route rule");
+    };
+    assert_eq!(rule.render(), "rustfs:AccountPermissions about caller");
+    assert!(!rule.anonymous);
+
+    for (mode, detail, reason) in [
+        ("anonymous", "CredentialOnly", "anonymous"),
+        ("custom", "MultipleActions", "ruled as"),
+        ("sigv4-admin", "CredentialOnly", "inventory authorises itself"),
+    ] {
+        route.auth_mode = mode.to_owned();
+        route.auth_detail = Some(detail.to_owned());
+        let result = super::forms(&route, &route.path, &super::rulings::native_rulings(), &mut Default::default());
+        assert!(result.is_err_and(|error| error.contains(reason)), "{mode} / {detail}");
+    }
+}
+
+/// The host still decides explicit denies before it reads mutation data. Enrolling a second
+/// factor reads no request body.
+#[test]
+fn native_self_service_mutations_keep_the_host_policy_checks() {
+    let rulings = super::rulings::native_rulings();
+    let retained = super::rulings::native_retained();
+    for (operation, check, buffered) in [
+        ("password", "deny-only:admin:ChangeOwnPassword", true),
+        ("mfa/activate", "deny-only:admin:ManageOwnMFA", true),
+        ("mfa/disable", "deny-only:admin:ManageOwnMFA", true),
+        ("mfa/enroll", "deny-only:admin:ManageOwnMFA", false),
+        ("mfa/recovery-codes", "deny-only:admin:ManageOwnMFA", true),
+    ] {
+        let path = format!("/rustfs/admin/v3/account/{operation}");
+        let mut route = route("POST", &path, "user", "custom", None);
+        route.auth_detail = Some("ContextualAuthorization".to_owned());
+        let (forms, _) = super::forms(&route, &path, &rulings, &mut Default::default()).expect("native self-service rule");
+        let [(None, rule, _)] = forms.as_slice() else {
+            panic!("one route-stage caller rule for {path}");
+        };
+        assert_eq!(rule.subject_expression().as_deref(), Some("SubjectRule::Caller"));
+        assert!(!rule.anonymous);
+        let guard = retained
+            .iter()
+            .find(|r| r.method == "POST" && r.path == path)
+            .expect("handler-retained deny");
+        assert!(guard.checks.contains(&check));
+        assert_eq!(guard.checks.contains(&"deny-only:admin:CreateUser"), operation == "password");
+        assert_eq!(guard.hand_on_body, buffered);
+        assert!(super::forms(&route, &path, super::RULINGS, &mut Default::default()).is_err());
     }
 }

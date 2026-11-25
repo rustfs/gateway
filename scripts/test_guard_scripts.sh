@@ -13002,6 +13002,65 @@ expect_fail_with_diagnostic check_op_file_shape.sh \
     'operation name and file name disagree' \
     mut_op_shape_dialect_misnamed
 
+mut_op_shape_native_dialect_mounted() {
+    python3 - <<'PYEOF'
+import pathlib
+ops = pathlib.Path("crates/dialect-rustfs-admin/src/native/ops")
+mount = pathlib.Path("crates/dialect-rustfs-admin/src/native/ops.rs")
+if not ops.is_dir() or not mount.is_file():
+    raise SystemExit("missing mutation subject: the native dialect ops tree")
+(ops / "get_v4_probe.rs").write_text("pub struct GetV4Probe;\nimpl Operation for GetV4Probe {}\n")
+mount.write_text(mount.read_text() + "\npub mod get_v4_probe;\n")
+PYEOF
+}
+expect_guard_pass check_op_file_shape.sh \
+    'a mounted one-operation module in a dialect native/ops tree' \
+    mut_op_shape_native_dialect_mounted
+
+mut_op_shape_native_dialect_unmounted() {
+    python3 - <<'PYEOF'
+import pathlib
+mount = pathlib.Path("crates/dialect-rustfs-admin/src/native/ops.rs")
+text = mount.read_text()
+target = "pub mod delete_v3_bucket_etag_by_bucket;\n"
+if text.count(target) != 1:
+    raise SystemExit("missing mutation subject: the native dialect ops mount")
+mount.write_text(text.replace(target, "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a native dialect operation file that native/ops.rs stops mounting' \
+    'no `pub mod`' \
+    mut_op_shape_native_dialect_unmounted
+
+mut_op_shape_native_dialect_second_operation() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/dialect-rustfs-admin/src/native/ops/delete_v3_bucket_etag_by_bucket.rs")
+if "impl Operation for DeleteV3BucketEtagByBucket" not in p.read_text():
+    raise SystemExit("missing mutation subject: the native dialect operation file")
+p.write_text(p.read_text() + "\nimpl Operation for DeleteV3BucketEtagByBucketAgain {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a second operation moving into a native dialect operation file' \
+    'declares 2 `impl Operation`' \
+    mut_op_shape_native_dialect_second_operation
+
+mut_op_shape_native_dialect_impl_in_mount() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/dialect-rustfs-admin/src/native/ops.rs")
+if not p.is_file():
+    raise SystemExit("missing mutation subject: the native dialect ops.rs root")
+p.write_text(p.read_text() + "\nimpl Operation for SmuggledNative {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation declared in native/ops.rs rather than its own native/ops/<stem>.rs file' \
+    'declares `impl Operation` outside the ops tree' \
+    mut_op_shape_native_dialect_impl_in_mount
+
 # rustfs/gateway#240. The same smuggled operation, behind a `#[cfg(test)]` item
 # that never opens a brace — the `#[path] mod tests;` split this repository uses
 # when a file crosses 800 lines. `cfg_test_spans` used to search ahead for the

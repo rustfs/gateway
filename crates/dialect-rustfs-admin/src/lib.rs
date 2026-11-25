@@ -32,6 +32,7 @@
 
 pub mod admin;
 pub mod dialect;
+pub mod native;
 pub mod ops;
 pub mod record;
 mod table;

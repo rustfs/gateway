@@ -44,6 +44,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+mod native;
+
 /// The RustFS commit the recorded inventory was generated from.
 pub const RUSTFS_SOURCE_COMMIT: &str = "443e8afee194fe38b32d62a9289a99c1f703715c";
 
@@ -408,6 +410,15 @@ pub struct RustfsAdminRouteInventory {
 }
 
 impl RustfsAdminRouteInventory {
+    /// Reads a v2 inventory against an explicit RustFS commit, keeping its host tables separate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first pin, shape, route-order, registration or census disagreement.
+    pub fn parse_native_at(text: &str, expected_host: &str) -> Result<native::NativeInventory, RouteInventoryError> {
+        native::parse(text, expected_host)
+    }
+
     /// Where the rows came from.
     #[must_use]
     pub const fn source(&self) -> &InventorySource {
@@ -554,23 +565,27 @@ pub fn parse_inventory(text: &str) -> Result<RustfsAdminRouteInventory, RouteInv
             return Err(RouteInventoryError::Order(route.key()));
         }
         previous = Some(current);
-        check_route(route)?;
+        check_route(route, false)?;
     }
     for extension in &inventory.extension_routes {
         check_extension(extension)?;
     }
-    check_census(&inventory)?;
+    check_census(
+        &inventory.source,
+        &inventory.census,
+        &derive_census(&inventory.routes, &inventory.extension_routes),
+    )?;
     Ok(inventory)
 }
 
-fn check_route(route: &AdminRoute) -> Result<(), RouteInventoryError> {
+fn check_route(route: &AdminRoute, registered_query: bool) -> Result<(), RouteInventoryError> {
     let refuse = |reason| {
         Err(RouteInventoryError::Row {
             key: route.key(),
             reason,
         })
     };
-    if !route.path.starts_with('/') {
+    if !registered_query && !route.path.starts_with('/') {
         return refuse("the path does not start with '/'");
     }
     let params = route
@@ -696,9 +711,11 @@ pub fn derive_census(routes: &[AdminRoute], extension_routes: &[ExtensionRoute])
     }
 }
 
-fn check_census(inventory: &RustfsAdminRouteInventory) -> Result<(), RouteInventoryError> {
-    let recorded = &inventory.census;
-    let derived = derive_census(&inventory.routes, &inventory.extension_routes);
+fn check_census(
+    source: &InventorySource,
+    recorded: &InventoryCensus,
+    derived: &InventoryCensus,
+) -> Result<(), RouteInventoryError> {
     let drift = |field, recorded: &dyn fmt::Debug, derived: &dyn fmt::Debug| {
         Err(RouteInventoryError::Census {
             field,
@@ -729,16 +746,12 @@ fn check_census(inventory: &RustfsAdminRouteInventory) -> Result<(), RouteInvent
         distinct_iam_actions,
     );
     // Two numbers the rows cannot produce, cross-checked against the RustFS authorities' own.
-    let matrix_rows = inventory.source.matrix_helper_calls.values().sum::<usize>();
+    let matrix_rows = source.matrix_helper_calls.values().sum::<usize>();
     if matrix_rows != derived.routes {
         return drift("source.matrix_helper_calls", &matrix_rows, &derived.routes);
     }
-    if inventory.source.registration_groups != derived.by_group.len() {
-        return drift(
-            "source.registration_groups",
-            &inventory.source.registration_groups,
-            &derived.by_group.len(),
-        );
+    if source.registration_groups != derived.by_group.len() {
+        return drift("source.registration_groups", &source.registration_groups, &derived.by_group.len());
     }
     Ok(())
 }
