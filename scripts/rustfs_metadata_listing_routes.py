@@ -257,7 +257,195 @@ def published_table(source, table, close, split, fail):
     return rows
 
 
-def control_bindings(host, dialect, assemble, split, fail, published=None):
+def top_block(text, pattern, label, close, fail):
+    opening = direct_item(text, pattern, label, close, fail).end() - 1
+    return " ".join(text[opening + 1:close(text, opening, "{", "}")].split())
+
+
+def native_claimed_routes(routes_src, authority_src, blob, has_lambda_fallback, admin_actions, strip, close, split, fail):
+    """Verify mounted native claimed control-plane routes and their pre-body IAM authority."""
+    if split(top_block(routes_src, r"\buse super::\{", "native_routes host imports", close, fail)) != ["Host", "NAME", "ROUTER"]:
+        fail("native routes: unsupported host imports")
+    if split(top_block(routes_src, r"\buse rustfs_gateway_dialect_rustfs_admin::\{",
+                       "native_routes dialect imports", close, fail)) != ["AdminOperation", "native::ops"]:
+        fail("native routes: unsupported dialect imports")
+    shadows_fn = top_block(routes_src, r"\bconst fn shadows_control_plane\(winner: &'static str\) -> ShadowingDecl\s*\{",
+                           "shadows_control_plane", close, fail)
+    if not re.fullmatch(r'ShadowingDecl \{ winner, shadowed: NAME, reason: "[^"]+", evidence: &\[ROUTER\],? \}', shadows_fn):
+        fail("native routes: unsupported shadows_control_plane declaration")
+    macro_body = top_block(routes_src, r"\bmacro_rules!\s+native_routes\s*\{", "native_routes macro", close, fail)
+    expected_macro = " ".join("""
+        ($($module:ident::$operation:ident),+ $(,)?) => {
+            const ROWS: &[OverlayRow] = &[$(ops::$module::OVERLAY_ROW),+];
+            pub(super) fn declare(builder: DialectBuilder) -> DialectBuilder {
+                $(
+                    let builder = builder.declare_claimed::<ops::$module::$operation>(ClaimedRoute {
+                        precedence: ops::$module::$operation::PRECEDENCE,
+                        rows: ops::$module::$operation::rows(),
+                        shadows: const { &[shadows_control_plane(ops::$module::NAME)] },
+                        bucket_param: ops::$module::$operation::BUCKET,
+                    });
+                )+
+                builder
+            }
+            pub(super) fn register(builder: ServiceBuilder, host: &Arc<Host>) -> ServiceBuilder {
+                builder$(.register::<ops::$module::$operation, _>(Arc::clone(host)))+
+            }
+        };
+    """.split())
+    if macro_body != expected_macro:
+        fail("native routes: unsupported native_routes! macro expansion")
+    if top_block(routes_src, r"\bpub\(super\) fn append_rows\(rows: &mut Vec<OverlayRow>\)\s*\{",
+                 "native_routes append_rows", close, fail) != "rows.extend_from_slice(ROWS);":
+        fail("native routes: unsupported append_rows")
+    if top_block(routes_src, r"\bpub\(super\) fn contains\(name: &str\) -> bool\s*\{",
+                 "native_routes contains", close, fail) != "ROWS.iter().any(|row| row.name == name)":
+        fail("native routes: unsupported contains")
+    invoc = direct_item(routes_src, r"\bnative_routes!\s*\(([^()]*)\)\s*;",
+                        "native_routes invocation", close, fail)[1]
+    items = split(invoc)
+    if not items:
+        fail("native routes: empty native_routes! invocation")
+    pairs = []
+    for item in items:
+        pair = re.fullmatch(r"([a-z][a-z0-9_]*)::([A-Z][A-Za-z0-9]*)", item)
+        if not pair:
+            fail(f"native routes: unreadable operation entry {item!r}")
+        pairs.append((pair[1], pair[2]))
+    if len({m for m, _ in pairs}) != len(pairs) or len({k for _, k in pairs}) != len(pairs):
+        fail("native routes: duplicate operation in native_routes!")
+
+    direct_item(strip(blob(DIALECT_DIR + "/src/native.rs")), r"\bpub mod ops;", "native.rs/ops", close, fail)
+    native_ops_mod = strip(blob(DIALECT_DIR + "/src/native/ops.rs"))
+    op_specs = {}
+    for module, kind in pairs:
+        direct_item(native_ops_mod, rf"\bpub mod {module};", f"native/ops/{module}", close, fail)
+        op_src = strip(blob(f"{DIALECT_DIR}/src/native/ops/{module}.rs"))
+        one(rf'pub const NAME: &str = "rustfs:{kind}";', op_src, f"{kind} name", fail)
+        one(rf"\bimpl Operation for {kind}\b", op_src, f"{kind} Operation impl", fail)
+        one(rf"\bimpl AdminOperation for {kind}\b", op_src, f"{kind} AdminOperation impl", fail)
+        one(r"\bstatic FLOOR: OperationFloor = admin::floor\(NAME\);", op_src, f"{kind} operation floor", fail)
+        sel_method = one(r"static SELECTOR: &\[Predicate\] = &\[Predicate::Method\(http::Method::([A-Z]+)\)\];",
+                         op_src, f"{kind} selector", fail)[1]
+        rec_method = one(r'\bmethod:\s*"([A-Z]+)",', op_src, f"{kind} record method", fail)[1]
+        if sel_method != rec_method:
+            fail(f"{kind}: selector method {sel_method} disagrees with record method {rec_method}")
+        if sel_method == "GET" and not has_lambda_fallback:
+            fail(f"{kind}: GET native route requires GatewayStack Object Lambda fallback")
+        auth = one(r'pub const AUTH: AuthRequirement =\s*AuthRequirement::new\("([\w:-]+)", ResourceShape::(\w+)\)'
+                   r'(?:\.about_subject\(([A-Z_]+)\))?;', op_src, f"{kind} authorization", fail)
+        action_wire, resource_shape, subject_const = auth.groups()
+        if subject_const:
+            one(rf"\bpub const {subject_const}: SubjectRule = SubjectRule::Caller;",
+                op_src, f"{kind} caller subject", fail)
+        op_specs[module] = (kind, action_wire, resource_shape, bool(subject_const))
+
+    auth_fn = top_block(
+        authority_src,
+        r"\bpub\(super\) async fn authorize\(context: &RequestContext<'_>, request: &AuthzRequest<'_>, head: &ClaimedHead\) -> S3Result<\(\)>\s*\{",
+        "native_authority::authorize",
+        close,
+        fail,
+    )
+    replicator_guard = (
+        r"if request\.operation == ops::put_v3_site_replication_remove_v2::NAME \{ "
+        r"reject_site_replicator_on_public_admin\(&credentials\)\?; \} "
+        if "put_v3_site_replication_remove_v2" in op_specs
+        else r""
+    )
+    auth_pattern = (
+        r'let identity = request \.identity \.filter\(\|identity\| context\.auth_scheme\(\) == AuthSchemeRef::SigV4Header '
+        r'&& identity\.origin\(\) == IdentityOrigin::AccessKey\) '
+        r'\.ok_or_else\(\|\| s3_error!\(AccessDenied, "[^"]+"\)\)\?; '
+        r'let accepted = context \.headers\(\) \.ok_or_else\(\|\| s3_error!\(InternalError, "[^"]+"\)\)\?; '
+        r"let mut headers = HeaderMap::new\(\); "
+        r"for \(name, value\) in accepted\.iter_raw\(\) \{ headers\.append\(name\.clone\(\), value\.clone\(\)\); \} "
+        r"if !headers\.contains_key\(header::HOST\) && let Some\(authority\) = head\.uri\.authority\(\) \{ "
+        r"headers\.insert\( header::HOST, HeaderValue::from_str\(authority\.as_str\(\)\) "
+        r'\.map_err\(\|_\| s3_error!\(InternalError, "[^"]+"\)\)\?,? \); \} '
+        r"let session = get_session_token\(&head\.uri, &headers\)\.map\(str::to_owned\); "
+        r"let credentials = RequestCredentials::without_secret_key\(identity\.access_key_id\(\)\.to_owned\(\), session\); "
+        r"let \(credentials, owner\) = authenticate_envelope_credentials\(&credentials\)\.await\?; "
+        r"let Permission::Admin \{ action, bucket \} = permission\(request\)\? else \{ return Ok\(\(\)\); \}; "
+        r"let extensions = context\.server_extensions\(\); "
+        r"let peer = extensions\.get::<Option<RemoteAddr>>\(\)\.copied\(\)\.flatten\(\)\.map\(\|peer\| peer\.0\); "
+        r"let source = RequestEnvelope::policy_source_addr_from\(peer, extensions\.get::<ClientInfo>\(\)\); "
+        r"match bucket \{ "
+        r"(?:Some\(bucket\) => \{ validate_admin_request_with_bucket\(&headers, &credentials, owner, false, vec!\[action\], source, bucket\)\.await\? \}"
+        r"|Some\(bucket\) => validate_admin_request_with_bucket\(&headers, &credentials, owner, false, vec!\[action\], source, bucket\)\.await\?,) "
+        r"None => validate_admin_request\(&headers, &credentials, owner, false, vec!\[action\], source\)\.await\?,? \} "
+        + replicator_guard
+        + r"Ok\(\(\)\)"
+    )
+    if not re.fullmatch(auth_pattern, auth_fn):
+        fail("native authority: unsupported authorize implementation")
+
+    perm_fn = top_block(
+        authority_src,
+        r"\bfn permission<'a>\(request: &AuthzRequest<'a>\) -> S3Result<Permission<'a>>\s*\{",
+        "native_authority::permission",
+        close,
+        fail,
+    )
+    covered = set()
+    if "post_v4_account_permissions" in op_specs:
+        caller_match = re.match(
+            r'if request\.operation == ops::post_v4_account_permissions::NAME \{ '
+            r'if request\.action == ops::post_v4_account_permissions::AUTH\.action '
+            r'&& request\.resource == ResourceShape::Service '
+            r'&& matches!\(request\.subject, Some\(Subject::Caller\)\) \{ '
+            r'return Ok\(Permission::Caller\); \} '
+            r'return Err\(s3_error!\(AccessDenied, "[^"]+"\)\); \}\s*',
+            perm_fn,
+        )
+        if not caller_match:
+            fail("native authority: missing caller-subject check for post_v4_account_permissions")
+        perm_fn = perm_fn[caller_match.end():]
+        covered.add("post_v4_account_permissions")
+    perm_match = re.fullmatch(
+        r"let \(action, shape\) = match request\.operation \{ (.*?) "
+        r'_ => return Err\(s3_error!\(InternalError, "[^"]+"\)\),? \}; '
+        r"let action = Action::AdminAction\(action\); "
+        r"if request\.action != <&str>::from\(&action\) \|\| request\.resource != shape \|\| request\.subject\.is_some\(\) \{ "
+        r'return Err\(s3_error!\(AccessDenied, "[^"]+"\)\); \} '
+        r"let bucket = if shape == ResourceShape::Bucket \{ "
+        r'Some\( request \.bucket \.ok_or_else\(\|\| s3_error!\(AccessDenied, "[^"]+"\)\)\? \.as_str\(\),? \) '
+        r"\} else \{ None \}; "
+        r"Ok\(Permission::Admin \{ action, bucket \}\)",
+        perm_fn,
+    )
+    if not perm_match:
+        fail("native authority: unsupported permission match structure")
+    arms_text = perm_match[1].strip()
+    arm_pattern = re.compile(
+        r"((?:ops::[a-z0-9_]+::NAME(?:\s*\|\s*)?)+)\s*=>\s*"
+        r"(?:\{\s*\(AdminAction::(\w+),\s*ResourceShape::(\w+)\)\s*\}(?:\s*,)?"
+        r"|\(AdminAction::(\w+),\s*ResourceShape::(\w+)\)\s*,?)\s*"
+    )
+    cursor = 0
+    while cursor < len(arms_text):
+        parsed = arm_pattern.match(arms_text, cursor)
+        if not parsed:
+            fail(f"native authority: unreadable permission arm {arms_text[cursor:]!r}")
+        cursor = parsed.end()
+        ops_pat = parsed.group(1)
+        admin_variant = parsed.group(2) or parsed.group(4)
+        shape = parsed.group(3) or parsed.group(5)
+        for mod_name in re.findall(r"ops::([a-z0-9_]+)::NAME", ops_pat):
+            if mod_name in covered or mod_name not in op_specs:
+                fail(f"native authority: duplicate or unmounted operation {mod_name} in permission")
+            _, action_wire, expected_shape, has_caller_subject = op_specs[mod_name]
+            if has_caller_subject or expected_shape != shape:
+                fail(f"native authority: {mod_name} resource or subject disagrees with dialect")
+            if admin_actions and admin_actions.get(admin_variant) != action_wire:
+                fail(f"native authority: {mod_name} action {admin_variant} disagrees with {action_wire}")
+            covered.add(mod_name)
+    if covered != set(op_specs):
+        fail("native authority: permission does not cover every mounted native operation")
+    return set(op_specs)
+
+
+def control_bindings(host, dialect, assemble, split, fail, published=None, has_native_routes=False):
     """Match the extension types in the installed dialect, overlay, and returned service builder."""
     def exactly(pattern, text, label):
         return one(pattern, text, label, fail)
@@ -274,15 +462,22 @@ def control_bindings(host, dialect, assemble, split, fail, published=None):
     if len(names) != int(borrowed[1]):
         fail("control plane: invalid overlay count")
     if published is not None:
-        suffix = """rows.push( OVERLAY .row(PostV3SpeedtestClientDevnull::NAME) .copied()
-            .ok_or(GatewayAssemblyError::AdminOverlayMissing)?, ); rows.extend_from_slice(control_plane::ROWS);
-            let record = RECORD.get_or_init(|| DialectOverlay { name: "rustfs-control-plane", vendor: OVERLAY.vendor,
-            claims: CLAIMS, operations: ROWS.get_or_init(|| rows), }); let builder = Dialect::assemble(record)
-            .declare_claimed::<ControlPlane>(ROUTE) .declare_claimed::<PostV3SpeedtestClientDevnull>(ClaimedRoute {
+        rows_tail = "rows.extend_from_slice(control_plane::ROWS);"
+        declare_tail = "control_plane::declare(builder) .build() .map_err(GatewayAssemblyError::AdminDialect)"
+        if has_native_routes:
+            rows_tail += " native_routes::append_rows(&mut rows);"
+            declare_tail = (
+                "let builder = control_plane::declare(builder); "
+                "native_routes::declare(builder) .build() .map_err(GatewayAssemblyError::AdminDialect)"
+            )
+        suffix = f"""rows.push( OVERLAY .row(PostV3SpeedtestClientDevnull::NAME) .copied()
+            .ok_or(GatewayAssemblyError::AdminOverlayMissing)?, ); {rows_tail}
+            let record = RECORD.get_or_init(|| DialectOverlay {{ name: "rustfs-control-plane", vendor: OVERLAY.vendor,
+            claims: CLAIMS, operations: ROWS.get_or_init(|| rows), }}); let builder = Dialect::assemble(record)
+            .declare_claimed::<ControlPlane>(ROUTE) .declare_claimed::<PostV3SpeedtestClientDevnull>(ClaimedRoute {{
             precedence: PostV3SpeedtestClientDevnull::PRECEDENCE, rows: PostV3SpeedtestClientDevnull::rows(),
-            shadows: SPEEDTEST_SHADOWS, bucket_param: PostV3SpeedtestClientDevnull::BUCKET, })
-            .declare_form::<StsForm>(STS_ROUTE); control_plane::declare(builder) .build()
-            .map_err(GatewayAssemblyError::AdminDialect)"""
+            shadows: SPEEDTEST_SHADOWS, bucket_param: PostV3SpeedtestClientDevnull::BUCKET, }})
+            .declare_form::<StsForm>(STS_ROUTE); {declare_tail}"""
         # Strip only the six declaration caches. Then account for every row added to the record.
         caches = r"(?:static \w+: OnceLock<(?:Vec<OverlayRow>|String|DialectOverlay)> = OnceLock::new\(\); ){6}"
         prefix = """let mut rows = vec![OverlayRow { name: NAME, precedence: ROUTE.precedence,
@@ -326,12 +521,14 @@ def control_bindings(host, dialect, assemble, split, fail, published=None):
 
 
 CONTROL_HOST = "rustfs/src/server/gateway_stack/control_plane.rs"
+NATIVE_ROUTES = "rustfs/src/server/gateway_stack/control_plane/native_routes.rs"
+NATIVE_AUTHORITY = "rustfs/src/server/gateway_stack/control_plane/native_authority.rs"
 HTTP_HOST = "rustfs/src/server/http.rs"
 STACK_DISPATCH = "rustfs/src/server/stack.rs"
 ADMIN_ROUTER = "rustfs/src/admin/router.rs"
 
 
-def native_tables(root, repository, actions, strip, close, split, fail):
+def native_tables(root, repository, actions, strip, close, split, fail, admin_actions=None):
     """Read each table from its host registrations and the dependency its Cargo.lock selects."""
     def read(path):
         if not (root / path).is_file():
@@ -390,8 +587,9 @@ def native_tables(root, repository, actions, strip, close, split, fail):
         r"request.extensions_mut\(\).insert\(path\); \} return Box::pin\(self.s3.call\(request\)\); \} "
         r"match &mut self.control_plane \{ Some\(control_plane\) => Box::pin\(control_plane.call\(request\)\), "
         r"None => bare\(http::StatusCode::NOT_IMPLEMENTED\), \}", dispatcher, "exclusive edge dispatch", fail)
+    router_src = read(ADMIN_ROUTER)
     shapes(r"s3_extension::route_key\(method, uri\)\.is_some\(\) \|\| parse_object_lambda_request\(method, uri\)\.is_some\(\) "
-           r"\|\| is_control_plane_route\(method, uri, headers\)", function(read(ADMIN_ROUTER), "claims_route"), "edge claims")
+           r"\|\| is_control_plane_route\(method, uri, headers\)", function(router_src, "claims_route"), "edge claims")
     shapes(r"let listings = metadata_listing::dialect\(\)\.map_err\(GatewayAssemblyError::MetadataListingDialect\)\?; "
            r"let builder = Self::configured_builder\(&assembly, iam, root, authorizer, std::convert::identity\)\? "
            r"\.answer_nul_torrent_keys_as_missing\(\) \.dialect\(&listings\); "
@@ -492,6 +690,30 @@ def native_tables(root, repository, actions, strip, close, split, fail):
         fail("metadata listings: binding coverage or listing precedence disagrees")
     control = read(CONTROL_HOST)
     control_table = active_table(control, "control_plane")
+    has_native_routes = (
+        bool(re.search(r"\b(?:native_routes|native_authority)\b", control))
+        or (root / NATIVE_ROUTES).is_file()
+        or (root / NATIVE_AUTHORITY).is_file()
+    )
+    if has_native_routes:
+        if control_table is None:
+            fail("control plane: native routes require the published control_plane table")
+        direct_item(control, r"\bmod\s+native_authority\s*;", "control native_authority module", close, fail)
+        direct_item(control, r"\bmod\s+native_routes\s*;", "control native_routes module", close, fail)
+        routes_src = read(NATIVE_ROUTES)
+        authority_src = read(NATIVE_AUTHORITY)
+        has_lambda_fallback = bool(re.search(r"\bobject_lambda_fallback\b\s*:", stack))
+        mounted_modules = native_claimed_routes(
+            routes_src, authority_src, blob, has_lambda_fallback, admin_actions, strip, close, split, fail
+        )
+        if "delete_v3_target_by_target_type_by_target_name" in mounted_modules:
+            shapes(
+                r"let key = route_key_canonical\(method, uri\.path\(\)\); "
+                r"let matched = self\.table\.at\(&key\)\.map_err\(\|_\| S3Error::new\(S3ErrorCode::NotImplemented\)\)\?; "
+                r"super::handlers::event::extract_target_params\(&matched\.params\)\?; Ok\(\(\)\)",
+                function(router_src, "validate_notification_target_params"),
+                "notification target parameter check",
+            )
     if control_table is not None:
         assembly = function(control, "assemble")
         prefix = """let gate = Admission { router: Arc::clone(&router), }; let authenticator = |authenticator: SigV4Authenticator| {
@@ -499,26 +721,73 @@ def native_tables(root, repository, actions, strip, close, split, fail):
             let host = Arc::new(Host { router, server_ctx: Arc::clone(&assembly.server_ctx), });
             let (builder, _settings) = GatewayStack::configured_builder(&assembly, iam, root, gate, authenticator)?
             .config(super::service_config(assembly.body_read_timeout, CLAIMED_ROUTE_BODY_BYTES));"""
+        if has_native_routes:
+            prefix += " let builder = native_routes::register(builder, &host);"
         if assembly.split("let service = builder", 1)[0].strip() != " ".join(prefix.split()):
             fail("control plane: service must install the host admission and handlers")
-        shapes(r"\[NAME, STS_NAME\]\.contains\(&operation\) \|\| BORROWED\.contains\(&operation\)",
-               function(control, "served"), "admitted control operation set")
-        admission = function(control, "route")
-        shapes(r"if !served\(request.operation\) \{ return Ok\(routed\(request\)\); \} let head = context "
-               r"\.server_extensions\(\) \.get::<ClaimedHead>\(\) "
-               r'\.ok_or_else\(\|\| handler_error\(s3_error!\(InternalError, "[^"]+"\)\)\)\?; '
-               r"let signed = request.identity.is_some\(\) && !head.repeated_authorization; self.router "
-               r"\.admit\(&head.method, &head.uri, &head.headers, signed\) \.map_err\(handler_error\)\?; "
-               r"Ok\(if head.repeated_authorization \{ Decision::Deny \} else \{ Decision::Allow \}\)", admission, "host admission")
-        shapes(r"let decision = self.route\(context, request\); Box::pin\(async move \{ decision \}\)",
-               function(control, "authorize_route_result"), "active control admission")
-        shapes(r"let decision = self.route\(context, request\)\.unwrap_or\(Decision::Deny\); Box::pin\(async move \{ decision \}\)",
-               function(control, "authorize_route"), "control admission decision")
+        if has_native_routes:
+            shapes(
+                r"\[NAME, STS_NAME\]\.contains\(&operation\) \|\| BORROWED\.contains\(&operation\) "
+                r"\|\| native_routes::contains\(operation\)",
+                function(control, "served"),
+                "admitted control operation set",
+            )
+            one(r"\basync fn route\b[^;{}]*\{", control, "async Admission::route", fail)
+            target_check = (
+                r"if request\.operation == rustfs_gateway_dialect_rustfs_admin::native::ops::delete_v3_target_by_target_type_by_target_name::NAME \{ "
+                r"self\.router \.validate_notification_target_params\(&head\.method, &head\.uri\) \.map_err\(handler_error\)\?; \} "
+                if "delete_v3_target_by_target_type_by_target_name" in mounted_modules
+                else r""
+            )
+            shapes(
+                r"if !served\(request\.operation\) \{ return Ok\(routed\(request\)\); \} "
+                r"let head = context \.server_extensions\(\) \.get::<ClaimedHead>\(\) "
+                r'\.ok_or_else\(\|\| handler_error\(s3_error!\(InternalError, "[^"]+"\)\)\)\?; '
+                r"let signed = request\.identity\.is_some\(\) && !head\.repeated_authorization; "
+                r"self\.router \.admit\(&head\.method, &head\.uri, &head\.headers, signed\) \.map_err\(handler_error\)\?; "
+                r"if head\.repeated_authorization \{ return Ok\(Decision::Deny\); \} "
+                r"if native_routes::contains\(request\.operation\) \{ "
+                + target_check
+                + r"if let Err\(error\) = native_authority::authorize\(context, request, head\)\.await \{ "
+                r"if error\.code\(\) == &rustfs_s3_types::S3ErrorCode::AccessDenied \{ return Ok\(Decision::Deny\); \} "
+                r"return Err\(handler_error\(error\)\); \} \} "
+                r"Ok\(Decision::Allow\)",
+                function(control, "route"),
+                "host admission",
+            )
+            shapes(
+                r"(?:Box::pin\(self\.route\(context, request\)\)|Box::pin\(async move \{ self\.route\(context, request\)\.await \}\))",
+                function(control, "authorize_route_result"),
+                "active control admission",
+            )
+            shapes(
+                r"Box::pin\(async move \{ self\.route\(context, request\)\.await\.unwrap_or\(Decision::Deny\) \}\)",
+                function(control, "authorize_route"),
+                "control admission decision",
+            )
+        else:
+            if re.search(r"\basync fn route\b", control):
+                fail("control plane: unexpected async Admission::route without native_routes")
+            shapes(r"\[NAME, STS_NAME\]\.contains\(&operation\) \|\| BORROWED\.contains\(&operation\)",
+                   function(control, "served"), "admitted control operation set")
+            admission = function(control, "route")
+            shapes(r"if !served\(request.operation\) \{ return Ok\(routed\(request\)\); \} let head = context "
+                   r"\.server_extensions\(\) \.get::<ClaimedHead>\(\) "
+                   r'\.ok_or_else\(\|\| handler_error\(s3_error!\(InternalError, "[^"]+"\)\)\)\?; '
+                   r"let signed = request.identity.is_some\(\) && !head.repeated_authorization; self.router "
+                   r"\.admit\(&head.method, &head.uri, &head.headers, signed\) \.map_err\(handler_error\)\?; "
+                   r"Ok\(if head.repeated_authorization \{ Decision::Deny \} else \{ Decision::Allow \}\)", admission, "host admission")
+            shapes(r"let decision = self.route\(context, request\); Box::pin\(async move \{ decision \}\)",
+                   function(control, "authorize_route_result"), "active control admission")
+            shapes(r"let decision = self.route\(context, request\)\.unwrap_or\(Decision::Deny\); Box::pin\(async move \{ decision \}\)",
+                   function(control, "authorize_route"), "control admission decision")
         shapes(r"if served\(request.operation\) \|\| request.identity.is_some\(\) \{ Decision::Allow \} else \{ Decision::Deny \}",
                function(control, "routed"), "admitted control inputs")
         shapes(r"let stage = routed\(request.route\(\)\); let decisions = request.decide_all\(stage, \|_\| stage\); "
                r"Box::pin\(async move \{ decisions \}\)", function(control, "authorize_input"), "control input decisions")
-    bindings = control_bindings(control, function(control, "dialect"), function(control, "assemble"), split, fail, control_table)
+    bindings = control_bindings(
+        control, function(control, "dialect"), function(control, "assemble"), split, fail, control_table, has_native_routes
+    )
     control_rows = []
     for index, (module, kind) in enumerate(bindings):
         path = f"{DIALECT_DIR}/src/ops/{module}.rs"
@@ -621,8 +890,14 @@ def extension_inventory(root, repository, source, names, strip, close, split, wi
     if (root / NATIVE_HANDLER).is_file():
         if legacy.is_file():
             fail("both legacy and native metadata listing selectors are present; cannot establish the active host")
-        tables = native_tables(root, repository, names.get("S3Action", {}), strip, close, split, fail)
-        return {"extension_tables": tables}, [HTTP_HOST, STACK_DISPATCH, ADMIN_ROUTER, NATIVE_STACK, NATIVE_HANDLER, NATIVE_ACCESS, CONTROL_HOST, "Cargo.lock"]
+        tables = native_tables(
+            root, repository, names.get("S3Action", {}), strip, close, split, fail, names.get("AdminAction", {})
+        )
+        authorities = [HTTP_HOST, STACK_DISPATCH, ADMIN_ROUTER, NATIVE_STACK, NATIVE_HANDLER, NATIVE_ACCESS, CONTROL_HOST]
+        if (root / NATIVE_ROUTES).is_file():
+            authorities.extend([NATIVE_ROUTES, NATIVE_AUTHORITY])
+        authorities.append("Cargo.lock")
+        return {"extension_tables": tables}, authorities
     if not legacy.is_file():
         fail(f"RustFS source file {METADATA_ROUTE} is missing")
     rows = metadata_listing_routes(strip(legacy.read_text(encoding="utf-8")), METADATA_ROUTE, fail, close)
