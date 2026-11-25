@@ -677,3 +677,99 @@ fn reports_connection_refusal_as_an_environment_error() {
     assert!(error.to_string().contains("connect"));
     drop(reservation);
 }
+
+fn header_value(captured: &[u8], header_name: &str) -> Option<String> {
+    let text = std::str::from_utf8(captured).expect("captured request is UTF-8");
+    text.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case(header_name).then(|| value.trim().to_owned())
+    })
+}
+
+fn run_external_sigv2(request_toml: &str, clock_toml: Option<&str>) -> Vec<u8> {
+    let (url, server) = responding_server(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: 25\r\nConnection: close\r\n\r\n<ListAllMyBucketsResult/>",
+    );
+    let mut target = Conn::external(std::path::PathBuf::from("."), &url).expect("external target");
+    target.prepare("c-sig-external-clock-test", None).expect("empty setup");
+    let request = crate::toml::parse(request_toml).expect("request block");
+    let clock_doc = clock_toml.map(|text| crate::toml::parse(text).expect("clock block"));
+    let plan = ExchangePlan {
+        case_id: "c-sig-external-clock-test",
+        index: 0,
+        request,
+        clock: clock_doc.as_ref().and_then(|doc| doc.get("clock")),
+        connection: None,
+        timeout_ms: Some(2_000),
+        deadline: None,
+        transport: Transport::Conn,
+        profile: Profile::Rustfs,
+    };
+    let observation = target.exchange(&plan).expect("external SigV2 exchange");
+    let captured = server.join().expect("server exits");
+    assert_eq!(observation.status, Some(200));
+    captured
+}
+
+#[test]
+fn external_sigv2_header_remaps_matching_authored_dates_to_wall_clock() {
+    let clock = "[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n";
+    let stale = "Fri, 02 Jan 2026 03:04:05 GMT";
+
+    let single = run_external_sigv2(
+        "method = \"GET\"\ntarget = \"/\"\nheaders = { \"date\" = \"Fri, 02 Jan 2026 03:04:05 GMT\" }\n\
+         sign = { mode = \"sigv2_header\", credential = \"valid\" }\n",
+        Some(clock),
+    );
+    let sent_date = header_value(&single, "date").expect("Date header sent");
+    assert_ne!(sent_date, stale, "matching authored SigV2 Date must remap off the pinned instant");
+    assert!(sent_date.ends_with(" GMT"), "remapped Date stays an HTTP-date: {sent_date}");
+    let auth = header_value(&single, "authorization").expect("SigV2 Authorization header is present");
+    let mut expected_headers = http::HeaderMap::new();
+    expected_headers.insert(http::header::DATE, http::HeaderValue::from_str(&sent_date).expect("valid Date header"));
+    let empty_query = rustfs_gateway::sig::RawQuery::new("");
+    let expected_spec = rustfs_gateway::sig::SigV2StringToSignSpec::new(
+        rustfs_gateway::sig::SigV2Mode::HeaderAuth,
+        &http::Method::GET,
+        "/",
+        &empty_query,
+        &expected_headers,
+        None,
+    );
+    let expected_auth =
+        rustfs_gateway::sig::SigV2Signer::new("AKIAIOSFODNN7EXAMPLE", b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+            .and_then(|signer| signer.authorization(&expected_spec))
+            .expect("compute expected SigV2 authorization");
+    assert_eq!(auth, expected_auth, "SigV2 signature must cover the remapped Date header");
+
+    let both = run_external_sigv2(
+        "method = \"GET\"\ntarget = \"/\"\n\
+         headers = { \"date\" = \"Fri, 02 Jan 2026 03:04:05 GMT\", \"x-amz-date\" = \"Fri, 02 Jan 2026 03:04:05 GMT\" }\n\
+         sign = { mode = \"sigv2_header\", credential = \"valid\" }\n",
+        Some(clock),
+    );
+    let both_date = header_value(&both, "date").expect("Date header preserved");
+    let both_amz = header_value(&both, "x-amz-date").expect("x-amz-date header preserved");
+    assert_ne!(both_date, stale, "matching authored Date must remap when paired with x-amz-date");
+    assert_eq!(both_date, both_amz, "matching Date and x-amz-date remap to the same wall-clock instant");
+}
+
+#[test]
+fn external_sigv2_header_preserves_skewed_and_unclocked_authored_dates() {
+    let clock = "[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n";
+    let skewed = "Thu, 01 Jan 2026 03:04:05 GMT";
+    let captured = run_external_sigv2(
+        "method = \"GET\"\ntarget = \"/\"\nheaders = { \"date\" = \"Thu, 01 Jan 2026 03:04:05 GMT\" }\n\
+         sign = { mode = \"sigv2_header\", credential = \"valid\" }\n",
+        Some(clock),
+    );
+    assert_eq!(header_value(&captured, "date").as_deref(), Some(skewed));
+
+    let literal = "Fri, 02 Jan 2026 03:04:05 GMT";
+    let unclocked = run_external_sigv2(
+        "method = \"GET\"\ntarget = \"/\"\nheaders = { \"date\" = \"Fri, 02 Jan 2026 03:04:05 GMT\" }\n\
+         sign = { mode = \"sigv2_header\", credential = \"valid\" }\n",
+        None,
+    );
+    assert_eq!(header_value(&unclocked, "date").as_deref(), Some(literal));
+}

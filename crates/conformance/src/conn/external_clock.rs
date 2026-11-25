@@ -14,7 +14,9 @@
 
 //! The instant an external exchange is signed at.
 //!
-//! Responsible for: translating a case's `[clock]` onto wall time or a caller-declared endpoint clock.
+//! Responsible for: translating a case's `[clock]` onto wall time or a caller-declared endpoint
+//! clock, and remapping structured `sigv2_header` `Date` / `x-amz-date` headers that explicitly
+//! spell the authored `clock.request_time` so external wall-clock runs do not send stale dates.
 //! Without an endpoint clock, a case that pins nothing is signed now; a `request_time` offset from
 //! its `fixed` instant is signed at the same offset from now, so a skew case still measures the skew;
 //! a case that pins `fixed` alone, or a server-side `skew_ms`, asks for an instant the wire cannot
@@ -28,7 +30,7 @@
 //! Upstream: `crate::inprocess`. Downstream: `super::external`.
 
 use super::external_fixture::clock::instant_at;
-use crate::inprocess::clock_of;
+use crate::inprocess::{Wire, clock_of};
 use crate::sut::SutError;
 use crate::time::Instant;
 use crate::value::Value;
@@ -43,13 +45,16 @@ impl super::Conn {
     }
 }
 
-/// The two instants an external exchange needs: its time base, and the one to sign at.
+/// The instants an external exchange needs: its time base, the one to sign at, and the authored
+/// `clock.request_time` when the case explicitly declared one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ExternalClock {
     /// Wall time or the caller-declared endpoint instant; not a remote clock observation.
     pub(super) now: Instant,
     /// The instant the request is signed at.
     pub(super) request_time: Instant,
+    /// The authored `clock.request_time` when explicitly declared, used to detect matching dates.
+    pub(super) authored_request_time: Option<Instant>,
 }
 
 /// Maps the case's `[clock]` onto the configured endpoint instant, or otherwise wall time.
@@ -64,7 +69,7 @@ pub(super) fn external_clock(
     now: Instant,
     configured: Option<&Instant>,
 ) -> Result<ExternalClock, SutError> {
-    let (fixed, request_time, skew_ms) = clock_of(clock)?;
+    let (fixed, authored_request_time, skew_ms) = clock_of(clock)?;
     let pins_fixed = clock.is_some_and(|clock| clock.read("clock.fixed").is_some());
     let shifts_request = clock.is_some_and(|clock| clock.read("clock.request_time").is_some());
     if skew_ms != 0 {
@@ -93,7 +98,7 @@ pub(super) fn external_clock(
     let now = configured.cloned().unwrap_or(now);
     // Preserve the authored offset from the declared endpoint time, or from wall time when the
     // endpoint has no explicit clock configuration. This does not observe a remote clock.
-    let offset = request_time.unix_seconds.saturating_sub(fixed.unix_seconds);
+    let offset = authored_request_time.unix_seconds.saturating_sub(fixed.unix_seconds);
     let signed_at = now
         .unix_seconds
         .checked_add(offset)
@@ -108,7 +113,66 @@ pub(super) fn external_clock(
     } else {
         instant_at(signed_at)?
     };
-    Ok(ExternalClock { now, request_time })
+    Ok(ExternalClock {
+        now,
+        request_time,
+        authored_request_time: shifts_request.then_some(authored_request_time),
+    })
+}
+
+/// Rewrites authored `Date` / `x-amz-date` headers on structured `sigv2_header` requests when
+/// external execution remapped `clock.request_time` away from its authored instant.
+///
+/// Only header values that exactly match the authored `clock.request_time` (as HTTP-date, or as
+/// basic ISO-8601 on `x-amz-date`) are updated in the same format. Intentionally skewed, malformed,
+/// raw-head, unclocked, and non-`sigv2_header` requests are left untouched.
+///
+/// # Errors
+///
+/// Returns [`SutError::Environment`] if an instant cannot be formatted as an HTTP-date.
+pub(super) fn remap_sigv2_authored_dates(wire: &mut Wire, clock: &ExternalClock) -> Result<(), SutError> {
+    let Some(authored) = clock.authored_request_time.as_ref() else {
+        return Ok(());
+    };
+    if authored.unix_seconds == clock.request_time.unix_seconds || wire.raw_head.is_some() {
+        return Ok(());
+    }
+    let is_sigv2_header = wire
+        .sign
+        .as_ref()
+        .and_then(|sign| sign.read("signSpec.mode"))
+        .and_then(Value::as_str)
+        == Some("sigv2_header");
+    if !is_sigv2_header {
+        return Ok(());
+    }
+    if !wire
+        .headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("date") || name.eq_ignore_ascii_case("x-amz-date"))
+    {
+        return Ok(());
+    }
+    let authored_http = rustfs_gateway::Timestamp::from_secs(authored.unix_seconds)
+        .render(rustfs_gateway::TimestampFormat::HttpDate)
+        .map_err(|_| SutError::Environment("authored SigV2 request time exceeds the HTTP date range".to_owned()))?;
+    let remapped_http = rustfs_gateway::Timestamp::from_secs(clock.request_time.unix_seconds)
+        .render(rustfs_gateway::TimestampFormat::HttpDate)
+        .map_err(|_| SutError::Environment("remapped SigV2 request time exceeds the HTTP date range".to_owned()))?;
+    for (name, value) in &mut wire.headers {
+        if name.eq_ignore_ascii_case("date") {
+            if *value == authored_http {
+                *value = remapped_http.clone();
+            }
+        } else if name.eq_ignore_ascii_case("x-amz-date") {
+            if *value == authored_http {
+                *value = remapped_http.clone();
+            } else if *value == authored.amz_stamp {
+                *value = clock.request_time.amz_stamp.clone();
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -127,6 +191,21 @@ mod tests {
         crate::time::parse_rfc3339("2026-10-07T12:00:00Z").expect("an instant")
     }
 
+    fn sigv2_wire(mode: Option<&str>, headers: &[(&str, &str)]) -> Wire {
+        Wire {
+            method: "GET".to_owned(),
+            target: "/".to_owned(),
+            headers: headers.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
+            raw_head: None,
+            h2_frames: Vec::new(),
+            http_version: None,
+            body: Vec::new(),
+            frames: Vec::new(),
+            steps: Vec::new(),
+            sign: mode.map(|m| Value::Table(vec![("mode".to_owned(), Value::String(m.to_owned()))])),
+        }
+    }
+
     /// Positive — a case that pins nothing is signed at the wall clock, and its fixture state is
     /// dated there too.
     #[test]
@@ -134,6 +213,7 @@ mod tests {
         let mapped = external_clock(None, now(), None).expect("mapped");
         assert_eq!(mapped.now, now());
         assert_eq!(mapped.request_time, now());
+        assert_eq!(mapped.authored_request_time, None);
     }
 
     /// Negative — `fixed` alone pins the target's instant, which the wire cannot set.
@@ -185,5 +265,123 @@ mod tests {
         ] {
             assert!(external_clock(Some(&clock(text)), now(), None).is_err(), "{text}");
         }
+    }
+
+    /// Positive — matching authored SigV2 `Date` and `x-amz-date` headers remap onto the external
+    /// request time in the same format (including non-zero offsets and paired headers).
+    #[test]
+    fn remaps_sigv2_authored_date_and_amz_date_matching_request_time() {
+        let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
+
+        let mut single = sigv2_wire(Some("sigv2_header"), &[("Date", "Fri, 02 Jan 2026 03:04:05 GMT")]);
+        remap_sigv2_authored_dates(&mut single, &mapped).expect("remaps matching Date");
+        assert_eq!(single.headers, vec![("Date".to_owned(), "Wed, 07 Oct 2026 12:00:00 GMT".to_owned())]);
+
+        let mut paired = sigv2_wire(
+            Some("sigv2_header"),
+            &[
+                ("date", "Fri, 02 Jan 2026 03:04:05 GMT"),
+                ("X-Amz-Date", "Fri, 02 Jan 2026 03:04:05 GMT"),
+            ],
+        );
+        remap_sigv2_authored_dates(&mut paired, &mapped).expect("remaps paired Date and x-amz-date");
+        assert_eq!(
+            paired.headers,
+            vec![
+                ("date".to_owned(), "Wed, 07 Oct 2026 12:00:00 GMT".to_owned()),
+                ("X-Amz-Date".to_owned(), "Wed, 07 Oct 2026 12:00:00 GMT".to_owned()),
+            ]
+        );
+
+        let mut iso = sigv2_wire(Some("sigv2_header"), &[("x-amz-date", "20260102T030405Z")]);
+        remap_sigv2_authored_dates(&mut iso, &mapped).expect("remaps matching ISO x-amz-date");
+        assert_eq!(iso.headers, vec![("x-amz-date".to_owned(), "20261007T120000Z".to_owned())]);
+
+        let offset = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:20:05Z\"\n");
+        let mapped_offset = external_clock(Some(&offset), now(), None).expect("mapped offset");
+        let mut shifted = sigv2_wire(Some("sigv2_header"), &[("date", "Fri, 02 Jan 2026 03:20:05 GMT")]);
+        remap_sigv2_authored_dates(&mut shifted, &mapped_offset).expect("remaps shifted Date");
+        assert_eq!(shifted.headers, vec![("date".to_owned(), "Wed, 07 Oct 2026 12:16:00 GMT".to_owned())]);
+    }
+
+    /// Positive — when the endpoint clock equals the authored instant, matching headers stay exact.
+    #[test]
+    fn preserves_authored_sigv2_date_when_endpoint_clock_matches_authored_time() {
+        let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n");
+        let configured = crate::time::parse_rfc3339("2026-01-02T03:04:05Z").expect("configured instant");
+        let mapped = external_clock(Some(&declared), now(), Some(&configured)).expect("mapped");
+        let mut wire = sigv2_wire(Some("sigv2_header"), &[("date", "Fri, 02 Jan 2026 03:04:05 GMT")]);
+        remap_sigv2_authored_dates(&mut wire, &mapped).expect("no-op remap");
+        assert_eq!(wire.headers, vec![("date".to_owned(), "Fri, 02 Jan 2026 03:04:05 GMT".to_owned())]);
+    }
+
+    /// Negative — intentionally skewed authored timestamps are never silently rewritten.
+    #[test]
+    fn does_not_rewrite_intentionally_skewed_authored_sigv2_dates() {
+        let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
+        let original = vec![
+            ("date".to_owned(), "Thu, 01 Jan 2026 03:04:05 GMT".to_owned()),
+            ("x-amz-date".to_owned(), "20260101T030405Z".to_owned()),
+        ];
+        let mut wire = sigv2_wire(
+            Some("sigv2_header"),
+            &[("date", "Thu, 01 Jan 2026 03:04:05 GMT"), ("x-amz-date", "20260101T030405Z")],
+        );
+        remap_sigv2_authored_dates(&mut wire, &mapped).expect("leaves skewed dates untouched");
+        assert_eq!(wire.headers, original);
+    }
+
+    /// Negative — malformed or empty authored date values stay intact so negative cases still test them.
+    #[test]
+    fn does_not_rewrite_malformed_or_empty_authored_sigv2_dates() {
+        let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
+        for (name, value) in [
+            ("date", ""),
+            ("date", "not-a-date"),
+            ("date", "Fri, 99 Jan 2026 03:04:05 GMT"),
+            ("x-amz-date", "bad-stamp"),
+        ] {
+            let mut wire = sigv2_wire(Some("sigv2_header"), &[(name, value)]);
+            remap_sigv2_authored_dates(&mut wire, &mapped).expect("leaves malformed date untouched");
+            assert_eq!(wire.headers, vec![(name.to_owned(), value.to_owned())]);
+        }
+    }
+
+    /// Negative — a basic ISO-8601 stamp placed in `Date` (invalid HTTP-date) is not repaired.
+    #[test]
+    fn does_not_rewrite_iso8601_stamp_on_plain_date_header() {
+        let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
+        let mut wire = sigv2_wire(Some("sigv2_header"), &[("date", "20260102T030405Z")]);
+        remap_sigv2_authored_dates(&mut wire, &mapped).expect("leaves invalid Date format untouched");
+        assert_eq!(wire.headers, vec![("date".to_owned(), "20260102T030405Z".to_owned())]);
+    }
+
+    /// Negative — unsigned, SigV4, presigned, and raw-head requests are never rewritten.
+    #[test]
+    fn does_not_rewrite_dates_for_non_sigv2_header_or_raw_head_requests() {
+        let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:04:05Z\"\n");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
+        for mode in [None, Some("sigv4_header"), Some("presigned_v2"), Some("anonymous")] {
+            let mut wire = sigv2_wire(mode, &[("date", "Fri, 02 Jan 2026 03:04:05 GMT")]);
+            remap_sigv2_authored_dates(&mut wire, &mapped).expect("leaves non-sigv2_header untouched");
+            assert_eq!(wire.headers, vec![("date".to_owned(), "Fri, 02 Jan 2026 03:04:05 GMT".to_owned())]);
+        }
+        let mut raw = sigv2_wire(Some("sigv2_header"), &[("date", "Fri, 02 Jan 2026 03:04:05 GMT")]);
+        raw.raw_head = Some(b"GET / HTTP/1.1\r\nHost: s3.example.com\r\nDate: Fri, 02 Jan 2026 03:04:05 GMT\r\n\r\n".to_vec());
+        remap_sigv2_authored_dates(&mut raw, &mapped).expect("leaves raw_head untouched");
+        assert_eq!(raw.headers, vec![("date".to_owned(), "Fri, 02 Jan 2026 03:04:05 GMT".to_owned())]);
+    }
+
+    /// Negative — a request without an explicit `clock.request_time` keeps its literal `Date`.
+    #[test]
+    fn does_not_rewrite_authored_sigv2_date_without_declared_request_time() {
+        let mapped = external_clock(None, now(), None).expect("mapped");
+        let mut wire = sigv2_wire(Some("sigv2_header"), &[("date", "Fri, 02 Jan 2026 03:04:05 GMT")]);
+        remap_sigv2_authored_dates(&mut wire, &mapped).expect("leaves unclocked Date untouched");
+        assert_eq!(wire.headers, vec![("date".to_owned(), "Fri, 02 Jan 2026 03:04:05 GMT".to_owned())]);
     }
 }

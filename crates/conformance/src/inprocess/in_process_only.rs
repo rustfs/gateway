@@ -40,6 +40,10 @@ pub(super) const IN_PROCESS_ONLY: &[(&str, &str)] = &[
     ("c-authz-1018", "counts copy-backend dispatch under an in-process Outposts decision"),
     ("c-cred-0002", "counts in-process credential-provider calls for an anonymous request"),
     (
+        "c-cred-0004",
+        "authenticates with the in-process target's fixture live_session temporary credential",
+    ),
+    (
         "c-cred-0005",
         "judges the closure credential-provider adapter the in-process target installs",
     ),

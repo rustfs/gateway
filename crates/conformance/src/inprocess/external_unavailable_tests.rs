@@ -186,3 +186,14 @@ fn reasons_name_their_case_and_near_misses_stay_available() {
         assert_eq!(super::unavailable_externally(id), None, "{id:?}");
     }
 }
+
+/// Negative — `c-cred-0004` relies on the in-process target's fixture `live_session` token and
+/// is unavailable externally, while ledger-ruled session cases stay outside `IN_PROCESS_ONLY`.
+#[test]
+fn live_session_presigned_case_is_unavailable_externally_without_touching_ruled_session_cases() {
+    let reason = super::unavailable_externally("c-cred-0004").expect("c-cred-0004 needs the in-process live_session fixture");
+    assert!(reason.starts_with("c-cred-0004") && reason.contains("live_session"), "{reason}");
+    for untouched in ["c-cred-0003", "c-cred-0020"] {
+        assert_eq!(super::unavailable_externally(untouched), None, "{untouched} must stay untouched");
+    }
+}

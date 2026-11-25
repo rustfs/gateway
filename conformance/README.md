@@ -614,8 +614,8 @@ in its list of cases configured by id that an endpoint can still judge, and ever
 **What can run against an external endpoint at all.** Two gates run before any traffic: the clock
 gate skips, at the `clock` phase, a case that pins `clock.fixed` (or a server `skew_ms`) an
 endpoint on its own wall clock cannot follow — the text report counts these on a `clock:` line —
-and the preflight gate above. Of the 890 cases, 534 (60.0%) pass these gates with
-`--allow-external-writes` and 125 (14.0%) without it, with `--allow-external-fixtures` in both and
+and the preflight gate above. Of the 890 cases, 533 (59.8%) pass these gates with
+`--allow-external-writes` and 124 (13.9%) without it, with `--allow-external-fixtures` in both and
 the endpoint on its own wall clock. `writes_tests::the_readme_states_the_externally_runnable_share_of_this_corpus`
 recomputes both numbers from the corpus with the runner's own gates and fails until this sentence
 matches. Nearly all of the rest pin `clock.fixed`, and run only against an endpoint started on that

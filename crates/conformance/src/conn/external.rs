@@ -86,10 +86,11 @@ impl Conn {
             .clone()
             .ok_or_else(|| SutError::Environment("external exchange has no configured endpoint".to_owned()))?;
         let clock = super::external_clock::external_clock(plan.clock, self.external_now()?, self.endpoint_fixed_time.as_ref())?;
-        let request_time = clock.request_time;
         let reuse = read_connection(plan.connection)?;
         self.inner.set_fixture_now(clock.now.unix_seconds);
-        let wire = self.inner.read_wire(&plan.request)?;
+        let mut wire = self.inner.read_wire(&plan.request)?;
+        super::external_clock::remap_sigv2_authored_dates(&mut wire, &clock)?;
+        let request_time = clock.request_time;
         let version_write = self.external_fixtures.version_write(plan.case_id, &wire)?;
         if !wire.h2_frames.is_empty() {
             return self.exchange_h2_external(plan, &wire, &endpoint, reuse);
