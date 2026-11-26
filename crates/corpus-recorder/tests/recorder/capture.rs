@@ -137,8 +137,8 @@ async fn n_a_body_credential_is_refused_and_nothing_is_written() {
     assert_eq!(std::fs::read_to_string(&config.output).expect("an output file"), "");
 }
 
-/// Negative — a body over the cap is passed through whole but recorded as no body at all, never
-/// as a truncated prefix posing as the whole.
+/// Negative — an HTTP/2-style body without `Content-Length` that exceeds the cap is passed through
+/// whole, counted as `body_not_recorded`, and never written as a bogus empty-body corpus entry.
 #[tokio::test]
 async fn n_an_over_cap_body_is_passed_through_but_not_recorded() {
     let mut config = config("capture-over-cap");
@@ -151,9 +151,37 @@ async fn n_an_over_cap_body_is_passed_through_but_not_recorded() {
         .oneshot(request("PUT", "/bucket/key", &[], Frames::of(&parts)))
         .await;
     assert_eq!(seen.frames(), [b"abc".to_vec(), b"defgh".to_vec()]);
-    let stats = settle(&layer, 1).await;
-    assert_eq!(stats.body_not_recorded, 1);
-    assert!(entries(&config)[0].chunks.is_none());
+    let stats = settle_unwritten(&layer).await;
+    assert_eq!((stats.body_not_recorded, stats.recorded), (1, 0));
+    assert_eq!(std::fs::read_to_string(&config.output).unwrap_or_default(), "");
+}
+
+/// Negative — an undeclared HTTP/2 body partially read before the service stops is counted as
+/// `body_not_recorded` and not written as an empty-body entry.
+#[tokio::test]
+async fn n_a_partially_read_undeclared_body_is_not_written_as_empty() {
+    let config = config("capture-partial-h2");
+    let layer = recorder(config.clone());
+    let partial_service = tower::service_fn(|request: crate::support::Tapped| async move {
+        let mut body = request.into_body();
+        let _ = http_body_util::BodyExt::frame(&mut body).await;
+        Ok::<_, std::convert::Infallible>(
+            http::Response::builder()
+                .status(400)
+                .body(String::new())
+                .expect("a valid response"),
+        )
+    });
+    let parts: [&[u8]; 2] = [b"first", b"second"];
+    let response = layer
+        .layer(partial_service)
+        .oneshot(request("PUT", "/bucket/key", &[], Frames::of(&parts)))
+        .await
+        .expect("an infallible service");
+    assert_eq!(response.status(), 400);
+    let stats = settle_unwritten(&layer).await;
+    assert_eq!((stats.body_not_recorded, stats.recorded), (1, 0));
+    assert_eq!(std::fs::read_to_string(&config.output).unwrap_or_default(), "");
 }
 
 /// Negative — a body the service never read to its end was not observed, so none of it is
