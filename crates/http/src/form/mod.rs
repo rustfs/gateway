@@ -490,19 +490,69 @@ impl FormField {
 
 /// Extracts the boundary from a `multipart/form-data` content type.
 fn parse_boundary(content_type: &str) -> Result<String, FormReject> {
-    let mut parts = content_type.split(';');
-    let Some(media) = parts.next() else {
-        return Err(FormReject::MalformedContentType);
-    };
+    let bytes = content_type.as_bytes();
+    let media_end = bytes.iter().position(|&byte| byte == b';').unwrap_or(bytes.len());
+    let media = content_type.get(..media_end).unwrap_or_default();
     if !media.trim().eq_ignore_ascii_case(MULTIPART_FORM_DATA) {
         return Err(FormReject::MalformedContentType);
     }
     let mut found: Option<String> = None;
-    for parameter in parts {
-        let Some((name, value)) = parameter.trim().split_once('=') else {
+    let mut at = media_end;
+    while at < bytes.len() {
+        at = at.saturating_add(1);
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at = at.saturating_add(1);
+        }
+        if at >= bytes.len() {
+            break;
+        }
+        let name_start = at;
+        while let Some(&byte) = bytes.get(at) {
+            if byte == b'=' || byte == b';' {
+                break;
+            }
+            if byte == b'"' {
+                return Err(FormReject::MalformedContentType);
+            }
+            at = at.saturating_add(1);
+        }
+        if bytes.get(at) != Some(&b'=') {
             continue;
+        }
+        let name = content_type.get(name_start..at).unwrap_or_default().trim();
+        at = at.saturating_add(1);
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at = at.saturating_add(1);
+        }
+        let value = if bytes.get(at) == Some(&b'"') {
+            let start = at.saturating_add(1);
+            let close = bytes
+                .get(start..)
+                .and_then(|rest| rest.iter().position(|&byte| byte == b'"'))
+                .map(|offset| start.saturating_add(offset))
+                .ok_or(FormReject::MalformedContentType)?;
+            at = close.saturating_add(1);
+            while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+                at = at.saturating_add(1);
+            }
+            if at < bytes.len() && bytes.get(at) != Some(&b';') {
+                return Err(FormReject::MalformedContentType);
+            }
+            content_type.get(start..close).unwrap_or_default()
+        } else {
+            let start = at;
+            while let Some(&byte) = bytes.get(at) {
+                if byte == b';' {
+                    break;
+                }
+                if byte == b'"' {
+                    return Err(FormReject::MalformedContentType);
+                }
+                at = at.saturating_add(1);
+            }
+            content_type.get(start..at).unwrap_or_default().trim()
         };
-        if !name.trim().eq_ignore_ascii_case("boundary") {
+        if !name.eq_ignore_ascii_case("boundary") {
             continue;
         }
         // Two `boundary` parameters is the same ambiguity the header layer refuses: one component
@@ -510,11 +560,6 @@ fn parse_boundary(content_type: &str) -> Result<String, FormReject> {
         if found.is_some() {
             return Err(FormReject::MalformedContentType);
         }
-        let value = value.trim();
-        let value = value
-            .strip_prefix('"')
-            .and_then(|rest| rest.strip_suffix('"'))
-            .unwrap_or(value);
         found = Some(value.to_owned());
     }
     let boundary = found.ok_or(FormReject::MalformedContentType)?;

@@ -306,3 +306,214 @@ fn n_a_line_without_a_line_feed_is_refused_at_the_bound() {
     assert_eq!(dribbled, Err(ChunkReject::TrailerSizeExceeded));
     assert!(parses < 5, "saw {parses}");
 }
+
+/// Reader that delivers `prefix` bytes and then returns `ReadProgress::Filled(0)` into a non-empty
+/// buffer, violating the `AsyncPayloadRead` contract.
+struct ZeroFillAfter {
+    prefix: Vec<u8>,
+    at: usize,
+    zero_polls: usize,
+}
+
+impl ZeroFillAfter {
+    fn new(prefix: impl Into<Vec<u8>>) -> Self {
+        Self {
+            prefix: prefix.into(),
+            at: 0,
+            zero_polls: 0,
+        }
+    }
+}
+
+impl AsyncPayloadRead for ZeroFillAfter {
+    fn poll_fill(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<ReadProgress, StreamError>> {
+        let this = self.get_mut();
+        if buf.is_empty() {
+            return Poll::Ready(Ok(ReadProgress::Filled(0)));
+        }
+        if this.at < this.prefix.len() {
+            let take = (this.prefix.len() - this.at).min(buf.len());
+            buf[..take].copy_from_slice(&this.prefix[this.at..this.at + take]);
+            this.at += take;
+            return Poll::Ready(Ok(ReadProgress::Filled(take)));
+        }
+        this.zero_polls += 1;
+        assert!(this.zero_polls <= 8, "IngestPipeline spun on ReadProgress::Filled(0)");
+        Poll::Ready(Ok(ReadProgress::Filled(0)))
+    }
+
+    fn caps(&self) -> PayloadCaps {
+        PayloadCaps::PULL
+    }
+
+    fn len_hint(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Negative — `ReadProgress::Filled(0)` on a non-empty buffer is a fatal producer contract
+/// violation in `refill()`, `refill_trailer()`, and `finalize()`: it must never spin forever and
+/// must never be mistaken for clean EOF with `commit_allowed == true`.
+#[test]
+fn n_zero_fill_on_non_empty_buffer_is_fatal_in_refill_trailer_and_finalize() {
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut out = [0u8; 64];
+
+    // 1) During chunk refill: must fail immediately, not spin forever.
+    let unsigned = ChunkFraming::derive(&support::FramingFixture::streaming_unsigned()).expect("consistent fixture");
+    let unsigned_trailer =
+        ChunkFraming::derive(&support::FramingFixture::streaming_unsigned_trailer()).expect("consistent fixture");
+    let mut in_refill = IngestPipeline::new(
+        ZeroFillAfter::new(b"5\r\nhe".to_vec()),
+        unsigned,
+        support::declared_length(5),
+        None,
+        no_observers(),
+        ChunkLimits::default(),
+        IngestPolicy::default(),
+    )
+    .expect("valid pipeline");
+    let first = Pin::new(&mut in_refill).poll_fill(&mut cx, &mut out);
+    assert!(matches!(first, Poll::Ready(Err(_))), "expected fatal error in refill, got {first:?}");
+    assert_eq!(in_refill.inner.zero_polls, 1, "must not spin on Filled(0)");
+    assert!(!in_refill.commit_allowed());
+
+    // 2) During trailer refill: must fail immediately, not spin forever.
+    let declaration = TrailerDeclaration::parse(&http::HeaderValue::from_static("x-amz-checksum-crc32c"), false)
+        .expect("valid trailer declaration");
+    let mut in_trailer = IngestPipeline::new(
+        ZeroFillAfter::new(b"5\r\nhello\r\n0\r\nx-amz-checksum-crc32c:".to_vec()),
+        unsigned_trailer,
+        support::declared_length(5),
+        None,
+        no_observers(),
+        ChunkLimits::default(),
+        IngestPolicy::default(),
+    )
+    .expect("valid pipeline")
+    .with_trailer_declaration(declaration.clone())
+    .expect("matching declaration");
+    let mut got_err = false;
+    for _ in 0..8 {
+        match Pin::new(&mut in_trailer).poll_fill(&mut cx, &mut out) {
+            Poll::Ready(Ok(ReadProgress::Filled(_))) => {}
+            Poll::Ready(Err(_)) => {
+                got_err = true;
+                break;
+            }
+            other => {
+                assert!(other.is_ready(), "unexpected pending in trailer refill");
+                break;
+            }
+        }
+    }
+    assert!(got_err, "trailer refill must fail on Filled(0)");
+    assert_eq!(in_trailer.inner.zero_polls, 1, "must not spin in refill_trailer");
+    assert!(!in_trailer.commit_allowed());
+
+    // 3) During finalize confirming probe (non-trailered): must NOT treat Filled(0) as clean EOF!
+    let mut in_finalize = IngestPipeline::new(
+        ZeroFillAfter::new(b"5\r\nhello\r\n0\r\n\r\n".to_vec()),
+        unsigned,
+        support::declared_length(5),
+        None,
+        no_observers(),
+        ChunkLimits::default(),
+        IngestPolicy::default(),
+    )
+    .expect("valid pipeline");
+    let first = Pin::new(&mut in_finalize).poll_fill(&mut cx, &mut out);
+    assert!(matches!(first, Poll::Ready(Ok(ReadProgress::Filled(5)))));
+    let second = Pin::new(&mut in_finalize).poll_fill(&mut cx, &mut out);
+    assert!(
+        matches!(second, Poll::Ready(Err(_))),
+        "finalize must reject Filled(0) on non-empty probe buffer, got {second:?}"
+    );
+    assert_eq!(in_finalize.inner.zero_polls, 1);
+    assert!(!in_finalize.commit_allowed(), "commit must stay disallowed without transport EOF");
+
+    // 4) During finalize confirming probe (trailered): must also fail without committing.
+    let mut in_trailer_finalize = IngestPipeline::new(
+        ZeroFillAfter::new(b"5\r\nhello\r\n0\r\nx-amz-checksum-crc32c:NhCmhg==\r\n\r\n".to_vec()),
+        unsigned_trailer,
+        support::declared_length(5),
+        None,
+        no_observers(),
+        ChunkLimits::default(),
+        IngestPolicy::default(),
+    )
+    .expect("valid pipeline")
+    .with_trailer_declaration(declaration)
+    .expect("matching declaration");
+    let first = Pin::new(&mut in_trailer_finalize).poll_fill(&mut cx, &mut out);
+    assert!(matches!(first, Poll::Ready(Ok(ReadProgress::Filled(5)))));
+    let second = Pin::new(&mut in_trailer_finalize).poll_fill(&mut cx, &mut out);
+    assert!(matches!(second, Poll::Ready(Err(_))), "got {second:?}");
+    assert!(!in_trailer_finalize.commit_allowed());
+}
+
+/// Positive & negative — `window_ceiling` accounts for `max_trailer_section_bytes` so valid
+/// trailers are accepted when `max_chunk_size < max_trailer_section_bytes`, while over-cap
+/// trailers are still refused with `TrailerSizeExceeded`.
+#[test]
+fn n_trailer_window_accommodates_trailer_bound_above_max_chunk_size() {
+    let limits = ChunkLimits::default()
+        .with_max_chunk_size(128)
+        .with_trailer_bounds(4096, 100)
+        .with_undeclared_trailer_fields_discarded();
+    let declaration = TrailerDeclaration::parse(&http::HeaderValue::from_static("x-amz-checksum-crc32c"), false)
+        .expect("valid trailer declaration");
+
+    let valid_section = format!("x-padding:{}\r\nx-amz-checksum-crc32c:NhCmhg==\r\n\r\n", "a".repeat(2048));
+    assert!(valid_section.len() > 1024 && valid_section.len() < 4096);
+    let mut valid_body = b"5\r\nhello\r\n0\r\n".to_vec();
+    valid_body.extend_from_slice(valid_section.as_bytes());
+    let mut valid_pipeline = support::unsigned_trailer_pipeline(valid_body, 64, 5, no_observers(), limits)
+        .with_trailer_declaration(declaration.clone())
+        .expect("matching declaration");
+    assert_eq!(drain_pipeline(&mut valid_pipeline, 64).expect("valid trailer fits ceiling"), b"hello");
+
+    let over_section = format!("x-padding:{}\r\nx-amz-checksum-crc32c:NhCmhg==\r\n\r\n", "a".repeat(4096));
+    let mut over_body = b"5\r\nhello\r\n0\r\n".to_vec();
+    over_body.extend_from_slice(over_section.as_bytes());
+    let mut over_pipeline = support::unsigned_trailer_pipeline(over_body, 64, 5, no_observers(), limits)
+        .with_trailer_declaration(declaration)
+        .expect("matching declaration");
+    assert!(drain_pipeline(&mut over_pipeline, 64).is_err());
+    assert_eq!(over_pipeline.reject(), Some(ChunkReject::TrailerSizeExceeded));
+}
+
+/// Positive & negative — `check_overhead_ratio()` does not spuriously fail on chunk 0 while
+/// `decoded_bytes == 0`, yet still rejects high-overhead micro-chunks once payload is decoded.
+#[test]
+fn n_overhead_ratio_guards_chunk_zero_before_payload_is_decoded() {
+    let limits = ChunkLimits::default()
+        .with_min_chunk_size_for_count(1)
+        .with_overhead_ratio_floor_bytes(64)
+        .with_max_overhead_permille(500);
+
+    // Valid single signed chunk (header ~86 bytes > 64-byte floor) with 1024-byte payload.
+    let data = payload(1024);
+    let mut chunker = SignedChunker::new(KEY, SEED);
+    chunker.push(&data);
+    let mut ok_pipeline = signed_pipeline(chunker.finish(), 4096, data.len() as u64, KEY, SEED, no_observers(), limits);
+    assert_eq!(drain_pipeline(&mut ok_pipeline, 1024).expect("chunk 0 must not fail on decoded==0"), data);
+    assert!(ok_pipeline.commit_allowed());
+
+    // Valid empty signed body (declared == 0, terminal header > 64-byte floor).
+    let empty_chunker = SignedChunker::new(KEY, SEED);
+    let mut empty_pipeline = signed_pipeline(empty_chunker.finish(), 4096, 0, KEY, SEED, no_observers(), limits);
+    assert!(
+        drain_pipeline(&mut empty_pipeline, 64)
+            .expect("empty signed body must pass")
+            .is_empty()
+    );
+    assert!(empty_pipeline.commit_allowed());
+
+    // Negative: tiny 1-byte signed chunk still trips overhead ratio once decoded.
+    let mut flood = SignedChunker::new(KEY, SEED);
+    flood.push(b"x").push(b"y");
+    let mut bad_pipeline = signed_pipeline(flood.finish(), 4096, 2, KEY, SEED, no_observers(), limits);
+    assert!(drain_pipeline(&mut bad_pipeline, 64).is_err());
+    assert!(matches!(bad_pipeline.reject(), Some(ChunkReject::OverheadRatioExceeded { .. })));
+}

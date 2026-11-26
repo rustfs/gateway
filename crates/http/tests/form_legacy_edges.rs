@@ -345,3 +345,34 @@ fn a_preamble_or_padding_past_the_prelude_bound_is_refused() {
     let mut reader = FormReader::new(&content_type(), limits).expect("a well-formed content type");
     assert!(matches!(reader.push(&tail), Ok(FormStep::FileReached { .. })));
 }
+
+/// Negative & positive — `FormGrammar::Gateway` respects quoted semicolons in `Content-Type`
+/// parameters (including `boundary="a;b"` and a quoted non-boundary parameter holding `;boundary=`)
+/// and refuses unbalanced quotes or trailing garbage after a closing quote.
+#[test]
+fn n_gateway_boundary_parses_quoted_semicolons_and_rejects_unbalanced_quotes() {
+    for bad_ct in [
+        format!("multipart/form-data; boundary=\"{BOUNDARY}"),
+        format!("multipart/form-data; boundary={BOUNDARY}\""),
+        "multipart/form-data; boundary=\"a;b".to_owned(),
+        format!("multipart/form-data; boundary=\"{BOUNDARY}\"trailing"),
+        "multipart/form-data; boundary=a\"b".to_owned(),
+        format!("multipart/form-data; note=\"unclosed; boundary={BOUNDARY}"),
+        "multipart/form-data; boundary=\"a;b\"; boundary=\"c\"".to_owned(),
+    ] {
+        assert_eq!(
+            FormReader::new(&bad_ct, FormLimits::default()).err(),
+            Some(FormReject::MalformedContentType),
+            "{bad_ct}"
+        );
+    }
+
+    let semi_body = b"--a;b\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\nc\r\n--a;b--\r\n";
+    let parsed = read_framed_under("multipart/form-data; boundary=\"a;b\"", semi_body, semi_body.len(), FormGrammar::Gateway);
+    assert_eq!(parsed.map(|parsed| parsed.file), Ok(b"c".to_vec()));
+
+    let ct_with_note = format!("multipart/form-data; note=\"x;boundary=fake\"; boundary=\"{BOUNDARY}\"");
+    let normal_body = form(&[field("key", "k"), file("a.txt", "c")]);
+    let parsed = read_framed_under(&ct_with_note, &normal_body, normal_body.len(), FormGrammar::Gateway);
+    assert_eq!(parsed.map(|parsed| parsed.file), Ok(b"c".to_vec()));
+}

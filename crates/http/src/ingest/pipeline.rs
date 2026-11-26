@@ -45,6 +45,7 @@
 //!
 //! [`ChunkLimits::max_chunk_size`]: crate::ChunkLimits::max_chunk_size
 
+use core::fmt;
 use core::num::NonZeroU8;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -177,10 +178,16 @@ impl<R> IngestPipeline<R> {
         let meta = usize::from(limits.max_chunk_meta_size());
         let chunk = usize::try_from(limits.max_chunk_size()).unwrap_or(usize::MAX);
         let lookahead = usize::from(policy.lookahead_chunks());
+        let trailer = if framing.declares_trailers() {
+            usize::from(limits.max_trailer_section_bytes()).saturating_add(1)
+        } else {
+            0
+        };
         let window_ceiling = chunk
             .saturating_mul(lookahead)
             .saturating_add(meta.saturating_mul(2))
-            .saturating_add(MIN_CHUNK_META_BYTES);
+            .saturating_add(MIN_CHUNK_META_BYTES)
+            .max(trailer);
         let initial = INITIAL_WINDOW_BYTES.min(window_ceiling).max(meta.saturating_mul(2));
 
         Ok(Self {
@@ -482,6 +489,14 @@ impl<R> IngestPipeline<R> {
         StreamError::upstream(Box::new(reject)).with_bytes_before_error(self.delivered_bytes)
     }
 
+    /// Fails closed when the inner reader breaks the `AsyncPayloadRead` contract by reporting
+    /// `ReadProgress::Filled(0)` on a non-empty buffer.
+    fn fail_zero_fill(&mut self) -> StreamError {
+        self.failed = true;
+        self.commit_allowed = false;
+        StreamError::upstream(Box::new(ZeroFillViolation)).with_bytes_before_error(self.delivered_bytes)
+    }
+
     /// The refusal that ended this body, if one did.
     ///
     /// Named rather than recovered by downcast: the response layer reads
@@ -526,7 +541,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
             return Poll::Ready(Err(self.fail(reject)));
         }
         let filled = self.filled;
-        let Some(tail) = self.window.get_mut(filled..) else {
+        let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
             return Poll::Ready(Err(self.fail(ChunkReject::ChunkMetaTooLong)));
         };
         match Pin::new(&mut self.inner).poll_fill(cx, tail) {
@@ -535,6 +550,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(self.fail_zero_fill())),
             Poll::Ready(Ok(ReadProgress::Filled(n))) => {
                 self.filled = self.filled.saturating_add(n);
                 Poll::Ready(Ok(()))
@@ -550,12 +566,18 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
     fn refill_trailer(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
         if self.filled >= self.window.len() {
             let start = self.decoder.cursor();
-            if start == 0 {
-                return Poll::Ready(Err(self.fail(ChunkReject::TrailerSizeExceeded)));
+            if start > 0 {
+                self.window.copy_within(start..self.filled, 0);
+                self.filled = self.filled.saturating_sub(start);
+                self.decoder.rebase(start);
             }
-            self.window.copy_within(start..self.filled, 0);
-            self.filled = self.filled.saturating_sub(start);
-            self.decoder.rebase(start);
+            if self.filled >= self.window.len() {
+                if self.window.len() >= self.window_ceiling {
+                    return Poll::Ready(Err(self.fail(ChunkReject::TrailerSizeExceeded)));
+                }
+                let next = self.window.len().saturating_mul(2).min(self.window_ceiling);
+                self.window.resize(next, 0);
+            }
         }
         let filled = self.filled;
         let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
@@ -567,6 +589,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(self.fail_zero_fill())),
             Poll::Ready(Ok(ReadProgress::Filled(n))) => {
                 self.filled = self.filled.saturating_add(n);
                 Poll::Ready(Ok(()))
@@ -682,14 +705,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
-            Poll::Ready(Ok(ReadProgress::Filled(0))) if self.framing.declares_trailers() => {
-                Poll::Ready(Err(self.fail(ChunkReject::TruncatedBeforeTrailer)))
-            }
-            Poll::Ready(Ok(ReadProgress::Filled(0))) => {
-                self.finished = true;
-                self.commit_allowed = true;
-                Poll::Ready(Ok(()))
-            }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(self.fail_zero_fill())),
             Poll::Ready(Ok(ReadProgress::Eof { trailers })) if self.framing.declares_trailers() && !trailers.is_empty() => {
                 Poll::Ready(Err(self.fail(ChunkReject::DataAfterTrailer)))
             }
@@ -750,6 +766,17 @@ impl<R: AsyncPayloadRead + Unpin> AsyncPayloadRead for IngestPipeline<R> {
         Some(self.declared.saturating_sub(self.delivered_bytes))
     }
 }
+
+#[derive(Debug)]
+struct ZeroFillViolation;
+
+impl fmt::Display for ZeroFillViolation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("inner payload reader returned Filled(0) for a non-empty buffer")
+    }
+}
+
+impl std::error::Error for ZeroFillViolation {}
 
 #[cfg(test)]
 mod tests;
