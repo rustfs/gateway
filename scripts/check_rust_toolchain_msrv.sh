@@ -30,6 +30,8 @@ import tomllib
 root = Path(sys.argv[1])
 paths = {
     "Cargo.toml": root / "Cargo.toml",
+    "rdma/Cargo.toml": root / "rdma/Cargo.toml",
+    "scripts/build-rdma.sh": root / "scripts/build-rdma.sh",
     "rust-toolchain.toml": root / "rust-toolchain.toml",
     "README.md": root / "README.md",
     "docs/msrv.md": root / "docs/msrv.md",
@@ -41,6 +43,7 @@ for name, path in paths.items():
 
 try:
     cargo = tomllib.loads(paths["Cargo.toml"].read_text())
+    rdma_cargo = tomllib.loads(paths["rdma/Cargo.toml"].read_text())
     toolchain = tomllib.loads(paths["rust-toolchain.toml"].read_text())
 except tomllib.TOMLDecodeError as error:
     raise SystemExit(f"check_rust_toolchain_msrv: invalid TOML: {error}") from error
@@ -48,6 +51,18 @@ except tomllib.TOMLDecodeError as error:
 msrv = cargo.get("workspace", {}).get("package", {}).get("rust-version")
 if not isinstance(msrv, str) or re.fullmatch(r"1\.[0-9]+\.[0-9]+", msrv) is None:
     raise SystemExit("check_rust_toolchain_msrv: workspace rust-version must be an exact stable release")
+
+rdma_msrv = rdma_cargo.get("package", {}).get("rust-version")
+if rdma_msrv != msrv:
+    raise SystemExit(
+        f"check_rust_toolchain_msrv: rdma/Cargo.toml rust-version {rdma_msrv!r} must match workspace rust-version {msrv!r}"
+    )
+
+build_rdma = paths["scripts/build-rdma.sh"].read_text()
+if f"RUSTFS_RDMA_TOOLCHAIN:-{msrv}" not in build_rdma:
+    raise SystemExit(
+        f"check_rust_toolchain_msrv: scripts/build-rdma.sh default toolchain must match workspace rust-version {msrv!r}"
+    )
 
 channel = toolchain.get("toolchain", {}).get("channel")
 if channel != msrv:
@@ -74,9 +89,11 @@ PY
 MSRV="${TOOLCHAIN_CONTRACT%% *}"
 TOOLCHAIN_COMPONENTS="${TOOLCHAIN_CONTRACT#* }"
 
-ruby -ryaml - "$REPO_ROOT/.github/workflows/ci.yml" "$MSRV" "$TOOLCHAIN_COMPONENTS" <<'RUBY'
+ruby -ryaml - "$REPO_ROOT/.github/workflows" "$MSRV" "$TOOLCHAIN_COMPONENTS" <<'RUBY'
 begin
-  workflow = YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], permitted_symbols: [], aliases: false)
+  workflows_dir = ARGV.fetch(0)
+  ci_path = File.join(workflows_dir, "ci.yml")
+  workflow = YAML.safe_load(File.read(ci_path), permitted_classes: [], permitted_symbols: [], aliases: false)
   abort("check_rust_toolchain_msrv: CI workflow must be a mapping") unless workflow.is_a?(Hash)
   jobs = workflow.fetch("jobs")
   abort("check_rust_toolchain_msrv: CI jobs must be a mapping") unless jobs.is_a?(Hash)
@@ -177,6 +194,68 @@ begin
     end
   end
   abort("check_rust_toolchain_msrv: CI installs no rust toolchain at all") if installed.zero?
+
+  # Enforce the exact same no-moving-toolchain and consistent-action-SHA contract across EVERY
+  # workflow under .github/workflows/ (rustfs/gateway#1634).
+  workflow_files = Dir.glob(File.join(workflows_dir, "*.yml")).sort
+  abort("check_rust_toolchain_msrv: no workflow files found under .github/workflows") if workflow_files.empty?
+
+  action_pins = Hash.new { |h, k| h[k] = Hash.new { |h2, k2| h2[k2] = [] } }
+  workflow_files.each do |wf_path|
+    wf_name = File.basename(wf_path)
+    wf = YAML.safe_load(File.read(wf_path), permitted_classes: [], permitted_symbols: [], aliases: false)
+    abort("check_rust_toolchain_msrv: #{wf_name} must be a mapping") unless wf.is_a?(Hash)
+    wf_env = wf["env"].is_a?(Hash) ? wf["env"] : {}
+    wf_jobs = wf["jobs"]
+    abort("check_rust_toolchain_msrv: #{wf_name} jobs must be a mapping") unless wf_jobs.is_a?(Hash)
+
+    wf_jobs.each do |job_id, job|
+      next unless job.is_a?(Hash)
+      steps = job["steps"]
+      next unless steps.is_a?(Array)
+      steps.each do |step|
+        next unless step.is_a?(Hash)
+        uses = step["uses"]
+        if uses.is_a?(String)
+          m = uses.match(%r{\A([^@\s]+)@([0-9a-f]{40})\z})
+          unless m
+            abort("check_rust_toolchain_msrv: #{wf_name} job #{job_id} uses unpinned action #{uses.inspect}")
+          end
+          action_ref, sha = m[1], m[2]
+          repo = action_ref.split("/", 3)[0, 2].join("/")
+          action_pins[repo][sha] << "#{wf_name}:#{job_id}"
+        end
+
+        next if wf_name == "ci.yml"
+        next unless uses.is_a?(String) && uses.match?(%r{\Adtolnay/rust-toolchain@})
+
+        inputs = step["with"]
+        unless inputs.is_a?(Hash) && inputs.key?("toolchain")
+          abort("check_rust_toolchain_msrv: #{wf_name} job #{job_id} installs a rust toolchain without " \
+                "naming one, so it takes the action's moving `stable` default")
+        end
+        requested = inputs.fetch("toolchain").to_s
+        if (m_env = requested.match(/\A\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}\z/))
+          env_key = m_env[1]
+          requested = wf_env.fetch(env_key).to_s
+        end
+        if wf_name == "fuzz-nightly.yml" && job_id == "fuzz"
+          unless requested.match?(/\Anightly-[0-9]{4}-[0-9]{2}-[0-9]{2}\z/)
+            abort("check_rust_toolchain_msrv: #{wf_name} job #{job_id} must pin a dated nightly, found #{requested.inspect}")
+          end
+        elsif requested != reference
+          abort("check_rust_toolchain_msrv: #{wf_name} job #{job_id} installs #{requested.inspect} instead " \
+                "of the pinned #{reference.inspect} in rust-toolchain.toml")
+        end
+      end
+    end
+  end
+
+  action_pins.each do |repo, sha_map|
+    next if sha_map.length <= 1
+    details = sha_map.map { |sha, locs| "#{sha[0, 12]} (#{locs.first})" }.join(", ")
+    abort("check_rust_toolchain_msrv: GitHub Action #{repo} pins drifted across workflows: #{details}")
+  end
 rescue KeyError, Psych::Exception => error
   abort("check_rust_toolchain_msrv: invalid CI workflow: #{error.message}")
 end

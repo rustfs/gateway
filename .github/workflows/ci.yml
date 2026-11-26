@@ -179,6 +179,11 @@ jobs:
       # pinned SDK's, so advisories are the one section judged here (rustfs/gateway#1073).
       - name: Dependency advisories of the aws-sdk-rust driver
         run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
+      # The excluded fuzz/ workspace maintains its own lock file (fuzz/Cargo.lock), which the
+      # root workspace check above never inspects (rustfs/gateway#1634). Judge it against the
+      # same deny.toml across all four sections.
+      - name: Dependency policy of the fuzz workspace
+        run: cargo deny --locked --manifest-path fuzz/Cargo.toml --config deny.toml check advisories bans licenses sources
       # Architecture guards. A guard that does not run in CI is decoration.
       #
       # A guard that declares REQUIRES-BUILD compiles the workspace, so it runs in
@@ -476,7 +481,8 @@ jobs:
         run: bash scripts/ci_install_host_tools.sh
       - name: External payload tests (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "external payload tests" cargo test --package rustfs-gateway --package rustfs-gateway-fs --features rustfs-gateway/external-payload,rustfs-gateway-fs/external-payload external_payload
+          scripts/ci_budget.sh 420 "external payload tests" cargo test --package rustfs-gateway --package rustfs-gateway-fs --features rustfs-gateway/external-payload,rustfs-gateway-fs/external-payload external_payload
+          scripts/ci_budget.sh 90 "rdma manifest compile check" bash scripts/verify_rdma_manifest.sh
 
   # Transport parity runs the whole corpus twice (once per production driver) and compares.
   # On one runner it sat at 413-471s of a 480s budget for nine consecutive main runs and hit

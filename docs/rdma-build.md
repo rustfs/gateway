@@ -38,6 +38,11 @@ source vendor/rustfs-ucx/scripts/build-env.sh
 cargo +1.97.1 build --manifest-path rdma/Cargo.toml --features rdma --release -j 2
 ```
 
+In CI, `scripts/verify_rdma_manifest.sh` compiles `rdma/Cargo.toml` (`--features rdma --lib`) against
+a temporary stand-in `vendor/rustfs-ucx` crate inside `external-payload-tests`, proving that the
+manifest MSRV, feature wiring, and public `external-payload` ports stay buildable on the workspace
+toolchain without contacting the private repository.
+
 This produces the `rustfs-gateway-rdma` integration library for a host to compose
 with the public gateway. Its implementation source comes from the private
 checkout at the pinned commit. `RUSTFS_RDMA_TOOLCHAIN` selects a compatible installed toolchain

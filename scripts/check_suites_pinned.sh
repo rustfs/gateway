@@ -144,7 +144,8 @@ for path in suite_workflows:
 s3tests_workflow = workflow_dir / "e2e-s3tests.yml"
 s3tests_runner = root / "ci/s3tests/run.sh"
 sut_library = root / "ci/lib/sut.sh"
-for required in (s3tests_workflow, s3tests_runner, sut_library):
+toolchain_file = root / "rust-toolchain.toml"
+for required in (s3tests_workflow, s3tests_runner, sut_library, toolchain_file):
     if not required.is_file():
         print(
             f"check_suites_pinned: required input is missing: {required.relative_to(root)}",
@@ -152,11 +153,24 @@ for required in (s3tests_workflow, s3tests_runner, sut_library):
         )
         raise SystemExit(1)
 
+try:
+    import tomllib
+    pinned_toolchain = tomllib.loads(toolchain_file.read_text(encoding="utf-8")).get("toolchain", {}).get("channel")
+except Exception as error:
+    print(f"check_suites_pinned: failed to read rust-toolchain.toml: {error}", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(pinned_toolchain, str) or re.fullmatch(r"1\.[0-9]+\.[0-9]+", pinned_toolchain) is None:
+    print(
+        f"check_suites_pinned: rust-toolchain.toml must pin an exact stable release, found {pinned_toolchain!r}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 def require_release_sut_before(relative: str, workflow_text: str, runner: str) -> None:
-    """The workflow installs pinned stable Rust and builds the release SUT before the runner."""
+    """The workflow installs the pinned repository Rust toolchain and builds the release SUT before the runner."""
     toolchain = re.search(
         r"^(?P<indent>[ \t]*)uses:[ \t]*(?:dtolnay/rust-toolchain|actions-rust-lang/setup-rust-toolchain)@"
-        r"[0-9a-f]{40}[ \t]*$",
+        r"[0-9a-f]{40}[ \t]*(?:#[^\n]*)?$",
         workflow_text,
         re.MULTILINE,
     )
@@ -174,11 +188,13 @@ def require_release_sut_before(relative: str, workflow_text: str, runner: str) -
         # Bind the input to this action, not a later step or a comment containing the selector.
         indent = re.escape(toolchain.group("indent"))
         selection = re.match(
-            rf"\n{indent}with:[ \t]*\n{indent}  toolchain:[ \t]*stable[ \t]*(?:\n|$)",
+            rf"\n{indent}with:[ \t]*\n{indent}  toolchain:[ \t]*{re.escape(pinned_toolchain)}[ \t]*(?:#[^\n]*)?(?:\n|$)",
             workflow_text[toolchain.end():],
         )
         if selection is None:
-            failures.append(f"{relative} must set with.toolchain to stable on the pinned Rust action step")
+            failures.append(
+                f"{relative} must set with.toolchain to the pinned {pinned_toolchain} on the pinned Rust action step"
+            )
     if release_build is None:
         failures.append(f"{relative} must run `cargo build --release -p rustfs-gateway-compat-sut`")
     if suite_run_match is None:

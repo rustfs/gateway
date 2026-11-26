@@ -152,6 +152,19 @@ require_equal(static_steps[driver_deny_at].keys, ["name", "run"],
               "static driver cargo-deny step may not alter execution")
 abort("ERROR: static must install cargo-deny before the driver's advisories") unless driver_deny_at > deny_at
 
+# The excluded fuzz/ workspace locks its own dependency graph (fuzz/Cargo.lock), which the root
+# workspace command above never reads (rustfs/gateway#1634). Dropping this step would leave the
+# fuzz lock ungated while CI stays green.
+fuzz_deny_command = "cargo deny --locked --manifest-path fuzz/Cargo.toml " \
+                    "--config deny.toml check advisories bans licenses sources"
+require_equal(all_runs.count(fuzz_deny_command), 1,
+              "#{fuzz_deny_command} must have one authoritative CI execution")
+fuzz_deny_at = static_steps.index { |step| step["run"] == fuzz_deny_command }
+abort("ERROR: static must run #{fuzz_deny_command}") if fuzz_deny_at.nil?
+require_equal(static_steps[fuzz_deny_at].keys, ["name", "run"],
+              "static fuzz cargo-deny step may not alter execution")
+abort("ERROR: static must install cargo-deny before the fuzz workspace check") unless fuzz_deny_at > deny_at
+
 clippy_steps = jobs.fetch("clippy").fetch("steps")
 require_equal(clippy_steps.map(&:keys),
               [["uses"], ["uses", "with"], ["uses"], ["name", "run"], ["run"]],
