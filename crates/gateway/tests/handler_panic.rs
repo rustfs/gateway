@@ -418,3 +418,113 @@ async fn n_custom_signature_verifier_panic_is_500_fail_closed() {
     let second = exchange(&service, custom_req()).await;
     assert_eq!(second.0, http::StatusCode::FORBIDDEN, "{}", second.1);
 }
+
+/// Negative — synchronous and asynchronous panics inside `Authenticator::authenticate_sigv2` and
+/// `Authenticator::authenticate` on an unrouted RustFS object-path `POST /bucket/key` multipart
+/// form (`service/refused_post.rs`) must be contained as `500 InternalError` without unwinding or
+/// leaking panic text, and subsequent requests must recover.
+#[tokio::test]
+async fn n_unrouted_object_post_form_authenticator_sigv4_and_sigv2_panics_are_500_fail_closed() {
+    use rustfs_gateway::sig::{AuthError, Verdict};
+    use rustfs_gateway::{Authentication, AuthenticationOutcome, Authenticator, BoxFuture, SigV2Authentication, Unavailable};
+
+    struct PanickingFormAuthenticator {
+        v4_calls: AtomicUsize,
+        v2_calls: AtomicUsize,
+    }
+
+    impl Authenticator for PanickingFormAuthenticator {
+        fn authenticate<'a>(
+            &'a self,
+            _request: &'a Authentication<'a>,
+        ) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
+            match self.v4_calls.fetch_add(1, Ordering::SeqCst) {
+                0 => panic!("unrouted form sigv4 sync panic fixture"),
+                1 => Box::pin(async { panic!("unrouted form sigv4 async panic fixture") }),
+                _ => Box::pin(async { Ok(AuthenticationOutcome::ordinary(Verdict::reject(AuthError::AccessDenied))) }),
+            }
+        }
+
+        fn authenticate_sigv2<'a>(
+            &'a self,
+            _request: &'a SigV2Authentication<'a>,
+        ) -> BoxFuture<'a, Result<AuthenticationOutcome, Unavailable>> {
+            match self.v2_calls.fetch_add(1, Ordering::SeqCst) {
+                0 => panic!("unrouted form sigv2 sync panic fixture"),
+                1 => Box::pin(async { panic!("unrouted form sigv2 async panic fixture") }),
+                _ => Box::pin(async { Ok(AuthenticationOutcome::ordinary(Verdict::reject(AuthError::AccessDenied))) }),
+            }
+        }
+    }
+
+    let reached = Arc::new(AtomicUsize::new(0));
+    let service = support::wired_at_signed_time()
+        .security_floor(
+            rustfs_gateway::SecurityFloor::new()
+                .enable_sigv2_presigned_compatibility()
+                .recognize_signatures_as_legacy_rustfs(),
+        )
+        .select_operations_as_legacy_rustfs()
+        .legacy_rustfs_post_forms()
+        .register::<Ping, _>(Arc::new(support::CountingBackend::new(&reached)))
+        .dialect(&crate::support::ping_dialect())
+        .authenticator(PanickingFormAuthenticator {
+            v4_calls: AtomicUsize::new(0),
+            v2_calls: AtomicUsize::new(0),
+        })
+        .build()
+        .expect("complete legacy-form assembly");
+
+    let build_form_request = |fields: &[(&str, &str)]| {
+        let mut body = String::new();
+        for (name, value) in fields {
+            body.push_str(&format!("--form\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"));
+        }
+        body.push_str("--form\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n\r\nhello\r\n--form--\r\n");
+        let bytes = bytes::Bytes::from(body);
+        http::Request::builder()
+            .method(http::Method::POST)
+            .uri("/bkt/obj")
+            .header(http::header::HOST, "s3.example.test")
+            .header(http::header::CONTENT_TYPE, "multipart/form-data; boundary=form")
+            .header(http::header::CONTENT_LENGTH, bytes.len())
+            .body(bytes)
+            .expect("valid multipart request")
+    };
+
+    let sigv4_fields = [
+        ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
+        ("x-amz-credential", "AKIDEXAMPLE/20260102/us-east-1/s3/aws4_request"),
+        ("x-amz-date", "20260102T030405Z"),
+        (
+            "policy",
+            "eyJleHBpcmF0aW9uIjogIjIwOTktMDEtMDFUMDA6MDA6MDBaIiwgImNvbmRpdGlvbnMiOiBbeyJ4LWFtei1kYXRlIjogIjIwMjYwMTAyVDAzMDQwNVoifSwgeyJ4LWFtei1jcmVkZW50aWFsIjogIkFLSURFWEFNUExFLzIwMjYwMTAyL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSwgeyJ4LWFtei1hbGdvcml0aG0iOiAiQVdTNC1ITUFDLVNIQTI1NiJ9XX0=",
+        ),
+        ("x-amz-signature", "0000000000000000000000000000000000000000000000000000000000000000"),
+    ];
+    let sigv2_fields = [
+        ("key", "upload"),
+        ("AWSAccessKeyId", "AKIDEXAMPLE"),
+        ("policy", "eyJleHBpcmF0aW9uIjogIjIwOTktMDEtMDFUMDA6MDA6MDBaIiwgImNvbmRpdGlvbnMiOiBbXX0="),
+        ("signature", "2ZkeVZV3N4SN7bWn9jlgrNF9b5A="),
+    ];
+
+    for label in ["unrouted-v4-sync", "unrouted-v4-async"] {
+        let resp = exchange(&service, build_form_request(&sigv4_fields)).await;
+        assert_eq!(resp.0, http::StatusCode::INTERNAL_SERVER_ERROR, "{label}: {}", resp.1);
+        assert!(resp.1.contains("<Code>InternalError</Code>"), "{label}: {}", resp.1);
+        assert!(!resp.1.contains("panic fixture"), "{label}: {}", resp.1);
+    }
+    let after_v4 = exchange(&service, build_form_request(&sigv4_fields)).await;
+    assert_eq!(after_v4.0, http::StatusCode::FORBIDDEN, "v4 recovery: {}", after_v4.1);
+
+    for label in ["unrouted-v2-sync", "unrouted-v2-async"] {
+        let resp = exchange(&service, build_form_request(&sigv2_fields)).await;
+        assert_eq!(resp.0, http::StatusCode::INTERNAL_SERVER_ERROR, "{label}: {}", resp.1);
+        assert!(resp.1.contains("<Code>InternalError</Code>"), "{label}: {}", resp.1);
+        assert!(!resp.1.contains("panic fixture"), "{label}: {}", resp.1);
+    }
+    let after_v2 = exchange(&service, build_form_request(&sigv2_fields)).await;
+    assert_eq!(after_v2.0, http::StatusCode::FORBIDDEN, "v2 recovery: {}", after_v2.1);
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+}

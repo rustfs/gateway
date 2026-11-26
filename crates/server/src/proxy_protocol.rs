@@ -58,16 +58,7 @@ impl IpCidr {
     pub fn new(ip: IpAddr, prefix: u8) -> Result<Self, ConfigError> {
         match ip {
             IpAddr::V4(v4) => Self::v4(v4, prefix),
-            IpAddr::V6(v6) => {
-                if let Some(mapped) = v6.to_ipv4_mapped() {
-                    if !(96..=128).contains(&prefix) {
-                        return Err(ConfigError::InvalidCidrPrefix { prefix, max: 128 });
-                    }
-                    Self::v4(mapped, prefix - 96)
-                } else {
-                    Self::v6(v6, prefix)
-                }
-            }
+            IpAddr::V6(v6) => Self::v6(v6, prefix),
         }
     }
 
@@ -94,10 +85,20 @@ impl IpCidr {
 
     /// Builds a validated IPv6 CIDR range (`0..=128`).
     ///
+    /// IPv4-mapped IPv6 addresses (`::ffff:a.b.c.d`) are canonicalized to IPv4 with prefix
+    /// `prefix - 96`, rejecting prefixes below `96`.
+    ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::InvalidCidrPrefix`] when `prefix > 128`.
+    /// Returns [`ConfigError::InvalidCidrPrefix`] when `prefix > 128`, or when `ip` is an
+    /// IPv4-mapped IPv6 address and `prefix < 96`.
     pub fn v6(ip: Ipv6Addr, prefix: u8) -> Result<Self, ConfigError> {
+        if let Some(mapped) = ip.to_ipv4_mapped() {
+            if !(96..=128).contains(&prefix) {
+                return Err(ConfigError::InvalidCidrPrefix { prefix, max: 128 });
+            }
+            return Self::v4(mapped, prefix - 96);
+        }
         if prefix > 128 {
             return Err(ConfigError::InvalidCidrPrefix { prefix, max: 128 });
         }
@@ -442,6 +443,37 @@ mod tests {
         assert!(cidr.contains(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 200))));
         assert!(cidr.contains("::ffff:10.1.2.99".parse().expect("mapped ip")));
         assert!(!cidr.contains(IpAddr::V4(Ipv4Addr::new(10, 1, 3, 1))));
+    }
+
+    #[test]
+    fn n_ip_cidr_v6_canonicalizes_ipv4_mapped_addresses_and_rejects_short_prefixes() {
+        let mapped: Ipv6Addr = "::ffff:10.1.2.3".parse().expect("valid IPv4-mapped IPv6");
+        for bad_prefix in [0_u8, 32, 95, 129] {
+            assert_eq!(
+                IpCidr::v6(mapped, bad_prefix),
+                Err(ConfigError::InvalidCidrPrefix {
+                    prefix: bad_prefix,
+                    max: 128,
+                }),
+                "IpCidr::v6 must reject prefix {bad_prefix} on IPv4-mapped IPv6"
+            );
+        }
+
+        let cidr = IpCidr::v6(mapped, 120).expect("valid IPv4-mapped /120");
+        assert_eq!(cidr, IpCidr::v4(Ipv4Addr::new(10, 1, 2, 0), 24).expect("valid v4"));
+        assert!(cidr.contains(IpAddr::V6(mapped)));
+        assert!(cidr.contains(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 99))));
+        assert!(cidr.contains("::ffff:10.1.2.99".parse().expect("mapped peer")));
+        assert!(!cidr.contains(IpAddr::V4(Ipv4Addr::new(10, 1, 3, 1))));
+        assert!(!cidr.contains("::ffff:10.1.3.1".parse().expect("outside mapped peer")));
+
+        let host_cidr = IpCidr::v6(mapped, 128).expect("valid IPv4-mapped /128");
+        assert!(host_cidr.contains(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))));
+        assert!(!host_cidr.contains(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 4))));
+
+        let any_v4 = IpCidr::v6("::ffff:0.0.0.0".parse().expect("mapped zero"), 96).expect("valid /96");
+        assert!(any_v4.contains(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7))));
+        assert!(!any_v4.contains(IpAddr::V6(Ipv6Addr::LOCALHOST)));
     }
 
     #[tokio::test]
