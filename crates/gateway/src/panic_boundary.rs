@@ -34,17 +34,30 @@ pub(crate) async fn catch_boxed_future<'a, T, F>(build: F) -> Result<T, ()>
 where
     F: FnOnce() -> BoxFuture<'a, T>,
 {
-    let Ok(mut future) = std::panic::catch_unwind(AssertUnwindSafe(build)) else {
-        return Err(());
+    let mut future = match std::panic::catch_unwind(AssertUnwindSafe(build)) {
+        Ok(future) => future,
+        Err(payload) => {
+            drop_payload_safely(payload);
+            return Err(());
+        }
     };
     poll_fn(
         move |context| match std::panic::catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(context))) {
             Ok(Poll::Ready(value)) => Poll::Ready(Ok(value)),
             Ok(Poll::Pending) => Poll::Pending,
-            Err(_) => Poll::Ready(Err(())),
+            Err(payload) => {
+                drop_payload_safely(payload);
+                Poll::Ready(Err(()))
+            }
         },
     )
     .await
+}
+
+fn drop_payload_safely(payload: Box<dyn std::any::Any + Send>) {
+    if let Err(secondary) = std::panic::catch_unwind(AssertUnwindSafe(move || drop(payload))) {
+        std::mem::forget(secondary);
+    }
 }
 
 /// Runs one report callback so that a panic in it cannot reach the answer it reports on.

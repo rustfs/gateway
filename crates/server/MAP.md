@@ -20,6 +20,8 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/accept_error.rs` | Classifies a failed accept as connection-local, a resource shortage to wait out, or a broken listener | The listener exits on a transient accept error, or keeps running on a broken socket |
 | `src/driver.rs` | Accepted-connection ownership, driver selection and the default Hyper driver | Adding a connection driver or changing who owns a socket |
 | `src/connection_service.rs` | Transport-independent request capacity, context, panic and shutdown lifecycle | A driver can bypass generic request contracts |
+| `src/connection_service/cancellation_capacity_tests.rs` | Unit controls for detached peer-loss cleanup, capacity handoff and force-abort accounting | Request capacity or cleanup accounting regresses |
+| `src/connection_service/panic_isolation_tests.rs` | Unit controls for `poll_ready` and response `Body` panic containment | Panics in `poll_ready` or `Body::poll_frame` unwind or leak capacity |
 | `src/connection_service/receipt_lifetime_tests.rs` | Detached cleanup retains request ownership while transport receipts settle independently. | Cancellation changes receipt or request lifetimes. |
 | `src/send_deadline.rs` | Runs each HTTP/2 stream under the send-progress deadline that releases a permit its peer starves of capacity | A zero-window HTTP/2 peer holds request permits, or a slow producer is reset |
 | `src/request_capacity.rs` | Global request permits, accept-loop capacity notification and request cancellation | H1/H2 exceed the shared request ceiling, listener acceptance fails to pause or peer loss does not reach service cleanup |

@@ -138,10 +138,17 @@ impl AssemblyUpdate {
         self
     }
 
-    pub(crate) fn into_snapshot(self) -> Result<AssemblySnapshot, crate::AssemblyError> {
-        let builder = self.builder;
+    pub(crate) fn into_snapshot_with_selection(
+        self,
+        selection: rustfs_gateway_core::route::Selection,
+        legacy_forms: bool,
+        monomorphic: bool,
+    ) -> Result<AssemblySnapshot, crate::AssemblyError> {
+        let mut builder = self.builder;
         let authorizer = builder.validate_assembly()?;
+        builder.router = builder.router.selecting(selection);
         let routing = super::assemble_routing(builder.router, builder.pending, builder.op_layers)?;
+        super::post_object_handler::validate_staged_post(&routing, legacy_forms, monomorphic)?;
         if builder.dangerous_allow_all_authorizer {
             crate::logging::allow_all_authorizer_assembled();
         }

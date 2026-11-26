@@ -627,3 +627,52 @@ async fn a_replacement_published_at_the_routed_seam_cannot_reach_later_stages() 
     assert_eq!(ping(&service).await, (StatusCode::OK, "<Ping>pong</Ping>".to_owned()));
     assert_eq!(take(&events), expected("new"));
 }
+
+/// Negative — `replace_assembly` on a service built with `select_operations_as_legacy_rustfs`
+/// must preserve `Selection::RustfsLegacy` rather than silently downgrading to `Selection::Table`.
+#[tokio::test]
+async fn n_replace_assembly_preserves_rustfs_legacy_selection() {
+    use rustfs_gateway::dto::{GetBucketVersioning, GetBucketVersioningOutput};
+    use rustfs_gateway::{Handler, HandlerContext, Resp, allow_when};
+
+    struct VersioningHandler;
+
+    impl Handler<GetBucketVersioning> for VersioningHandler {
+        async fn call(&self, _request: Req<GetBucketVersioning>) -> HandlerResult<GetBucketVersioning> {
+            Ok(Resp::new(GetBucketVersioningOutput::default()))
+        }
+
+        async fn call_with_context(
+            &self,
+            request: Req<GetBucketVersioning>,
+            _context: HandlerContext,
+        ) -> HandlerResult<GetBucketVersioning> {
+            self.call(request).await
+        }
+    }
+
+    let service = support::wired_at_signed_time()
+        .select_operations_as_legacy_rustfs()
+        .register::<GetBucketVersioning, _>(Arc::new(VersioningHandler))
+        .build()
+        .expect("legacy-selection service builds");
+
+    // `GET /my-bucket?x-id=GetBucketVersioning` routes to GetBucketVersioning ONLY under
+    // `Selection::RustfsLegacy`; under `Selection::Table` `x-id` is ignored and routes to
+    // ListObjects (501 NotImplemented because ListObjects is not registered).
+    let before = exchange(&service, support::signed(Method::GET, "/my-bucket?x-id=GetBucketVersioning")).await;
+    assert_eq!(before.0, StatusCode::OK, "before replace_assembly: {}", before.1);
+
+    let update = AssemblyUpdate::new()
+        .register::<GetBucketVersioning, _>(Arc::new(VersioningHandler))
+        .authorizer(allow_when(|_| true));
+    service.replace_assembly(update).expect("replace_assembly succeeds");
+
+    let after = exchange(&service, support::signed(Method::GET, "/my-bucket?x-id=GetBucketVersioning")).await;
+    assert_eq!(
+        after.0,
+        StatusCode::OK,
+        "replace_assembly must preserve Selection::RustfsLegacy instead of downgrading to Selection::Table: {}",
+        after.1
+    );
+}

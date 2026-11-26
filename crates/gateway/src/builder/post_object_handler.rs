@@ -46,7 +46,7 @@ impl ServiceBuilder {
     }
 }
 
-pub(super) fn validate_staged_post(
+pub(crate) fn validate_staged_post(
     routing: &RoutingSnapshot,
     legacy_forms: bool,
     monomorphic: bool,

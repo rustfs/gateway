@@ -313,32 +313,43 @@ where
     })
 }
 
+pub(crate) enum PolicySnapshotOutcome {
+    Ready(Result<PolicySnapshot, PolicyError>),
+    TimedOut,
+    Panicked,
+}
+
 pub(crate) async fn policy_snapshot_with_timeout<'a>(
     source: &'a dyn PolicySource,
     identity: Option<&'a rustfs_gateway_sig::Identity>,
     timeout: Duration,
-) -> Option<Result<PolicySnapshot, PolicyError>> {
-    let mut snapshot = source.snapshot(identity);
+) -> PolicySnapshotOutcome {
+    let Ok(mut snapshot) = crate::panic_boundary::contain_decision(|| source.snapshot(identity)) else {
+        return PolicySnapshotOutcome::Panicked;
+    };
     let mut deadline = pin!(wait_without_runtime(timeout));
     let mut first_poll = true;
     poll_fn(move |context| {
         if first_poll {
             first_poll = false;
-            if let Poll::Ready(result) = snapshot.as_mut().poll(context) {
-                return Poll::Ready(Some(result));
+            match crate::panic_boundary::contain_decision(|| snapshot.as_mut().poll(context)) {
+                Ok(Poll::Ready(result)) => return Poll::Ready(PolicySnapshotOutcome::Ready(result)),
+                Ok(Poll::Pending) => {}
+                Err(()) => return Poll::Ready(PolicySnapshotOutcome::Panicked),
             }
             if deadline.as_mut().poll(context).is_ready() {
-                return Poll::Ready(None);
+                return Poll::Ready(PolicySnapshotOutcome::TimedOut);
             }
             return Poll::Pending;
         }
         if deadline.as_mut().poll(context).is_ready() {
-            return Poll::Ready(None);
+            return Poll::Ready(PolicySnapshotOutcome::TimedOut);
         }
-        if let Poll::Ready(result) = snapshot.as_mut().poll(context) {
-            return Poll::Ready(Some(result));
+        match crate::panic_boundary::contain_decision(|| snapshot.as_mut().poll(context)) {
+            Ok(Poll::Ready(result)) => Poll::Ready(PolicySnapshotOutcome::Ready(result)),
+            Ok(Poll::Pending) => Poll::Pending,
+            Err(()) => Poll::Ready(PolicySnapshotOutcome::Panicked),
         }
-        Poll::Pending
     })
     .await
 }
