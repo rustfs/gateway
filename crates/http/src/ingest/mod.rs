@@ -62,7 +62,7 @@ mod signer_ecdsa;
 mod trailer;
 
 pub use crate::ingest::decoder::MIN_CHUNK_META_BYTES;
-pub use crate::ingest::pipeline::{IngestPipeline, IngestPolicy};
+pub use crate::ingest::pipeline::IngestPipeline;
 pub use crate::ingest::reject::{ChunkReject, ModeConfusion};
 pub use crate::ingest::signer::{
     ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, MAX_SCOPE_LINE_BYTES, ScopeId, SigningKeyCache,
@@ -70,8 +70,53 @@ pub use crate::ingest::signer::{
 pub use crate::ingest::signer_ecdsa::{ChunkVerifyingKey, EcdsaChunkSeed};
 pub use crate::ingest::trailer::{MAX_TRAILER_SECTION_BYTES, TrailerDeclaration};
 
+use core::num::NonZeroU8;
+
 use crate::framing::Framing;
 use crate::limits::ChunkLimits;
+
+/// When a decoded chunk becomes visible to the consumer.
+///
+/// One variant, on purpose. The alternative — deliver first and abort the object afterwards — is
+/// defensible for a plain `PutObject`, whose commit happens after the body, and indefensible for
+/// `UploadPart`, where the part must not reach storage at all. A policy with an opt-out variant
+/// would be selected by somebody, once, for a benchmark; a policy with no such variant cannot be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IngestPolicy {
+    /// Hold each chunk until its signature verifies, then deliver it.
+    VerifyBeforeDeliver {
+        /// How many chunks may be resident but undelivered. One: the chunk being verified.
+        ///
+        /// It is a [`NonZeroU8`] because zero would mean "deliver before verifying", which is the
+        /// state this enum exists to make unrepresentable.
+        lookahead_chunks: NonZeroU8,
+    },
+}
+
+impl IngestPolicy {
+    /// The only sane lookahead: the chunk currently being verified.
+    #[must_use]
+    pub fn verify_before_deliver() -> Self {
+        Self::VerifyBeforeDeliver {
+            // One is not zero.
+            lookahead_chunks: NonZeroU8::MIN,
+        }
+    }
+
+    /// How many chunks may be resident but not yet delivered.
+    #[must_use]
+    pub fn lookahead_chunks(&self) -> u8 {
+        match self {
+            Self::VerifyBeforeDeliver { lookahead_chunks } => lookahead_chunks.get(),
+        }
+    }
+}
+
+impl Default for IngestPolicy {
+    fn default() -> Self {
+        Self::verify_before_deliver()
+    }
+}
 
 /// The signature-derived facts the ingest layer is allowed to read about a payload.
 ///

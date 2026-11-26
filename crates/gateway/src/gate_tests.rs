@@ -242,7 +242,6 @@ async fn c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling() {
         &headers,
         &framing,
         &crate::ext::ChunkSink::new(),
-        None,
         rustfs_gateway_http::ChunkLimits::default(),
     )
     .expect("gzip metadata is not a framing error");
@@ -383,7 +382,6 @@ fn unsigned_ingest(decoded: u64, wire: u64) -> crate::chunked::ChunkIngest {
         &headers,
         &framing,
         &crate::ext::ChunkSink::new(),
-        None,
         rustfs_gateway_http::ChunkLimits::default(),
     )
     .expect("head-level checks pass")

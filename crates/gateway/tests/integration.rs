@@ -33,6 +33,8 @@ mod assembly;
 mod assembly_order;
 #[path = "assembly_snapshot.rs"]
 mod assembly_snapshot;
+#[path = "auth_failure_floor.rs"]
+mod auth_failure_floor;
 #[path = "authz_consumption.rs"]
 mod authz_consumption;
 #[path = "authz_context_facts.rs"]
@@ -211,6 +213,8 @@ mod raw_path_fallback;
 mod refusal_order_guards;
 #[path = "reject_rendering.rs"]
 mod reject_rendering;
+#[path = "replay_nonce_store.rs"]
+mod replay_nonce_store;
 #[path = "replica_put.rs"]
 mod replica_put;
 #[path = "replication_token.rs"]

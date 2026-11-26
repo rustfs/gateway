@@ -564,6 +564,14 @@ fn read_attributes(
             },
             None => None,
         };
+        // XML Namespaces 1.0 §6.3 forbids two attributes on the same element whose resolved
+        // `(namespace URI, local name)` pairs match, even when written with distinct prefixes.
+        if out
+            .iter()
+            .any(|existing: &XmlAttribute| existing.name == name && existing.namespace == namespace)
+        {
+            return Err(XmlError::Malformed);
+        }
         out.push(XmlAttribute {
             name,
             namespace,

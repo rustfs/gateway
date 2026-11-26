@@ -273,6 +273,8 @@ pub(crate) enum Extension {
     BearerVerifier,
     /// The host's header token verifier (ADR-0054). Its panic is a refusal, answered `403`.
     HeaderTokenVerifier,
+    /// The host's presigned-URL replay nonce store (H7). Its panic fails closed as `403`.
+    ReplayNonceStore,
 }
 
 impl Extension {
@@ -282,6 +284,7 @@ impl Extension {
             Self::Authorizer => "authorizer",
             Self::BearerVerifier => "bearer_verifier",
             Self::HeaderTokenVerifier => "header_token_verifier",
+            Self::ReplayNonceStore => "replay_nonce_store",
         }
     }
 
@@ -289,7 +292,7 @@ impl Extension {
     const fn answered(self) -> u16 {
         match self {
             Self::Handler | Self::Authorizer => 500,
-            Self::BearerVerifier | Self::HeaderTokenVerifier => 403,
+            Self::BearerVerifier | Self::HeaderTokenVerifier | Self::ReplayNonceStore => 403,
         }
     }
 
@@ -298,11 +301,13 @@ impl Extension {
         static AUTHORIZER: Throttle = Throttle::new();
         static BEARER_VERIFIER: Throttle = Throttle::new();
         static HEADER_TOKEN_VERIFIER: Throttle = Throttle::new();
+        static REPLAY_NONCE_STORE: Throttle = Throttle::new();
         match self {
             Self::Handler => &HANDLER,
             Self::Authorizer => &AUTHORIZER,
             Self::BearerVerifier => &BEARER_VERIFIER,
             Self::HeaderTokenVerifier => &HEADER_TOKEN_VERIFIER,
+            Self::ReplayNonceStore => &REPLAY_NONCE_STORE,
         }
     }
 }

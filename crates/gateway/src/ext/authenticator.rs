@@ -425,6 +425,8 @@ pub struct SigV4Authenticator {
     pub(super) signed_headers: super::authenticator_switches::SignedHeaderPolicy,
     /// Whether a provider fault is answered [`Unavailable`], not the closed 403 (#1585).
     pub(super) store_faults_unavailable: bool,
+    /// Optional single-use presigned-URL replay protection store (H7).
+    pub(super) replay_nonce_store: Option<Arc<dyn rustfs_gateway_sig::ReplayNonceStore + Send + Sync>>,
 }
 
 /// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
@@ -458,6 +460,7 @@ impl SigV4Authenticator {
             double_encoded_prefixes: &[],
             signed_headers: super::authenticator_switches::SignedHeaderPolicy::default(),
             store_faults_unavailable: false,
+            replay_nonce_store: None,
         }
     }
 
@@ -549,7 +552,7 @@ impl SigV4Authenticator {
             match &presented {
                 Presented::Form(policy) => (policy.verify(&key).ok(), None),
                 Presented::UnroutedForm(policy) => (policy.verify(&key).ok(), None),
-                Presented::Header(_) | Presented::Query(_) => {
+                Presented::Header(_, _) | Presented::Query(_, _) => {
                     let (signed_headers, signature) =
                         presented.canonical_parts().ok_or(AuthError::AuthorizationHeaderMalformed)?;
                     let legacy_answer = |error: AuthError| {
@@ -624,6 +627,18 @@ impl SigV4Authenticator {
             return Err(AuthError::InvalidCredentialRegion.into());
         }
 
+        // H7: optional single-use presigned-URL replay check, strictly after cryptographic
+        // signature verification succeeds and before publishing chunk-verification material.
+        if let Some(store) = self.replay_nonce_store.as_ref()
+            && let Some(fingerprint) = sealed.replay_fingerprint()
+        {
+            let decision = crate::panic_boundary::contain_decision(|| store.record_first_use(fingerprint))
+                .unwrap_or(rustfs_gateway_sig::ReplayDecision::Unavailable);
+            if decision != rustfs_gateway_sig::ReplayDecision::FirstUse {
+                return Err(AuthError::AccessDenied.into());
+            }
+        }
+
         let identity_axis = match credentials.session_token() {
             Some(token) => SigIdentity::Session {
                 token: token.clone_secret(),
@@ -647,8 +662,14 @@ impl SigV4Authenticator {
         // question; `Content-Encoding: aws-chunked` is metadata and is not consulted anywhere.
         if request.payload().has_chunk_signatures()
             && let Some(sink) = request.chunk_sink()
+            && let Some(seed) = presented.chunk_seed()
         {
-            sink.publish(ChunkVerification::new(key, presented.scope().scope_string(), date.as_str().to_owned()));
+            sink.publish(ChunkVerification::new(
+                key,
+                presented.scope().scope_string(),
+                date.as_str().to_owned(),
+                seed,
+            ));
         }
         // The scope published is the one `enforce_scope` produced above and the signing key was
         // derived from — not a re-parse of the header and not a configured region, so a verdict

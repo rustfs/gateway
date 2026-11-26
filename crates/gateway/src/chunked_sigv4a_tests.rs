@@ -37,7 +37,7 @@ use rustfs_gateway_sig::{
 };
 use rustfs_gateway_stream::{MemoryReader, TrailingHeaders};
 
-use super::{ChunkIngest, presented_signature_hex};
+use super::ChunkIngest;
 use crate::ext::{AuthSchemeRef, Authentication, Authenticator, ChunkSink, Credentials, SigV4Authenticator, StaticCredentials};
 
 const AKID: &str = "AKIDEXAMPLE";
@@ -103,7 +103,6 @@ async fn sigv4a_header_authenticates_through_sigv4_authenticator() {
     assert!(outcome.verdict().is_authenticated());
     assert_eq!(AuthSchemeRef::of_verdict(outcome.verdict()), Some(AuthSchemeRef::OtherSigned));
     assert_eq!(outcome.verdict().verified_scope().map(|s| s.region()), Some("eu-west-1,us-east-1"));
-    assert_eq!(presented_signature_hex(signed.headers(), ""), Some(signed.signature_hex()));
 }
 
 #[tokio::test]
@@ -165,13 +164,11 @@ async fn sigv4a_streaming_upload_unpadded_and_crt_padded_verify_end_to_end() {
             wire.extend_from_slice(&chunker.encode_chunk(b""));
         }
 
-        let seed = presented_signature_hex(signed.headers(), "");
         let ingest = ChunkIngest::prepare(
             &payload,
             signed.headers(),
             &wire_framing(wire.len() as u64),
             &sink,
-            seed,
             ChunkLimits::default(),
         )
         .expect("prepare ok")
@@ -221,13 +218,11 @@ async fn sigv4a_streaming_trailer_upload_verifies_end_to_end() {
     wire.extend_from_slice(b"x-amz-checksum-crc32:DUoRhQ==\r\n");
     wire.extend_from_slice(format!("x-amz-trailer-signature:{trailer_sig}\r\n\r\n").as_bytes());
 
-    let seed = presented_signature_hex(signed.headers(), "");
     let ingest = ChunkIngest::prepare(
         &payload,
         signed.headers(),
         &wire_framing(wire.len() as u64),
         &sink,
-        seed,
         ChunkLimits::default(),
     )
     .expect("prepare ok")
@@ -463,7 +458,6 @@ async fn n_sigv4a_tampered_chunk_and_trailer_return_403_and_close_connection() {
         signed.headers(),
         &wire_framing(wire.len() as u64),
         &sink,
-        presented_signature_hex(signed.headers(), ""),
         ChunkLimits::default(),
     )
     .expect("prepare ok")

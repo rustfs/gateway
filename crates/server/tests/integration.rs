@@ -30,3 +30,5 @@ mod server_load;
 mod server_runtime;
 #[path = "tls_h2.rs"]
 mod tls_h2;
+#[path = "tls_hardening.rs"]
+mod tls_hardening;

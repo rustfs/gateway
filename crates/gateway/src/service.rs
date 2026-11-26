@@ -115,13 +115,13 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
-    RequestContextView, ResourceShape, ResponseBody, RouteRequestParts, SseConfig, StaticDispatchError, StaticDispatchOutcome,
-    TransportSecurity,
+    RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
+    StaticDispatchOutcome, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{
-    Admission, AuthError, PayloadMode, RawQuery, RequestNow, SecurityFloor, SigService, Verdict, WireView, detect_credentials,
+    Admission, AuthError, RawQuery, RequestNow, ScopeRejection, SecurityFloor, SigService, WireView, detect_credentials,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
@@ -130,9 +130,9 @@ use crate::clock::{Clock, ClockPosture, MonotonicClock};
 use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::ext::{
-    AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
-    BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver,
-    InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, SigV2Authentication, emit_safely,
+    AuthSchemeRef, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage, BucketOwnerSource, CachedCorsSource, ClassKind,
+    ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver, InputAuthzRequest, PolicySnapshot, RequestContext,
+    RequestEvent, ResponseView, RoutedView, emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
@@ -141,13 +141,14 @@ use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::panic_boundary::catch_boxed_future;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
-use crate::render::{from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth};
+use crate::render::{from_auth_context, from_codec, from_denial, from_handler, from_pre_auth};
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{PolicySnapshotOutcome, elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
 use crate::trace::TraceSource;
 use crate::{response::into_response, routing::RuntimeAssembly};
 
+mod authenticate;
 mod body_preparation;
 mod cors;
 pub(crate) mod extension_guards;
@@ -175,6 +176,7 @@ pub(crate) struct Inner {
     pub(crate) names: NamePolicy,
     pub(crate) config: ConfigStore,
     pub(crate) authenticator: Arc<dyn Authenticator>,
+    pub(crate) replay_nonce_store: Option<Arc<dyn rustfs_gateway_sig::ReplayNonceStore + Send + Sync>>,
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
     pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
@@ -205,6 +207,7 @@ pub(crate) struct Inner {
     /// Off in the RustFS profile: an anonymous aws-chunked body stays undecoded, as legacy RustFS leaves it.
     pub(crate) decode_anonymous_framing: bool,
     pub(crate) detached_work: crate::DetachedWork,
+    pub(crate) unread_body_drain_permits: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 pub(crate) use self::state::connection_security;
@@ -405,6 +408,10 @@ impl S3Service {
             };
             crate::ext::observe_safely(runtime.observer.as_ref(), &event);
         }
+        if outcome.identity.is_none() && (outcome.refused.is_some() || outcome.error.is_some() || !response.status().is_success())
+        {
+            response.extensions_mut().insert(crate::unread_body::SkipUnreadBodyDrain);
+        }
         file_body_path.adapt(response)
     }
 
@@ -558,10 +565,12 @@ impl S3Service {
             }
         }
         // The RustFS profile's SigV4 header guard, where legacy RustFS asks it: before routing.
+        let guard_started = self.inner.authz_clock.monotonic();
         let guard = self.inner.view_policy.sigv4_header_guard();
         let by_header_token = self.header_token_presented(&headers); // ADR-0054: the floor alone answers such a request
         let guarded = guard.refusal(&headers, wire.query().as_str(), wire.method(), &resolved, response_kind);
         if let Some(refusal) = guarded.filter(|_| !by_header_token) {
+            self.hold_auth_failure_floor(guard_started).await;
             return outcome.refuse(refusal);
         }
 
@@ -719,6 +728,7 @@ impl S3Service {
         // POST Object's credentials live in its bounded prelude. Ordinary bodies remain sealed,
         // including a body the RustFS authenticator may bound and hash for an STS-scoped signature.
         let sealed = SealedBody::seal(pending, declared_length);
+        let form_started = self.inner.authz_clock.monotonic();
         let routed_body = if is_post_object {
             let content_type = headers
                 .get(http::header::CONTENT_TYPE)
@@ -733,12 +743,19 @@ impl S3Service {
                 .await
             {
                 Ok(prelude) => prelude,
-                Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
+                Err(error) => {
+                    let refused = Refused::reading_a_form(&error);
+                    if refused == Some(Refused::Authentication) {
+                        self.hold_auth_failure_floor(form_started).await;
+                    }
+                    return outcome.refuse_as(refused, error);
+                }
             };
             RoutedBody::PostObject(Box::new(prelude))
         } else {
             RoutedBody::Ordinary(sealed)
         };
+        let auth_started = self.inner.authz_clock.monotonic();
         let (form_fields, post_policy_limits) = match &routed_body {
             RoutedBody::PostObject(prelude) => (Some(prelude.form_fields()), Some(prelude.policy_limits())),
             RoutedBody::Ordinary(_) => (None, None),
@@ -747,9 +764,6 @@ impl S3Service {
             Some(fields) => head_view.with_form_fields(fields),
             None => head_view,
         };
-        let presence = detect_credentials(&view);
-        // Legacy RustFS's answers to a header signature or a presigned URL it refuses before its
-        // credential lookup, in its order, when the assembly answers with them (rustfs/gateway#1130).
         let signed_head = crate::builder::view_policy::header_signatures::SignedHead {
             method: wire.method(),
             headers: &headers,
@@ -757,16 +771,14 @@ impl S3Service {
             now,
             window: self.inner.floor.skew_window(),
         };
-        let policy = &self.inner.view_policy;
         let body_owed = wire.framing().has_body();
-        let legacy_refusal = policy
-            .header_signatures
-            .refusal(&signed_head, response_kind, body_owed)
-            .or_else(|| policy.presigned_urls.refusal(&signed_head, response_kind, body_owed));
-        if let Some(refusal) = legacy_refusal.filter(|_| !by_header_token) {
-            return outcome.refuse(refusal);
+        if let Some(response) = self
+            .pre_lookup_auth_refusal(&signed_head, by_header_token, response_kind, body_owed, auth_started, outcome)
+            .await
+        {
+            return response;
         }
-
+        let presence = detect_credentials(&view);
         // Presenting nothing leaves no signature to verify first: legacy RustFS's claimed-route ceiling precedes the floor.
         let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed);
         let aws_credential_marker = self.inner.floor.credential_marker(&view);
@@ -779,45 +791,24 @@ impl S3Service {
         {
             return outcome.refuse(refusal);
         }
-        let chunk_sink = crate::ext::ChunkSink::new();
-        // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
-        // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
-        let mut framing_mode: Option<PayloadMode> = None;
-        let mut trailer_refusal = None;
-        let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
-        let mut body_digest = BodyDigestObligation::None;
-        let mut signed_body = false; // Whether a SigV4 header signature covers the body (rustfs/gateway#1587).
-        // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
-        let mut legacy = None;
-        // Whether this request's own admission was a bearer or header-token one; such a verdict from any other path is refused below.
-        let (mut bearer_admitted, mut header_token_admitted) = (false, false);
-        let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            // Unsigned: anonymous, or admitted by the header token claim (ADR-0054). One framing rule serves both.
-            Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
-                framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
-                    Ok(mode) => mode,
-                    Err(error) => return outcome.refuse_at(Refused::Decode, error),
-                };
-                let verdict = match unsigned {
-                    Admission::Anonymous(evidence) => Verdict::anonymous(evidence),
-                    Admission::HeaderToken(admission) => {
-                        header_token_admitted = true;
-                        self.header_token_verdict(admission, wire.transport_extensions(), outcome.trace, operation)
-                    }
-                    _ => Verdict::reject(AuthError::AccessDenied), // not reachable: the pattern admits only those two
-                };
-                (AuthenticationOutcome::ordinary(verdict), None)
-            }
+        let (admission, prepared_sealed, replacement_verdict) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Sealed(sealed)) => {
-                let location = sealed.marker().location();
-                let (payload, obligation) = match policy.signed_payload(&signed_head, operation, location, &mut trailer_refusal) {
-                    Ok(declared) => declared,
-                    Err(refusal) => return outcome.refuse_at(Refused::Authentication, refusal.render(response_kind, body_owed)),
+                let prepared = match self
+                    .prepare_sealed_payload(
+                        &sealed,
+                        &signed_head,
+                        operation,
+                        request_body_mode,
+                        response_kind,
+                        body_owed,
+                        auth_started,
+                        outcome,
+                    )
+                    .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(response) => return response,
                 };
-                signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
-                body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
-                let payload = self.inner.view_policy.signed_payload_mode(payload);
-                framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
                 let replacement_verdict = match self
                     .inner
@@ -832,179 +823,55 @@ impl S3Service {
                     None => None,
                 };
                 #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
-                let replacement_verdict: Option<Verdict> = None;
-                if let Some(verdict) = replacement_verdict {
-                    (AuthenticationOutcome::ordinary(verdict), None)
-                } else {
-                    let question = Authentication::new(
-                        &sealed,
-                        wire.method(),
-                        wire.raw_path().as_str(),
-                        wire.host().raw_for_signing(),
-                        &payload,
-                        if external_bound { Some(0) } else { declared_length },
-                    )
-                    .with_post_form(post_policy_limits, routed_body.post_filename())
-                    .with_claimed_route(claimed)
-                    // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
-                    // chain is verified with the same key and seed the request signature was, and
-                    // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
-                    .with_chunk_sink(&chunk_sink)
-                    .with_sts_body_reader(routed_body.sts_body_reader(), operation, config.config());
-                    let auth = self.inner.authenticator.as_ref();
-                    let result = match extension_guards::authenticate_safely(auth, &question, outcome.trace, operation).await {
-                        Ok(result) => result,
-                        Err(error) => return outcome.refuse_handler(error),
-                    };
-                    signed_body = question.signs_its_body();
-                    body_digest = self.settle_body_digest(request_body_mode, body_digest, &question);
-                    let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
-                    legacy = published_legacy;
-                    if let Some(refusal) = body_refusal {
-                        return outcome.refuse_at(Refused::Authentication, refusal);
-                    }
-                    match result {
-                        Ok(authentication) => (authentication, signature_mismatch),
-                        Err(_) => return outcome.refuse_unavailable(UNAUTHENTICATED, wire.framing().has_body()),
-                    }
-                }
+                let replacement_verdict: Option<rustfs_gateway_sig::Verdict> = None;
+                (Ok(Admission::Sealed(sealed)), Some(prepared), replacement_verdict)
             }
-            // No payload mode and no framed body: SigV2 has neither, so `framing_mode` stays
-            // `None` and the body read at the bottom is a plain one.
-            Ok(Admission::SealedSigV2(sealed)) => {
-                let question =
-                    SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket.as_deref())
-                        .with_post_policy_limits(post_policy_limits);
-                let auth = self.inner.authenticator.as_ref();
-                match extension_guards::authenticate_sigv2_safely(auth, &question, outcome.trace, operation).await {
-                    Ok(Ok(authentication)) => (authentication, None),
-                    Ok(Err(_)) => return outcome.refuse_unavailable(UNAUTHENTICATED, wire.framing().has_body()),
-                    Err(error) => return outcome.refuse_handler(error),
-                }
-            }
-            Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {
-                Some(verifier) => {
-                    let verdict = match extension_guards::verify_custom_signature_safely(
-                        verifier.as_ref(),
-                        &request,
-                        outcome.trace,
-                        operation,
-                    ) {
-                        Ok(verdict) => verdict,
-                        Err(error) => return outcome.refuse_handler(error),
-                    };
-                    let verdict = if verdict.is_anonymous() {
-                        Verdict::reject(AuthError::AuthorizationHeaderMalformed)
-                    } else {
-                        verdict
-                    };
-                    (AuthenticationOutcome::ordinary(verdict), None)
-                }
-                None => {
-                    return outcome.refuse_handler_at(
-                        Refused::Authentication,
-                        HandlerError::new(
-                            ErrorCode::NOT_IMPLEMENTED,
-                            "this deployment registered a custom authentication scheme and installed no verifier for it",
-                        ),
-                    );
-                }
-            },
-            // ADR-0042: only the installed host verifier makes a bearer admission a verdict; else it is refused.
-            Ok(Admission::Bearer(admission)) => {
-                bearer_admitted = true;
-                let verdict = self.bearer_verdict(admission, wire.raw_path().as_str(), outcome.trace, operation);
-                (AuthenticationOutcome::ordinary(verdict), None)
-            }
-            // `Admission` is `#[non_exhaustive]`: a variant added later must not be answered by a
-            // wildcard that falls through to "authenticated". Refused, loudly.
-            Ok(_) => {
-                return outcome.refuse_handler_at(
-                    Refused::Authentication,
-                    HandlerError::new(
-                        ErrorCode::NOT_IMPLEMENTED,
-                        "the security floor admitted this request in a way this assembly does not handle",
-                    ),
-                );
-            }
-            // The floor rejects malformed credential surfaces before a verifier can recover a scope. Keep that fail-closed
-            // response distinct from a verifier's well-formed but unserved scope, which is `400 AuthorizationHeaderMalformed`.
-            Err(error) => {
-                return outcome.refuse_at(Refused::Authentication, from_auth(error, response_kind, wire.framing().has_body()));
-            }
+            other => (other, None, None),
         };
-        // H4's run-time half: a receipt minted for another request cannot be attached to this one.
-        let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
-        let caller_secret = caller_secret.filter(|_| secret_scope.admits(signed_body, self.inner.caller_secret_every_operation));
-        let verdict = SecurityFloor::seal_verdict(verdict, presence);
-        let verdict = host_tokens::from_own_admission(verdict, bearer_admitted, header_token_admitted);
-        if let Some(error) = verdict.rejection() {
-            // A RustFS-profile reading's refusal, in legacy RustFS's words (rustfs/gateway#1130).
-            if let Some(legacy) = legacy {
-                return outcome.refuse(legacy.render(&error, response_kind, wire.framing().has_body()));
-            }
-            if error == AuthError::AuthorizationHeaderMalformed {
-                let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
-                    Some(region) => {
-                        let Ok(region) = RegionLabel::new(region.as_str()) else {
-                            return outcome.refuse_handler(HandlerError::internal_error(
-                                "the configured signing region could not be rendered",
-                            ));
-                        };
-                        ErrorContext::authorization_region_mismatch(region)
-                    }
-                    None => ErrorContext::authorization_scope_malformed(),
-                };
-                return outcome.refuse_at(
-                    Refused::Authentication,
-                    from_auth_context(error, context, response_kind, wire.framing().has_body()),
-                );
-            }
-            return outcome.refuse_at(
-                Refused::Authentication,
-                from_auth_with_detail(
-                    error,
-                    signature_mismatch.as_ref(),
-                    config.config().verbose_signature_errors(),
+        let auth_stage = match self
+            .complete_auth_stage(
+                admission,
+                authenticate::AuthStageInput {
+                    auth_started,
+                    operation,
+                    operation_floor: M::floor(&op),
+                    request_body_mode,
+                    declared_length,
+                    external_bound,
+                    claimed,
+                    bearer_verified_claim,
+                    secret_scope,
+                    vhost_bucket: vhost_bucket.as_deref(),
+                    now,
                     response_kind,
-                    wire.framing().has_body(),
-                ),
-            );
-        }
-        // ADR-0042: with the host verifier installed, a signed request on a bearer-claimed operation
-        // must also carry a token the verifier accepts for this download and for the signed
-        // principal. The signature verdict stays as it is; the receipt only carries host state.
-        let signed_bearer = match (bearer_verified_claim, &self.inner.bearer_token_verifier, verdict.identity()) {
-            (Some(_), Some(verifier), Some(signed)) if verdict.is_authenticated() => {
-                let verified = self
-                    .inner
-                    .floor
-                    .bearer_alongside_signature(&view, M::floor(&op), now)
-                    .and_then(|admission| {
-                        admission.map_or(Err(AuthError::AccessDenied), |admission| {
-                            crate::panic_boundary::contain_decision(|| {
-                                admission.verify_alongside(verifier.as_ref(), wire.raw_path().as_str(), signed)
-                            })
-                            .unwrap_or_else(|()| {
-                                crate::logging::extension_panicked(
-                                    Extension::BearerVerifier,
-                                    outcome.trace.request_id(),
-                                    operation,
-                                );
-                                Err(AuthError::AccessDenied)
-                            })
-                        })
-                    });
-                match verified {
-                    Ok(receipt) => Some(receipt),
-                    Err(error) => {
-                        return outcome
-                            .refuse_at(Refused::Authentication, from_auth(error, response_kind, wire.framing().has_body()));
-                    }
-                }
-            }
-            _ => None,
+                    headers: &headers,
+                    wire: &wire,
+                    view,
+                    presence,
+                    prepared_sealed,
+                    replacement_verdict,
+                    post_policy_limits,
+                    post_filename: routed_body.post_filename(),
+                    sts_body_reader: routed_body.sts_body_reader(),
+                    config: config.config(),
+                },
+                outcome,
+            )
+            .await
+        {
+            Ok(stage) => stage,
+            Err(response) => return response,
         };
+        let authenticate::AuthStageOutput {
+            verdict,
+            caller_secret,
+            chunk_sink,
+            framing_mode,
+            trailer_refusal,
+            signed_length,
+            body_digest,
+            signed_bearer,
+        } = auth_stage;
         let context_query: std::borrow::Cow<'_, str> = match bearer_verified_claim {
             Some(claim) => std::borrow::Cow::Owned(claim.strip_from(wire.query().as_str())),
             None => std::borrow::Cow::Borrowed(wire.query().as_str()),
@@ -1024,7 +891,13 @@ impl S3Service {
         }
         let accepted_body = match self.resolve_routed_body(routed_body, &meta, now) {
             Ok(body) => body,
-            Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
+            Err(error) => {
+                let refused = Refused::reading_a_form(&error);
+                if refused == Some(Refused::Authentication) {
+                    self.hold_auth_failure_floor(auth_started).await;
+                }
+                return outcome.refuse_as(refused, error);
+            }
         };
         let post_key_constraints = accepted_body.post_key_constraints(&verdict);
         // Own the form's request facts so the route and input stages borrow no body.
@@ -1322,20 +1195,16 @@ impl S3Service {
                 return Err(from_handler(refusal, response_kind, ConnectionIntent::MayKeepAlive));
             }
             let ingest = match framing_mode.as_ref() {
-                Some(payload) => {
-                    let seed = crate::chunked::presented_signature_hex(body_headers, body_wire.query().as_str());
-                    match crate::chunked::ChunkIngest::prepare(
-                        payload,
-                        body_headers,
-                        body_wire.framing(),
-                        &chunk_sink,
-                        seed,
-                        view_policy.chunk_reading.limits(),
-                    ) {
-                        Ok(ingest) => ingest,
-                        Err(error) => return Err(error),
-                    }
-                }
+                Some(payload) => match crate::chunked::ChunkIngest::prepare(
+                    payload,
+                    body_headers,
+                    body_wire.framing(),
+                    &chunk_sink,
+                    view_policy.chunk_reading.limits(),
+                ) {
+                    Ok(ingest) => ingest,
+                    Err(error) => return Err(error),
+                },
                 None => None,
             };
 
@@ -1575,6 +1444,9 @@ impl S3Service {
             Err(StaticDispatchError::Route(error)) | Err(StaticDispatchError::Input(error)) => return outcome.refuse(error),
             Err(StaticDispatchError::Body(error)) => {
                 let refused = Refused::reading_the_body(&error);
+                if refused == Some(Refused::Authentication) {
+                    self.hold_auth_failure_floor(auth_started).await;
+                }
                 return outcome.refuse_as(refused, self.inner.view_policy.body_refusal(error));
             }
             Err(StaticDispatchError::Codec(error)) => {
@@ -1623,6 +1495,26 @@ impl S3Service {
                 into_response(encoded)
             }
         }
+    }
+
+    fn refuse_scope_rejection(
+        error: AuthError,
+        scope_rejection: Option<ScopeRejection>,
+        response_kind: ResponseKind,
+        body_owed: bool,
+        outcome: &mut Outcome<'_>,
+    ) -> Response<Body> {
+        let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
+            Some(region) => {
+                let Ok(region) = RegionLabel::new(region.as_str()) else {
+                    return outcome
+                        .refuse_handler(HandlerError::internal_error("the configured signing region could not be rendered"));
+                };
+                ErrorContext::authorization_region_mismatch(region)
+            }
+            None => ErrorContext::authorization_scope_malformed(),
+        };
+        outcome.refuse_at(Refused::Authentication, from_auth_context(error, context, response_kind, body_owed))
     }
 }
 

@@ -92,7 +92,8 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
-            let (request, retention) = crate::unread_body::retain(request, service.unread_body_drain());
+            let (request, retention) =
+                crate::unread_body::retain(request, service.unread_body_drain(), service.unread_body_drain_permits());
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
@@ -118,7 +119,8 @@ where
     fn call(&self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
-            let (request, retention) = crate::unread_body::retain(request, service.unread_body_drain());
+            let (request, retention) =
+                crate::unread_body::retain(request, service.unread_body_drain(), service.unread_body_drain_permits());
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
@@ -148,7 +150,11 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
-            let (request, retention) = crate::unread_body::retain(request, service.service.unread_body_drain());
+            let (request, retention) = crate::unread_body::retain(
+                request,
+                service.service.unread_body_drain(),
+                service.service.unread_body_drain_permits(),
+            );
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
@@ -174,7 +180,11 @@ where
     fn call(&self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
-            let (request, retention) = crate::unread_body::retain(request, service.service.unread_body_drain());
+            let (request, retention) = crate::unread_body::retain(
+                request,
+                service.service.unread_body_drain(),
+                service.service.unread_body_drain_permits(),
+            );
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);

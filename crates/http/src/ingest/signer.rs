@@ -16,7 +16,7 @@
 //!
 //! Responsible for: [`SigningKeyCache`] (the derived key, kept for as long as its scope is
 //! valid), [`ChunkSigner`] (the running payload hash and the chained verification), and the
-//! stack-resident string-to-sign the two share.
+//! allocation-free streaming HMAC-SHA256 verification the two share.
 //! NOT responsible for: deriving a signing key. The four-step derivation is
 //! `rustfs-gateway-sig`'s and stays there — this module holds the *result* and the closure that
 //! produces it, because a security primitive implemented twice is a security primitive that
@@ -36,9 +36,9 @@
 //! ```
 //!
 //! [`SigningKeyCache::derivations`] and [`ChunkSigner::hmac_calls`] are public so that ratio is a
-//! test assertion instead of a comment. The per-chunk string-to-sign is written into a stack
-//! buffer and the comparison runs on the raw 32 bytes, so a chunk costs one HMAC, no allocation,
-//! and no hex encoding.
+//! test assertion instead of a comment. The per-chunk string-to-sign is fed directly into the
+//! incremental HMAC state and the comparison runs on the raw 32 bytes, so a chunk costs one HMAC,
+//! no allocation, and only a 64-byte stack hex scratch buffer.
 
 use core::fmt;
 
@@ -52,30 +52,26 @@ use zeroize::Zeroize;
 use crate::ingest::decoder::ChunkAuth;
 use crate::ingest::reject::ChunkReject;
 use crate::ingest::signer_ecdsa::{
-    ChunkVerifyingKey, ECDSA_CHUNK_STRING_TO_SIGN_PREFIX, ECDSA_TRAILER_STRING_TO_SIGN_PREFIX, EcdsaChunkSeed, EcdsaDerFrame,
-    MAX_ECDSA_DER_HEX_BYTES,
+    ChunkVerifyingKey, ECDSA_STRING_TO_SIGN_CAPACITY, EcdsaChunkSeed, EcdsaDerFrame, MAX_ECDSA_DER_HEX_BYTES,
+    write_ecdsa_chunk_sts, write_ecdsa_trailer_sts,
 };
 
 type HmacSha256 = Hmac<Sha256>;
 
 /// The longest credential-scope line this module will sign with.
 ///
-/// `20130524/us-east-1/s3/aws4_request` is 34 bytes; the ceiling leaves room for the longest
-/// plausible region name and keeps the string-to-sign buffer a fixed, stack-resident size.
-pub const MAX_SCOPE_LINE_BYTES: usize = 80;
+/// Matches [`crate::limits::Limits`]'s default 16 KiB header-block ceiling so any valid credential
+/// scope — including maximum-length standard regions (`64` bytes, producing 89–96-byte scope
+/// lines) and long legacy custom regions — verifies without truncation while still bounding
+/// untrusted construction inputs.
+pub const MAX_SCOPE_LINE_BYTES: usize = 16 * 1024;
 
 /// The exact width of an ISO 8601 basic-format timestamp: `20130524T000000Z`.
 const AMZ_DATE_BYTES: usize = 16;
 
-/// The string-to-sign buffer size.
-///
-/// Covers both SigV4 (317 bytes max) and SigV4a (31 + 17 + 81 + 145 + 65 + 64 = 403 bytes max),
-/// rounded up to 512 bytes on the stack.
-const STRING_TO_SIGN_CAPACITY: usize = 512;
-
 /// Lowercase hex SHA-256 of the empty byte string, which is the payload hash of every chunk's
 /// (absent) canonical request.
-const EMPTY_SHA256_HEX: &[u8; 64] = b"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+pub(crate) const EMPTY_SHA256_HEX: &[u8; 64] = b"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 /// The fixed prefix of a chunk string-to-sign.
 const CHUNK_STRING_TO_SIGN_PREFIX: &[u8] = b"AWS4-HMAC-SHA256-PAYLOAD\n";
@@ -86,25 +82,19 @@ const TRAILER_STRING_TO_SIGN_PREFIX: &[u8] = b"AWS4-HMAC-SHA256-TRAILER\n";
 /// The final HMAC carried inside a signed trailer section.
 const TRAILER_SIGNATURE_HEADER: &str = "x-amz-trailer-signature";
 
-/// One HMAC-SHA256 step.
-fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    #[allow(clippy::expect_used)] // HMAC accepts a key of any length, so this construction cannot fail.
-    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(key).expect("HMAC-SHA256 accepts any key length");
-    mac.update(data);
-    mac.finalize().into_bytes().into()
-}
-
-/// Writes `bytes` as lowercase hex into `out`, which must be twice as long.
-fn write_hex_lower(bytes: &[u8; 32], out: &mut [u8]) -> Option<()> {
+/// Writes `bytes` as lowercase hex into a 64-byte stack buffer.
+pub(crate) fn write_hex_lower(bytes: &[u8; 32], out: &mut [u8; 64]) {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    for (index, byte) in bytes.iter().enumerate() {
-        let at = index.checked_mul(2)?;
-        let high = *DIGITS.get(usize::from(byte >> 4))?;
-        let low = *DIGITS.get(usize::from(byte & 0x0f))?;
-        *out.get_mut(at)? = high;
-        *out.get_mut(at.checked_add(1)?)? = low;
+    for (byte, pair) in bytes.iter().zip(out.chunks_exact_mut(2)) {
+        if let [high_slot, low_slot] = pair {
+            if let Some(&high) = DIGITS.get(usize::from(byte >> 4)) {
+                *high_slot = high;
+            }
+            if let Some(&low) = DIGITS.get(usize::from(byte & 0x0f)) {
+                *low_slot = low;
+            }
+        }
     }
-    Some(())
 }
 
 /// Decodes exactly 64 lowercase hex characters into 32 bytes.
@@ -372,12 +362,16 @@ impl ChunkScope {
     ///
     /// # Errors
     ///
-    /// [`ChunkReject::SignatureChainBroken`] for chunk zero when the scope line is longer than
-    /// [`MAX_SCOPE_LINE_BYTES`] or the timestamp is not the 16-character basic format. Both are
-    /// server-side facts by the time they reach here, so a violation is a construction bug — but
-    /// it is one that would otherwise silently truncate the buffer the signature is computed over.
+    /// [`ChunkReject::SignatureChainBroken`] for chunk zero when the scope line is empty, longer
+    /// than [`MAX_SCOPE_LINE_BYTES`], contains CR/LF line breaks, or the timestamp is not the
+    /// 16-character basic format without line breaks.
     pub fn new(scope_line: &str, amz_date: &str) -> Result<Self, ChunkReject> {
-        if scope_line.len() > MAX_SCOPE_LINE_BYTES || scope_line.is_empty() || amz_date.len() != AMZ_DATE_BYTES {
+        if scope_line.len() > MAX_SCOPE_LINE_BYTES
+            || scope_line.is_empty()
+            || scope_line.bytes().any(|byte| byte == b'\r' || byte == b'\n')
+            || amz_date.len() != AMZ_DATE_BYTES
+            || amz_date.bytes().any(|byte| byte == b'\r' || byte == b'\n')
+        {
             return Err(ChunkReject::SignatureChainBroken { chunk_index: 0 });
         }
         Ok(Self {
@@ -484,14 +478,7 @@ impl ChunkSigner {
 
         match (&mut self.mode, presented) {
             (ChainMode::Hmac { key, previous }, ChunkAuth::Hmac(presented_bytes)) => {
-                let mut prev_hex = [0u8; 64];
-                write_hex_lower(previous, &mut prev_hex).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
-                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
-                let len = write_chunk_sts(CHUNK_STRING_TO_SIGN_PREFIX, &self.scope, &prev_hex, &digest, &mut buf)
-                    .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
-                let signed = buf.get(..len).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
-
-                let expected = hmac_sha256(key.expose(), signed);
+                let expected = mac_chunk_string_to_sign(key, &self.scope, previous, &digest);
                 self.hmac_calls = self.hmac_calls.saturating_add(1);
 
                 let matched: bool = expected.ct_eq(presented_bytes).into();
@@ -514,8 +501,8 @@ impl ChunkSigner {
                 let prev_slice = previous_hex
                     .get(..usize::from(*previous_hex_len))
                     .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
-                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
-                let len = write_chunk_sts(ECDSA_CHUNK_STRING_TO_SIGN_PREFIX, &self.scope, prev_slice, &digest, &mut buf)
+                let mut buf = [0u8; ECDSA_STRING_TO_SIGN_CAPACITY];
+                let len = write_ecdsa_chunk_sts(&self.scope.amz_date, &self.scope.scope_line, prev_slice, &digest, &mut buf)
                     .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
                 let signed = buf.get(..len).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
                 if !key.verify_der(signed, frame.as_bytes()) {
@@ -568,13 +555,7 @@ impl ChunkSigner {
         match &mut self.mode {
             ChainMode::Hmac { key, previous } => {
                 let presented = decode_hex_lower_32(raw_trailer_sig.as_bytes()).ok_or(ChunkReject::TrailerSignatureMismatch)?;
-                let mut prev_hex = [0u8; 64];
-                write_hex_lower(previous, &mut prev_hex).ok_or(ChunkReject::TrailerSignatureMismatch)?;
-                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
-                let len = write_trailer_sts(TRAILER_STRING_TO_SIGN_PREFIX, &self.scope, &prev_hex, &digest, &mut buf)
-                    .ok_or(ChunkReject::TrailerSignatureMismatch)?;
-                let signed = buf.get(..len).ok_or(ChunkReject::TrailerSignatureMismatch)?;
-                let expected = hmac_sha256(key.expose(), signed);
+                let expected = mac_trailer_string_to_sign(key, &self.scope, previous, &digest);
                 self.hmac_calls = self.hmac_calls.saturating_add(1);
 
                 let matched: bool = expected.ct_eq(&presented).into();
@@ -594,8 +575,8 @@ impl ChunkSigner {
                 let prev_slice = previous_hex
                     .get(..usize::from(*previous_hex_len))
                     .ok_or(ChunkReject::TrailerSignatureMismatch)?;
-                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
-                let len = write_trailer_sts(ECDSA_TRAILER_STRING_TO_SIGN_PREFIX, &self.scope, prev_slice, &digest, &mut buf)
+                let mut buf = [0u8; ECDSA_STRING_TO_SIGN_CAPACITY];
+                let len = write_ecdsa_trailer_sts(&self.scope.amz_date, &self.scope.scope_line, prev_slice, &digest, &mut buf)
                     .ok_or(ChunkReject::TrailerSignatureMismatch)?;
                 let signed = buf.get(..len).ok_or(ChunkReject::TrailerSignatureMismatch)?;
                 if !key.verify_der(signed, frame.as_bytes()) {
@@ -633,68 +614,57 @@ impl ChunkSigner {
     }
 }
 
-/// Writes one chunk string-to-sign into `out` entirely on the stack, for either HMAC or ECDSA.
-fn write_chunk_sts(
-    prefix: &[u8],
-    scope: &ChunkScope,
-    previous_hex: &[u8],
-    chunk_digest: &[u8; 32],
-    out: &mut [u8; STRING_TO_SIGN_CAPACITY],
-) -> Option<usize> {
-    let mut at = 0usize;
-    let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
-        let end = at.checked_add(src.len())?;
-        out.get_mut(*at..end)?.copy_from_slice(src);
-        *at = end;
-        Some(())
-    };
-
-    put(prefix, &mut at)?;
-    put(scope.amz_date.as_bytes(), &mut at)?;
-    put(b"\n", &mut at)?;
-    put(scope.scope_line.as_bytes(), &mut at)?;
-    put(b"\n", &mut at)?;
-    put(previous_hex, &mut at)?;
-    put(b"\n", &mut at)?;
-    put(EMPTY_SHA256_HEX, &mut at)?;
-    put(b"\n", &mut at)?;
+/// Computes the chunk HMAC by streaming each component directly into the MAC state.
+///
+/// Uses only a 64-byte stack hex scratch buffer and performs zero heap allocations regardless of
+/// the credential-scope length.
+fn mac_chunk_string_to_sign(key: &ChunkSigningKey, scope: &ChunkScope, previous: &[u8; 32], chunk_digest: &[u8; 32]) -> [u8; 32] {
+    #[allow(clippy::expect_used)] // HMAC accepts a key of any length, so this construction cannot fail.
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(key.expose()).expect("HMAC-SHA256 accepts any key length");
+    mac.update(CHUNK_STRING_TO_SIGN_PREFIX);
+    mac.update(scope.amz_date.as_bytes());
+    mac.update(b"\n");
+    mac.update(scope.scope_line.as_bytes());
+    mac.update(b"\n");
 
     let mut hex = [0u8; 64];
-    write_hex_lower(chunk_digest, &mut hex)?;
-    put(&hex, &mut at)?;
+    write_hex_lower(previous, &mut hex);
+    mac.update(&hex);
+    mac.update(b"\n");
 
-    Some(at)
+    mac.update(EMPTY_SHA256_HEX);
+    mac.update(b"\n");
+
+    write_hex_lower(chunk_digest, &mut hex);
+    mac.update(&hex);
+
+    mac.finalize().into_bytes().into()
 }
 
-/// Writes one trailer string-to-sign into `out` entirely on the stack, for either HMAC or ECDSA.
-fn write_trailer_sts(
-    prefix: &[u8],
+/// Computes the final trailer HMAC by streaming each component directly into the MAC state.
+fn mac_trailer_string_to_sign(
+    key: &ChunkSigningKey,
     scope: &ChunkScope,
-    previous_hex: &[u8],
+    previous: &[u8; 32],
     trailer_digest: &[u8; 32],
-    out: &mut [u8; STRING_TO_SIGN_CAPACITY],
-) -> Option<usize> {
-    let mut at = 0usize;
-    let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
-        let end = at.checked_add(src.len())?;
-        out.get_mut(*at..end)?.copy_from_slice(src);
-        *at = end;
-        Some(())
-    };
-
-    put(prefix, &mut at)?;
-    put(scope.amz_date.as_bytes(), &mut at)?;
-    put(b"\n", &mut at)?;
-    put(scope.scope_line.as_bytes(), &mut at)?;
-    put(b"\n", &mut at)?;
-    put(previous_hex, &mut at)?;
-    put(b"\n", &mut at)?;
+) -> [u8; 32] {
+    #[allow(clippy::expect_used)] // HMAC accepts a key of any length, so this construction cannot fail.
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(key.expose()).expect("HMAC-SHA256 accepts any key length");
+    mac.update(TRAILER_STRING_TO_SIGN_PREFIX);
+    mac.update(scope.amz_date.as_bytes());
+    mac.update(b"\n");
+    mac.update(scope.scope_line.as_bytes());
+    mac.update(b"\n");
 
     let mut hex = [0u8; 64];
-    write_hex_lower(trailer_digest, &mut hex)?;
-    put(&hex, &mut at)?;
+    write_hex_lower(previous, &mut hex);
+    mac.update(&hex);
+    mac.update(b"\n");
 
-    Some(at)
+    write_hex_lower(trailer_digest, &mut hex);
+    mac.update(&hex);
+
+    mac.finalize().into_bytes().into()
 }
 
 impl fmt::Debug for ChunkSigner {

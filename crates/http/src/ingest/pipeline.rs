@@ -45,8 +45,6 @@
 //!
 //! [`ChunkLimits::max_chunk_size`]: crate::ChunkLimits::max_chunk_size
 
-use core::fmt;
-use core::num::NonZeroU8;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
@@ -57,57 +55,15 @@ use smallvec::SmallVec;
 
 use crate::ingest::ChunkFraming;
 use crate::ingest::DecodedLength;
+use crate::ingest::IngestPolicy;
 use crate::ingest::decoder::{ChunkAuth, ChunkDecoder, DecodeEvent, MIN_CHUNK_META_BYTES};
-use crate::ingest::reject::{ChunkReject, ModeConfusion};
+use crate::ingest::reject::{ChunkReject, ModeConfusion, ZeroFillViolation};
 use crate::ingest::signer::ChunkSigner;
 use crate::ingest::trailer::{TrailerDeclaration, TrailerProgress, parse_trailer_section};
 use crate::limits::ChunkLimits;
 
 /// The window size the pipeline starts from before it learns how large the chunks really are.
 const INITIAL_WINDOW_BYTES: usize = 64 * 1024;
-
-/// When a decoded chunk becomes visible to the consumer.
-///
-/// One variant, on purpose. The alternative — deliver first and abort the object afterwards — is
-/// defensible for a plain `PutObject`, whose commit happens after the body, and indefensible for
-/// `UploadPart`, where the part must not reach storage at all. A policy with an opt-out variant
-/// would be selected by somebody, once, for a benchmark; a policy with no such variant cannot be.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IngestPolicy {
-    /// Hold each chunk until its signature verifies, then deliver it.
-    VerifyBeforeDeliver {
-        /// How many chunks may be resident but undelivered. One: the chunk being verified.
-        ///
-        /// It is a [`NonZeroU8`] because zero would mean "deliver before verifying", which is the
-        /// state this enum exists to make unrepresentable.
-        lookahead_chunks: NonZeroU8,
-    },
-}
-
-impl IngestPolicy {
-    /// The only sane lookahead: the chunk currently being verified.
-    #[must_use]
-    pub fn verify_before_deliver() -> Self {
-        Self::VerifyBeforeDeliver {
-            // One is not zero.
-            lookahead_chunks: NonZeroU8::MIN,
-        }
-    }
-
-    /// How many chunks may be resident but not yet delivered.
-    #[must_use]
-    pub fn lookahead_chunks(&self) -> u8 {
-        match self {
-            Self::VerifyBeforeDeliver { lookahead_chunks } => lookahead_chunks.get(),
-        }
-    }
-}
-
-impl Default for IngestPolicy {
-    fn default() -> Self {
-        Self::verify_before_deliver()
-    }
-}
 
 /// A run of bytes inside the window.
 type Run = (usize, usize);
@@ -500,6 +456,17 @@ impl<R> IngestPipeline<R> {
         StreamError::upstream(Box::new(reject)).with_bytes_before_error(self.delivered_bytes)
     }
 
+    /// Total verified bytes currently queued for delivery from the pipeline window.
+    #[must_use]
+    pub fn deliverable_bytes(&self) -> usize {
+        self.deliverable.get(self.deliver_at..).map_or(0, |runs| {
+            runs.iter()
+                .map(|(_, len)| *len)
+                .sum::<usize>()
+                .saturating_sub(self.deliver_offset)
+        })
+    }
+
     /// Fails closed when the inner reader breaks the `AsyncPayloadRead` contract by reporting
     /// `ReadProgress::Filled(0)` on a non-empty buffer.
     fn fail_zero_fill(&mut self) -> StreamError {
@@ -520,6 +487,36 @@ impl<R> IngestPipeline<R> {
 }
 
 impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
+    /// Advances the pipeline until at least one verified byte is deliverable or end-of-stream is
+    /// reached, without requiring a caller-allocated delivery buffer while the wire is pending.
+    ///
+    /// Returns `Ok(n)` with `n > 0` verified bytes queued in the window, or `Ok(0)` once EOF has
+    /// been reached (the subsequent [`AsyncPayloadRead::poll_fill`] yields `ReadProgress::Eof`).
+    ///
+    /// # Errors
+    ///
+    /// Any framing, signature, or transport [`StreamError`] observed while advancing the pipeline.
+    pub fn poll_ready_deliverable(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<usize, StreamError>> {
+        let this = self.get_mut();
+        if this.failed {
+            return Poll::Ready(Err(StreamError::incomplete_body().with_bytes_before_error(this.delivered_bytes)));
+        }
+        loop {
+            let ready = this.deliverable_bytes();
+            if ready > 0 {
+                return Poll::Ready(Ok(ready));
+            }
+            if this.finished {
+                return Poll::Ready(Ok(0));
+            }
+            match this.advance(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                Poll::Ready(Ok(())) => {}
+            }
+        }
+    }
+
     /// Runs the state machine one step, reading from the inner body when it needs bytes.
     fn advance(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
         let event = match self.decoder.step(self.window.get(..self.filled).unwrap_or(&[])) {
@@ -777,17 +774,6 @@ impl<R: AsyncPayloadRead + Unpin> AsyncPayloadRead for IngestPipeline<R> {
         Some(self.declared.saturating_sub(self.delivered_bytes))
     }
 }
-
-#[derive(Debug)]
-struct ZeroFillViolation;
-
-impl fmt::Display for ZeroFillViolation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("inner payload reader returned Filled(0) for a non-empty buffer")
-    }
-}
-
-impl std::error::Error for ZeroFillViolation {}
 
 #[cfg(test)]
 mod tests;

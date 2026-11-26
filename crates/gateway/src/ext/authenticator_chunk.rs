@@ -27,7 +27,10 @@ const MAX_ECDSA_DER_BYTES: usize = 72;
 
 /// Internal algorithm-typed key material carried by [`ChunkVerification`].
 enum ChunkKeyMaterial {
-    Hmac(rustfs_gateway_sig::SigningKey),
+    Hmac {
+        key: rustfs_gateway_sig::SigningKey,
+        seed: [u8; 32],
+    },
     Ecdsa {
         verifying_key_sec1: [u8; 33],
         seed_der: [u8; MAX_ECDSA_DER_BYTES],
@@ -54,11 +57,12 @@ pub struct ChunkVerification {
 }
 
 impl ChunkVerification {
-    /// Publishes the derived SigV4 HMAC key and the scope the chunk chain is dated with.
+    /// Publishes the derived SigV4 HMAC key, scope line, timestamp, and verified 32-byte
+    /// request-head signature seed that starts the chunk signature chain.
     #[must_use]
-    pub fn new(key: rustfs_gateway_sig::SigningKey, scope_line: String, amz_date: String) -> Self {
+    pub fn new(key: rustfs_gateway_sig::SigningKey, scope_line: String, amz_date: String, seed: [u8; 32]) -> Self {
         Self {
-            key: ChunkKeyMaterial::Hmac(key),
+            key: ChunkKeyMaterial::Hmac { key, seed },
             scope_line,
             amz_date,
         }
@@ -98,11 +102,22 @@ impl ChunkVerification {
     /// `None` for ECDSA material or if the key is not 32 bytes.
     #[must_use]
     pub fn chunk_signing_key(&self) -> Option<rustfs_gateway_http::ChunkSigningKey> {
-        let ChunkKeyMaterial::Hmac(key) = &self.key else {
+        let ChunkKeyMaterial::Hmac { key, .. } = &self.key else {
             return None;
         };
         let bytes: [u8; 32] = key.expose().try_into().ok()?;
         Some(rustfs_gateway_http::ChunkSigningKey::from_derived(bytes))
+    }
+
+    /// The verified 32-byte SigV4 request-head signature that seeds the first chunk HMAC.
+    ///
+    /// `None` for ECDSA material.
+    #[must_use]
+    pub fn chunk_seed(&self) -> Option<rustfs_gateway_http::ChunkSeed> {
+        let ChunkKeyMaterial::Hmac { seed, .. } = &self.key else {
+            return None;
+        };
+        Some(rustfs_gateway_http::ChunkSeed::from_request_signature(*seed))
     }
 
     /// The derived SigV4a public P-256 verifying key for the ECDSA chunk signer.

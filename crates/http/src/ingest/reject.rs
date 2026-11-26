@@ -310,3 +310,16 @@ impl core::fmt::Display for ChunkReject {
 }
 
 impl std::error::Error for ChunkReject {}
+
+/// Internal contract violation error when an inner `AsyncPayloadRead` returns `Filled(0)` on a
+/// non-empty buffer.
+#[derive(Debug)]
+pub(crate) struct ZeroFillViolation;
+
+impl core::fmt::Display for ZeroFillViolation {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("inner payload reader returned Filled(0) for a non-empty buffer")
+    }
+}
+
+impl std::error::Error for ZeroFillViolation {}

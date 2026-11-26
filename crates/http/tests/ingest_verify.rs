@@ -370,13 +370,80 @@ fn the_signer_and_the_mode_must_agree_at_construction() {
     assert_eq!(built.err(), Some(ChunkReject::SignatureChainBroken { chunk_index: 0 }));
 }
 
-/// Negative: a scope line that would overflow the stack-resident string-to-sign is refused at
-/// construction rather than silently truncating the bytes the signature is computed over.
+/// Negative: a scope line that exceeds the ceiling, is empty, or contains line breaks is refused
+/// at construction.
 #[test]
 fn an_over_long_scope_line_is_refused() {
     let long = "x".repeat(MAX_SCOPE_LINE_BYTES + 1);
     assert!(ChunkScope::new(&long, TEST_AMZ_DATE).is_err());
     assert!(ChunkScope::new("", TEST_AMZ_DATE).is_err());
+    assert!(ChunkScope::new("20130524/us-east-1\n/s3/aws4_request", TEST_AMZ_DATE).is_err());
+    assert!(ChunkScope::new("20130524/us-east-1\r/s3/aws4_request", TEST_AMZ_DATE).is_err());
+    assert!(ChunkScope::new(TEST_SCOPE_LINE, "20130524T00000\nZ").is_err());
+}
+
+/// Positive: valid 64-byte `CredentialScope::MAX_REGION_LEN` regions (`s3` = 89 bytes,
+/// `s3vectors` = 96 bytes) and long legacy custom regions (e.g. 4096 bytes) verify signed chunks
+/// and signed trailers without triggering `SignatureChainBroken`.
+#[test]
+fn wide_region_scope_lines_verify_signed_chunks_and_trailers() {
+    let max_standard_region = "r".repeat(64);
+    let legacy_wide_region = "r".repeat(4096);
+    for scope_line in [
+        format!("20130524/{max_standard_region}/s3/aws4_request"),
+        format!("20130524/{max_standard_region}/s3vectors/aws4_request"),
+        format!("20130524/{legacy_wide_region}/s3/aws4_request"),
+    ] {
+        let scope = ChunkScope::new(&scope_line, TEST_AMZ_DATE)
+            .unwrap_or_else(|err| panic!("scope of {} bytes must be accepted: {err:?}", scope_line.len()));
+
+        // Streaming signed chunks without trailers.
+        let mut chunker = SignedChunker::with_scope(KEY, SEED, &scope_line, TEST_AMZ_DATE);
+        chunker.push(b"hello ").push(b"wide scope");
+        let body = chunker.finish();
+        let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("consistent fixture");
+        let signer = ChunkSigner::new(ChunkSigningKey::from_derived(KEY), scope.clone(), ChunkSeed::from_request_signature(SEED));
+        let mut pipeline = IngestPipeline::new(
+            ScriptReader::new(body, 64),
+            framing,
+            declared_length(16),
+            Some(signer),
+            no_observers(),
+            ChunkLimits::default(),
+            IngestPolicy::default(),
+        )
+        .expect("signed pipeline builds");
+        let out = drain_pipeline(&mut pipeline, 64).expect("wide-scope signed body verifies");
+        assert_eq!(out, b"hello wide scope");
+        assert!(pipeline.commit_allowed());
+
+        // Streaming signed chunks WITH signed trailers.
+        let mut trailer_chunker = SignedChunker::with_scope(KEY, SEED, &scope_line, TEST_AMZ_DATE);
+        trailer_chunker.push(b"hello world");
+        let trailer_body = trailer_chunker.finish_with_trailers(&[("x-amz-checksum-crc32", "DUoRhQ==")], false);
+        let trailer_framing = ChunkFraming::derive(&FramingFixture::streaming_signed_trailer()).expect("consistent fixture");
+        let declaration = TrailerDeclaration::parse(&HeaderValue::from_static("x-amz-checksum-crc32"), true)
+            .expect("valid signed trailer declaration");
+        let trailer_signer = ChunkSigner::new(ChunkSigningKey::from_derived(KEY), scope, ChunkSeed::from_request_signature(SEED));
+        let mut trailer_pipeline = IngestPipeline::new(
+            ScriptReader::new(trailer_body, 64),
+            trailer_framing,
+            declared_length(11),
+            Some(trailer_signer),
+            no_observers(),
+            ChunkLimits::default(),
+            IngestPolicy::default(),
+        )
+        .and_then(|pipeline| pipeline.with_trailer_declaration(declaration))
+        .expect("signed trailer pipeline builds");
+        let (decoded, trailers) = drive_trailered(&mut trailer_pipeline).expect("wide-scope signed trailer verifies");
+        assert_eq!(decoded, b"hello world");
+        assert!(trailer_pipeline.trailer_signature_satisfied());
+        assert_eq!(
+            trailers.get(&HeaderName::from_static("x-amz-checksum-crc32")),
+            Some(&HeaderValue::from_static("DUoRhQ=="))
+        );
+    }
 }
 
 /// Negative: a timestamp of the wrong width.

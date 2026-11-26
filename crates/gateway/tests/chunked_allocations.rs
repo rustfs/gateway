@@ -404,3 +404,175 @@ fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
         large.blocks
     );
 }
+
+const PENDING_PROBE_ENV: &str = "RUSTFS_GATEWAY_PENDING_POLL_ALLOCATION_PROBE";
+const PENDING_PROBE_SENTINEL: &str = "rustfs-gateway pending poll allocation probe: ";
+const PENDING_PROBE_TEST: &str = "chunked_allocations::n_framed_poll_pending_does_not_allocate_delivery_buffer";
+
+struct DrainPutObject;
+
+impl rustfs_gateway::Handler<rustfs_gateway::dto::PutObject> for DrainPutObject {
+    async fn call(
+        &self,
+        request: rustfs_gateway::Req<rustfs_gateway::dto::PutObject>,
+    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::PutObject> {
+        let mut body = request.into_input().body.expect("PutObject body").into_body();
+        while http_body_util::BodyExt::frame(&mut body)
+            .await
+            .transpose()
+            .is_ok_and(|f| f.is_some())
+        {}
+        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::PutObjectOutput::default()))
+    }
+}
+
+struct PendingBeforeData {
+    remaining_pending: usize,
+    wire: Option<Bytes>,
+}
+
+impl http_body::Body for PendingBeforeData {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: core::pin::Pin<&mut Self>,
+        context: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+        let this = self.get_mut();
+        if this.remaining_pending > 0 {
+            this.remaining_pending -= 1;
+            context.waker().wake_by_ref();
+            return core::task::Poll::Pending;
+        }
+        match this.wire.take() {
+            Some(bytes) => core::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes)))),
+            None => core::task::Poll::Ready(None),
+        }
+    }
+}
+
+fn streaming_put_request(len: usize) -> (http::request::Parts, Bytes) {
+    use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+
+    let decoded: Vec<u8> = (0..len).map(|index| (index % 251) as u8).collect();
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let mut signer = SigV4Signer::new(credentials, scope);
+
+    let probe = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("a valid request");
+    let accepted = rustfs_gateway::WireRequest::accept(probe, &rustfs_gateway::Limits::default()).expect("an acceptable host");
+
+    let wire_len = len + (format!("{len:x}").len() + 17 + 64 + 4) + 1 + 17 + 64 + 4;
+    let mut map = http::HeaderMap::new();
+    map.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    map.insert(
+        http::header::CONTENT_LENGTH,
+        http::HeaderValue::from_str(&wire_len.to_string()).expect("digit run"),
+    );
+    let signing = SigningRequest::new(
+        &http::Method::PUT,
+        "/bucket/key",
+        "",
+        &map,
+        accepted.host().raw_for_signing(),
+        PayloadMode::StreamingSigned {
+            trailer: rustfs_gateway::sig::TrailerSet::None,
+        },
+        stamp,
+    )
+    .with_wire_content_length(wire_len as u64)
+    .with_decoded_content_length(len as u64);
+    let signed = signer.sign_headers(&signing).expect("a signable PutObject request");
+
+    let mut chain = signer.chunk_signer(&signed).expect("a chunk chain");
+    let mut wire = Vec::with_capacity(wire_len);
+    wire.extend_from_slice(&chain.encode_chunk(&decoded));
+    wire.extend_from_slice(&chain.encode_chunk(b""));
+    assert_eq!(wire.len(), wire_len);
+
+    let mut builder = http::Request::builder().method(http::Method::PUT).uri("/bucket/key");
+    for (name, value) in signed.headers() {
+        builder = builder.header(name, value);
+    }
+    let (parts, ()) = builder.body(()).expect("valid PutObject request").into_parts();
+    (parts, Bytes::from(wire))
+}
+
+fn pending_poll_cost(pending_polls: usize) -> (u64, u64) {
+    let service = support::wired_at_signed_time()
+        .register::<rustfs_gateway::dto::PutObject, _>(std::sync::Arc::new(DrainPutObject))
+        .build()
+        .expect("a streaming PutObject assembly");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a current-thread runtime");
+    let (parts, wire) = streaming_put_request(1024);
+
+    let warm = runtime.block_on(async {
+        let req = http::Request::from_parts(
+            parts.clone(),
+            PendingBeforeData {
+                remaining_pending: 0,
+                wire: Some(wire.clone()),
+            },
+        );
+        service.call(req).await.status()
+    });
+    assert_eq!(warm, http::StatusCode::OK);
+
+    let profiler = dhat::Profiler::builder().testing().build();
+    let status = runtime.block_on(async {
+        let req = http::Request::from_parts(
+            parts,
+            PendingBeforeData {
+                remaining_pending: pending_polls,
+                wire: Some(wire),
+            },
+        );
+        service.call(req).await.status()
+    });
+    let stats = dhat::HeapStats::get();
+    drop(profiler);
+    assert_eq!(status, http::StatusCode::OK);
+    (stats.total_blocks, stats.total_bytes)
+}
+
+/// Negative — polling a framed `VerifiedRequestBody` while the transport returns `Poll::Pending`
+/// must not allocate a 64 KiB delivery buffer on every poll.
+#[test]
+fn n_framed_poll_pending_does_not_allocate_delivery_buffer() {
+    if let Some(counts) = support::allocations::requested_sizes(PENDING_PROBE_ENV) {
+        for pending_polls in counts {
+            let (blocks, bytes) = pending_poll_cost(pending_polls);
+            support::allocations::report(PENDING_PROBE_SENTINEL, &[blocks, bytes]);
+        }
+        return;
+    }
+
+    let rows = support::allocations::measure(PENDING_PROBE_TEST, PENDING_PROBE_ENV, PENDING_PROBE_SENTINEL, &[0, 64], 2);
+    let (immediate_blocks, immediate_bytes) = (rows[0][0], rows[0][1]);
+    let (pending_blocks, pending_bytes) = (rows[1][0], rows[1][1]);
+    assert!(
+        immediate_blocks >= MEASURED_BLOCKS_FLOOR && immediate_bytes >= MEASURED_BYTES_FLOOR,
+        "probe recorded too little work ({immediate_blocks} blocks, {immediate_bytes} bytes)"
+    );
+    let extra_bytes = pending_bytes.saturating_sub(immediate_bytes);
+    let extra_blocks = pending_blocks.saturating_sub(immediate_blocks);
+    assert!(
+        extra_bytes < 4096,
+        "64 Poll::Pending polls allocated {extra_bytes} extra bytes ({immediate_bytes} -> {pending_bytes}); \
+         VerifiedRequestBody::poll_read must not allocate a 64 KiB delivery buffer on Poll::Pending"
+    );
+    assert!(
+        extra_blocks <= 16,
+        "64 Poll::Pending polls allocated {extra_blocks} extra blocks ({immediate_blocks} -> {pending_blocks})"
+    );
+}

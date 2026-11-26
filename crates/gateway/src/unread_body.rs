@@ -47,8 +47,10 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytes::Buf;
 use http::{HeaderValue, Request, Response, Version, header::CONNECTION};
 use http_body::{Body, Frame, SizeHint};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Inserted into a request by [`crate::SelfHeldHttp1Driver`], which owns its socket and handles
 /// unread request bodies directly on its connection lock rather than via a detached drain task.
@@ -57,18 +59,38 @@ use http_body::{Body, Frame, SizeHint};
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SelfHeldTransport;
 
-/// Whether, and with which idle bound, an assembly reads what an HTTP/1 request body still owed
+/// Inserted into a response by [`crate::S3Service`] when a request was refused without an
+/// authenticated identity, signalling [`Retention::settle`] to drop any unread body immediately
+/// rather than spending background drain work on an unauthenticated peer.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SkipUnreadBodyDrain;
+
+/// Whether, and under which bounds, an assembly reads what an HTTP/1 request body still owed
 /// after its answer.
 ///
-/// Installed with [`crate::ServiceBuilder::drain_unread_request_bodies`]. The bound applies to each
-/// wait for the next frame, not to the whole body.
+/// Installed with [`crate::ServiceBuilder::drain_unread_request_bodies`]. Every drain is bounded
+/// by an optional per-frame idle timeout, a total wall-clock duration cap, a total byte budget,
+/// and a per-service concurrent task ceiling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnreadBodyDrain {
     idle: Option<Duration>,
+    max_duration: Duration,
+    max_bytes: u64,
+    max_concurrent: usize,
 }
 
 impl UnreadBodyDrain {
-    /// A drain that stops once the peer has sent nothing for `idle`.
+    /// Default total wall-clock cap for one background unread-body drain task.
+    pub const DEFAULT_MAX_DURATION: Duration = Duration::from_secs(30);
+
+    /// Default total byte budget discarded by one background unread-body drain task (16 MiB).
+    pub const DEFAULT_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+    /// Default ceiling on concurrent background unread-body drain tasks per assembled service.
+    pub const DEFAULT_MAX_CONCURRENT: usize = 64;
+
+    /// A drain that stops once the peer has sent nothing for `idle` (in addition to the total
+    /// duration cap, total byte budget, and concurrency ceiling).
     ///
     /// A zero `idle` is [`UnreadBodyDrain::unbounded`], as RustFS reads a zero
     /// `RUSTFS_HTTP_REQUEST_BODY_READ_TIMEOUT`.
@@ -77,20 +99,80 @@ impl UnreadBodyDrain {
         if idle.is_zero() {
             Self::unbounded()
         } else {
-            Self { idle: Some(idle) }
+            Self {
+                idle: Some(idle),
+                max_duration: Self::DEFAULT_MAX_DURATION,
+                max_bytes: Self::DEFAULT_MAX_BYTES,
+                max_concurrent: Self::DEFAULT_MAX_CONCURRENT,
+            }
         }
     }
 
-    /// A drain that waits for the peer for as long as the connection lasts.
+    /// A drain with no per-frame idle timeout, still bounded by [`Self::DEFAULT_MAX_DURATION`],
+    /// [`Self::DEFAULT_MAX_BYTES`], and [`Self::DEFAULT_MAX_CONCURRENT`].
     #[must_use]
     pub const fn unbounded() -> Self {
-        Self { idle: None }
+        Self {
+            idle: None,
+            max_duration: Self::DEFAULT_MAX_DURATION,
+            max_bytes: Self::DEFAULT_MAX_BYTES,
+            max_concurrent: Self::DEFAULT_MAX_CONCURRENT,
+        }
     }
 
-    /// The idle bound, if there is one.
+    /// Sets the total wall-clock duration cap for one background drain task.
+    ///
+    /// A zero duration disables background draining fail-closed.
+    #[must_use]
+    pub const fn with_max_duration(mut self, max_duration: Duration) -> Self {
+        self.max_duration = max_duration;
+        self
+    }
+
+    /// Sets the maximum total bytes one background drain task will read and discard.
+    ///
+    /// Zero disables background draining fail-closed.
+    #[must_use]
+    pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = max_bytes;
+        self
+    }
+
+    /// Sets the maximum number of concurrent background drain tasks an assembled service may run.
+    ///
+    /// Zero disables background draining fail-closed; excess unread bodies are dropped immediately.
+    #[must_use]
+    pub const fn with_max_concurrent(mut self, max_concurrent: usize) -> Self {
+        self.max_concurrent = max_concurrent;
+        self
+    }
+
+    /// The per-frame idle bound, if there is one.
     #[must_use]
     pub const fn idle_timeout(&self) -> Option<Duration> {
         self.idle
+    }
+
+    /// The total wall-clock duration cap for one drain task.
+    #[must_use]
+    pub const fn max_duration(&self) -> Duration {
+        self.max_duration
+    }
+
+    /// The total byte budget for one drain task.
+    #[must_use]
+    pub const fn max_bytes(&self) -> u64 {
+        self.max_bytes
+    }
+
+    /// The maximum number of concurrent background drain tasks.
+    #[must_use]
+    pub const fn max_concurrent(&self) -> usize {
+        self.max_concurrent
+    }
+
+    const fn allows_draining(&self) -> bool {
+        !self.max_duration.is_zero() && self.max_bytes > 0 && self.max_concurrent > 0
     }
 }
 
@@ -172,20 +254,24 @@ impl<B: Body> Body for Retained<B> {
 
 /// What the adapter keeps of a [`retain`]ed request to settle its answer with.
 pub(crate) struct Retention<B: Body> {
-    kept: Option<(Slot<B>, UnreadBodyDrain)>,
+    kept: Option<(Slot<B>, UnreadBodyDrain, Option<Arc<Semaphore>>)>,
 }
 
 /// Wraps `request`'s body so that a drop before its end hands it back, when `drain` is set, the
 /// request is HTTP/1.0 or HTTP/1.1, the transport is not self-held, and its body had not ended on
 /// arrival.
-pub(crate) fn retain<B: Body>(request: Request<B>, drain: Option<UnreadBodyDrain>) -> (Request<Retained<B>>, Retention<B>) {
+pub(crate) fn retain<B: Body>(
+    request: Request<B>,
+    drain: Option<UnreadBodyDrain>,
+    permits: Option<Arc<Semaphore>>,
+) -> (Request<Retained<B>>, Retention<B>) {
     let (parts, body) = request.into_parts();
     #[cfg(feature = "server")]
     let driver_managed = parts.extensions.get::<SelfHeldTransport>().is_some();
     #[cfg(not(feature = "server"))]
     let driver_managed = false;
     let owed = !driver_managed && matches!(parts.version, Version::HTTP_10 | Version::HTTP_11) && !body.is_end_stream();
-    match drain.filter(|_| owed) {
+    match drain.filter(|drain| owed && drain.allows_draining()) {
         Some(drain) => {
             let slot: Slot<B> = Arc::new(Mutex::new(None));
             let body = Retained::Kept {
@@ -196,7 +282,7 @@ pub(crate) fn retain<B: Body>(request: Request<B>, drain: Option<UnreadBodyDrain
             (
                 Request::from_parts(parts, body),
                 Retention {
-                    kept: Some((slot, drain)),
+                    kept: Some((slot, drain, permits)),
                 },
             )
         }
@@ -210,47 +296,69 @@ where
     B::Data: Send,
 {
     /// Settles `response` against the body the service left: when it was handed back, the answer
-    /// announces `Connection: close` and the rest of the body is read and discarded in a task of
-    /// its own. A body the service still holds, read to its end, or never retained is left alone.
+    /// announces `Connection: close` and the rest of the body is read and discarded in a bounded
+    /// background task. Unauthenticated refusals ([`SkipUnreadBodyDrain`]), concurrency-saturated
+    /// services, finished bodies, and never-retained bodies are released immediately without
+    /// spawning.
     ///
     /// The drain needs a Tokio runtime to run on; without one the body is released as it would be
     /// without the setting.
     pub(crate) fn settle<T>(self, response: &mut Response<T>) {
-        let Some((slot, drain)) = self.kept else {
+        let Some((slot, drain, permits)) = self.kept else {
             return;
         };
+        if response.extensions().get::<SkipUnreadBodyDrain>().is_some() || !drain.allows_draining() {
+            return;
+        }
         let Some(body) = slot.lock().ok().and_then(|mut kept| kept.take()) else {
             return;
         };
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads everything an unread HTTP/1 body
-        // still owes, whoever sent it and however large it is, bounded only by the idle wait. That
-        // keeps a proxy from turning the answer into a `502`, and it also spends this server's reads
-        // on a peer it may have just refused. The intended future behaviour is this crate's
-        // server-side lingering close: a byte budget, no linger for an unauthenticated peer.
+        let permit = match permits {
+            Some(semaphore) => match semaphore.try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => return,
+            },
+            None => None,
+        };
         response.headers_mut().insert(CONNECTION, HeaderValue::from_static("close"));
-        runtime.spawn(discard(body, drain.idle));
+        runtime.spawn(discard(body, drain, permit));
     }
 }
 
-/// Reads `body` to its end, a transport error, or `idle` without a frame, and discards every frame.
-async fn discard<B: Body>(mut body: Pin<Box<B>>, idle: Option<Duration>) {
-    loop {
-        let next = poll_fn(|context| body.as_mut().poll_frame(context));
-        let frame = match idle {
-            Some(idle) => match tokio::time::timeout(idle, next).await {
-                Ok(frame) => frame,
-                Err(_) => return,
-            },
-            None => next.await,
-        };
-        match frame {
-            Some(Ok(_)) => {}
-            Some(Err(_)) | None => return,
-        }
+/// Reads `body` until EOF, a transport error, `drain.idle` without a frame, `drain.max_duration`
+/// total elapsed time, or `drain.max_bytes` discarded bytes, holding `_permit` for the task's life.
+async fn discard<B: Body>(mut body: Pin<Box<B>>, drain: UnreadBodyDrain, _permit: Option<OwnedSemaphorePermit>) {
+    if !drain.allows_draining() {
+        return;
     }
+    let mut drained_bytes = 0_u64;
+    let _ = tokio::time::timeout(drain.max_duration, async {
+        loop {
+            let next = poll_fn(|context| body.as_mut().poll_frame(context));
+            let frame = match drain.idle {
+                Some(idle) => match tokio::time::timeout(idle, next).await {
+                    Ok(frame) => frame,
+                    Err(_) => return,
+                },
+                None => next.await,
+            };
+            match frame {
+                Some(Ok(frame)) => {
+                    if let Some(data) = frame.data_ref() {
+                        drained_bytes = drained_bytes.saturating_add(data.remaining() as u64);
+                        if drained_bytes >= drain.max_bytes {
+                            return;
+                        }
+                    }
+                }
+                Some(Err(_)) | None => return,
+            }
+        }
+    })
+    .await;
 }
 
 #[cfg(test)]

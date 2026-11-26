@@ -362,8 +362,22 @@ pub(crate) fn elapsed_since(clock: &dyn MonotonicClock, started: MonotonicNow) -
     Duration::from_millis(clock.monotonic().saturating_millis_since(started))
 }
 
+/// Computes the remaining wait for `FailureFloor` from a whole-millisecond `MonotonicClock`.
+///
+/// `MonotonicNow` truncates elapsed time to whole milliseconds, so `now - started` can overstate
+/// real elapsed time by nearly 1 ms when the two samples straddle a millisecond boundary. Subtract
+/// 1 ms (saturating at zero) so `FailureFloor` never under-sleeps below its configured minimum.
+pub(crate) fn failure_floor_remaining(
+    floor: FailureFloor,
+    clock: &dyn MonotonicClock,
+    started: MonotonicNow,
+) -> Option<Duration> {
+    let elapsed_lower_bound = Duration::from_millis(clock.monotonic().saturating_millis_since(started).saturating_sub(1));
+    floor.remaining(elapsed_lower_bound)
+}
+
 pub(crate) async fn hold_failure_floor(floor: FailureFloor, clock: &dyn MonotonicClock, started: MonotonicNow) {
-    if let Some(remaining) = floor.remaining(elapsed_since(clock, started)) {
+    if let Some(remaining) = failure_floor_remaining(floor, clock, started) {
         wait_without_runtime(remaining).await;
     }
 }
@@ -583,6 +597,34 @@ mod tests {
             }
             Poll::Pending => panic!("neither the outcome nor the elapsed bound was reported"),
         }
+    }
+
+    /// Negative — whole-millisecond `MonotonicNow` truncation can advance by 1 ms across a
+    /// boundary even when less than 1 ms actually elapsed, so `failure_floor_remaining` must use
+    /// the conservative lower bound `(now - started).saturating_sub(1)` and never under-sleep.
+    #[test]
+    fn failure_floor_remaining_accounts_for_millisecond_quantization() {
+        let clock = crate::clock::ManualMonotonic::at_millis(10);
+        let started = clock.monotonic();
+        let floor = FailureFloor::new(Duration::from_millis(25));
+
+        // Zero ticks elapsed -> full 25 ms remaining.
+        assert_eq!(failure_floor_remaining(floor, &clock, started), Some(Duration::from_millis(25)));
+
+        // Straddling a millisecond boundary (1 tick diff, <1 ms real work) still owes full 25 ms.
+        clock.advance_millis(1);
+        assert_eq!(failure_floor_remaining(floor, &clock, started), Some(Duration::from_millis(25)));
+
+        // 25-tick diff can correspond to 24.01 ms real elapsed -> still owes 1 ms.
+        clock.advance_millis(24);
+        assert_eq!(failure_floor_remaining(floor, &clock, started), Some(Duration::from_millis(1)));
+
+        // 26-tick diff guarantees >25 ms real elapsed -> no remaining wait.
+        clock.advance_millis(1);
+        assert_eq!(failure_floor_remaining(floor, &clock, started), None);
+
+        // Positive control: a zero floor never adds wait.
+        assert_eq!(failure_floor_remaining(FailureFloor::new(Duration::ZERO), &clock, started), None);
     }
 }
 

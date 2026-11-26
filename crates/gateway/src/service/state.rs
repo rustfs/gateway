@@ -34,6 +34,11 @@ impl S3Service {
         self.inner.view_policy.unread_body_drain()
     }
 
+    /// The shared concurrency semaphore bounding background unread-body drain tasks.
+    pub(crate) fn unread_body_drain_permits(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        self.inner.unread_body_drain_permits.as_ref().map(Arc::clone)
+    }
+
     pub(crate) fn from_inner(inner: Inner) -> Self {
         Self { inner: Arc::new(inner) }
     }

@@ -73,8 +73,8 @@ use bytes::{Bytes, BytesMut};
 use http::HeaderMap;
 use rustfs_gateway_core::{HandlerError, MetaView, ResponseKind};
 use rustfs_gateway_http::{
-    BodyDigests, ChecksumVerified, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength,
-    Framing, IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length_with,
+    BodyDigests, ChecksumVerified, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSigner, DecodedLength, Framing,
+    IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length_with,
 };
 use rustfs_gateway_sig::PayloadMode;
 use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress, TrailingHeaders};
@@ -206,7 +206,6 @@ impl ChunkIngest {
         headers: &HeaderMap,
         wire: &Framing,
         sink: &ChunkSink,
-        seed: Option<&str>,
         limits: ChunkLimits,
     ) -> Result<Option<Self>, S3Error> {
         let framing = ChunkFraming::derive(&FramingOf(payload)).map_err(from_chunk_reject)?;
@@ -229,7 +228,7 @@ impl ChunkIngest {
             })?;
 
         let signer = if framing.has_chunk_signatures() {
-            Some(build_signer(&framing, sink, seed)?)
+            Some(build_signer(&framing, sink)?)
         } else {
             None
         };
@@ -357,16 +356,12 @@ fn decoded_length_header(headers: &HeaderMap) -> Option<&str> {
     headers.get(DECODED_LENGTH_HEADER).and_then(|value| value.to_str().ok())
 }
 
-/// Builds the chunk signer from what the authenticator published and the signature the client
-/// presented.
+/// Builds the chunk signer from the verified material the authenticator published.
 ///
-/// Both halves are required and neither is invented. The key is the `k_signing` the request
-/// signature was derived from, which only an [`crate::Authenticator`] can produce; the seed is the
-/// request signature itself, read back off the wire. Reading it back is safe *here* and only here:
-/// this runs after the verdict was checked, so the presented value has already been shown equal to
-/// the derived one in constant time. A seed read before that check would be a value an attacker
-/// chose.
-fn build_signer(framing: &ChunkFraming, sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3Error> {
+/// The derived signing/verifying key, credential scope, timestamp, and verified request-head seed
+/// all arrive together through [`ChunkSink`], published only after signature verification
+/// succeeded. Nothing here re-parses the raw `Authorization` header or query string.
+fn build_signer(framing: &ChunkFraming, sink: &ChunkSink) -> Result<ChunkSigner, S3Error> {
     let Some(material) = sink.get() else {
         return Err(chunk_signatures_unavailable());
     };
@@ -383,9 +378,9 @@ fn build_signer(framing: &ChunkFraming, sink: &ChunkSink, seed: Option<&str>) ->
     let Some(key) = material.chunk_signing_key() else {
         return Err(chunk_signatures_unavailable());
     };
-    let seed = seed
-        .ok_or_else(chunk_signatures_unavailable)
-        .and_then(|hex| ChunkSeed::from_hex(hex).map_err(from_chunk_reject))?;
+    let Some(seed) = material.chunk_seed() else {
+        return Err(chunk_signatures_unavailable());
+    };
     Ok(ChunkSigner::new(key, scope, seed))
 }
 
@@ -421,28 +416,6 @@ fn chunk_stream_failed() -> S3Error {
         ResponseKind::Other,
         ConnectionIntent::Close,
     )
-}
-
-/// The presented request signature, borrowed from the wire run used as the chunk seed.
-///
-/// Read off `Authorization` for header-signed requests and `X-Amz-Signature` for presigned ones.
-/// Returning `None` is never an admission of anything: [`build_signer`] refuses without it.
-pub(crate) fn presented_signature_hex<'a>(headers: &'a HeaderMap, query: &'a str) -> Option<&'a str> {
-    if let Some(value) = headers.get(http::header::AUTHORIZATION).and_then(|value| value.to_str().ok())
-        && let Some(hex) = value.split("Signature=").nth(1)
-    {
-        let length = hex.bytes().take_while(u8::is_ascii_hexdigit).count();
-        if length != 0 {
-            return Some(&hex[..length]);
-        }
-    }
-    for pair in query.split('&') {
-        let (name, value) = pair.split_once('=')?;
-        if name.eq_ignore_ascii_case("X-Amz-Signature") {
-            return Some(value);
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -503,9 +476,8 @@ mod tests {
             http::HeaderValue::from_static("aws-chunked"),
         );
         let wire = wire_length(64);
-        let prepared =
-            ChunkIngest::prepare(&PayloadMode::Unsigned, &headers, &wire, &ChunkSink::new(), None, ChunkLimits::default())
-                .expect("an unframed mode is not an error");
+        let prepared = ChunkIngest::prepare(&PayloadMode::Unsigned, &headers, &wire, &ChunkSink::new(), ChunkLimits::default())
+            .expect("an unframed mode is not an error");
         assert!(prepared.is_none());
     }
 
@@ -529,7 +501,6 @@ mod tests {
             &headers,
             &wire_length(4096),
             &ChunkSink::new(),
-            None,
             ChunkLimits::default(),
         )
         .expect("head-level checks pass")
@@ -561,7 +532,6 @@ mod tests {
             &headers,
             &wire_length(64),
             &ChunkSink::new(),
-            None,
             ChunkLimits::default(),
         )
         .expect("an unframed mode is not an error");
@@ -573,7 +543,6 @@ mod tests {
             &headers,
             &wire_length(4096),
             &ChunkSink::new(),
-            None,
             ChunkLimits::default(),
         )
         .expect("head-level checks pass")
@@ -605,7 +574,6 @@ mod tests {
             &headers,
             &wire,
             &ChunkSink::new(),
-            Some(&"a".repeat(64)),
             ChunkLimits::default(),
         )
         .err()
@@ -633,7 +601,6 @@ mod tests {
             &headers,
             &wire_length(4096),
             &ChunkSink::new(),
-            None,
             ChunkLimits::default(),
         )
         .expect("head-level checks pass")
@@ -701,6 +668,7 @@ mod tests {
             rustfs_gateway_sig::SigningKey::from_array([0x5a; 32]),
             "20130524/us-east-1/s3/aws4_request".to_owned(),
             "20130524T000000Z".to_owned(),
+            [0xaa; 32],
         ));
         sink
     }
@@ -725,7 +693,6 @@ mod tests {
             &headers,
             &wire_length(4096),
             &sink_with_material(),
-            Some(&"a".repeat(64)),
             ChunkLimits::default(),
         )
         .expect("every head-level check passes");
@@ -747,7 +714,6 @@ mod tests {
             &headers,
             &wire_length(4096),
             &sink_with_material(),
-            Some(&"a".repeat(64)),
             ChunkLimits::default(),
         )
         .expect("head-level checks pass")
@@ -774,7 +740,6 @@ mod tests {
             &headers,
             &wire_length(4096),
             &sink_with_material(),
-            Some(&"a".repeat(64)),
             ChunkLimits::default(),
         )
         .expect("head-level checks pass")

@@ -253,6 +253,18 @@ impl SigV4Authenticator {
             return Err(pending.answer(&proof).into());
         }
 
+        // H7: optional single-use presigned-URL replay check, strictly after cryptographic
+        // signature verification succeeds and before publishing chunk-verification material.
+        if let Some(store) = self.replay_nonce_store.as_ref()
+            && let Some(fingerprint) = sealed.replay_fingerprint()
+        {
+            let decision = crate::panic_boundary::contain_decision(|| store.record_first_use(fingerprint))
+                .unwrap_or(rustfs_gateway_sig::ReplayDecision::Unavailable);
+            if decision != rustfs_gateway_sig::ReplayDecision::FirstUse {
+                return Err(AuthError::AccessDenied.into());
+            }
+        }
+
         let identity_axis = match credentials.session_token() {
             Some(token) => SigIdentity::Session {
                 token: token.clone_secret(),

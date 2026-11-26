@@ -165,6 +165,47 @@ fn n_legacy_persistence_keeps_trailing_text_but_refuses_invalid_attributes_and_n
     }
 }
 
+/// Negative — XML Namespaces 1.0 §6.3 forbids two attributes on the same element whose resolved
+/// `(namespace URI, local name)` pairs match, even when written with distinct prefixes or
+/// entity-encoded namespace URIs.
+#[test]
+fn n_refuses_same_uri_duplicate_attributes_across_distinct_prefixes() {
+    for body in [
+        "<Root xmlns:a=\"u\" xmlns:b=\"u\" a:k=\"1\" b:k=\"2\"/>",
+        "<Root xmlns:a=\"u\" xmlns:b=\"u\" a:k=\"1\" b:k=\"2\"></Root>",
+        "<Root xmlns:a=\"u\"><Child xmlns:b=\"u\" a:k=\"1\" b:k=\"2\"/></Root>",
+        "<Root xmlns:a=\"urn:a&amp;b\" xmlns:b=\"urn:a&#38;b\" a:k=\"1\" b:k=\"2\"/>",
+    ] {
+        assert_eq!(parse(body.as_bytes()), Err(XmlError::Malformed), "{body:?}");
+        assert_eq!(
+            parse_legacy_persistence_with_limits(body.as_bytes(), XmlLimits::S3),
+            Err(XmlError::Malformed),
+            "legacy persistence must also reject duplicate expanded attribute {body:?}"
+        );
+    }
+}
+
+/// Positive control — distinct namespace URIs, distinct local names under one URI, and an
+/// unprefixed attribute alongside a prefixed attribute under the default namespace remain valid.
+#[test]
+fn admits_distinct_expanded_attributes_on_same_element() {
+    let distinct_uris = parse(b"<Root xmlns:a=\"u\" xmlns:b=\"v\" a:k=\"1\" b:k=\"2\"/>")
+        .expect("same local name in distinct namespace URIs is well formed");
+    assert_eq!(distinct_uris.attribute_ns("u", "k"), Some("1"));
+    assert_eq!(distinct_uris.attribute_ns("v", "k"), Some("2"));
+
+    let distinct_locals = parse(b"<Root xmlns:a=\"u\" xmlns:b=\"u\" a:k1=\"1\" b:k2=\"2\"/>")
+        .expect("distinct local names in one namespace URI are well formed");
+    assert_eq!(distinct_locals.attribute_ns("u", "k1"), Some("1"));
+    assert_eq!(distinct_locals.attribute_ns("u", "k2"), Some("2"));
+
+    // XML Namespaces 1.0 §6.2: the default namespace does not apply to unprefixed attributes.
+    let default_vs_prefixed = parse(b"<Root xmlns=\"u\" xmlns:a=\"u\" k=\"1\" a:k=\"2\"/>")
+        .expect("unprefixed attribute is in no namespace and does not collide with prefixed");
+    assert_eq!(default_vs_prefixed.attribute("k"), Some("1"));
+    assert_eq!(default_vs_prefixed.attribute_ns("u", "k"), Some("2"));
+}
+
 #[test]
 fn n_root_declares_namespace_inspects_only_root_start_tag() {
     use crate::root_declares_namespace;

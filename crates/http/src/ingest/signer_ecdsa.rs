@@ -44,6 +44,9 @@ pub(crate) const MAX_ECDSA_DER_BYTES: usize = 72;
 /// Maximum lowercase-hex length of an ASN.1 DER ECDSA P-256 signature (and AWS CRT padded width).
 pub(crate) const MAX_ECDSA_DER_HEX_BYTES: usize = 144;
 
+/// Stack buffer capacity for a SigV4a chunk or trailer string-to-sign (max 403 bytes).
+pub(crate) const ECDSA_STRING_TO_SIGN_CAPACITY: usize = 512;
+
 /// AWS CRT right-padding byte for streaming SigV4a chunk and trailer signatures.
 const SIGV4A_PADDING_BYTE: u8 = b'*';
 
@@ -222,4 +225,68 @@ fn hex_value_lower(byte: u8) -> Option<u8> {
         b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
         _ => None,
     }
+}
+
+/// Writes one SigV4a ECDSA chunk string-to-sign into `out` entirely on the stack.
+pub(crate) fn write_ecdsa_chunk_sts(
+    amz_date: &str,
+    scope_line: &str,
+    previous_hex: &[u8],
+    chunk_digest: &[u8; 32],
+    out: &mut [u8; ECDSA_STRING_TO_SIGN_CAPACITY],
+) -> Option<usize> {
+    let mut at = 0usize;
+    let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
+        let end = at.checked_add(src.len())?;
+        out.get_mut(*at..end)?.copy_from_slice(src);
+        *at = end;
+        Some(())
+    };
+
+    put(ECDSA_CHUNK_STRING_TO_SIGN_PREFIX, &mut at)?;
+    put(amz_date.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(scope_line.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(previous_hex, &mut at)?;
+    put(b"\n", &mut at)?;
+    put(crate::ingest::signer::EMPTY_SHA256_HEX, &mut at)?;
+    put(b"\n", &mut at)?;
+
+    let mut hex = [0u8; 64];
+    crate::ingest::signer::write_hex_lower(chunk_digest, &mut hex);
+    put(&hex, &mut at)?;
+
+    Some(at)
+}
+
+/// Writes one SigV4a ECDSA trailer string-to-sign into `out` entirely on the stack.
+pub(crate) fn write_ecdsa_trailer_sts(
+    amz_date: &str,
+    scope_line: &str,
+    previous_hex: &[u8],
+    trailer_digest: &[u8; 32],
+    out: &mut [u8; ECDSA_STRING_TO_SIGN_CAPACITY],
+) -> Option<usize> {
+    let mut at = 0usize;
+    let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
+        let end = at.checked_add(src.len())?;
+        out.get_mut(*at..end)?.copy_from_slice(src);
+        *at = end;
+        Some(())
+    };
+
+    put(ECDSA_TRAILER_STRING_TO_SIGN_PREFIX, &mut at)?;
+    put(amz_date.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(scope_line.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(previous_hex, &mut at)?;
+    put(b"\n", &mut at)?;
+
+    let mut hex = [0u8; 64];
+    crate::ingest::signer::write_hex_lower(trailer_digest, &mut hex);
+    put(&hex, &mut at)?;
+
+    Some(at)
 }

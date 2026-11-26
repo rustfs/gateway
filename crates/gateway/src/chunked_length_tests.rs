@@ -67,7 +67,6 @@ fn prepare_transfer_chunked(headers: &HeaderMap) -> Result<Option<ChunkIngest>, 
         headers,
         &transfer_chunked(),
         &ChunkSink::new(),
-        None,
         ChunkLimits::default(),
     )
 }
@@ -190,7 +189,6 @@ async fn a_framed_body_without_a_decoded_length_is_refused_at_the_head() {
         &HeaderMap::new(),
         &wire,
         &ChunkSink::new(),
-        None,
         ChunkLimits::default(),
     )
     .err()
