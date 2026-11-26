@@ -516,3 +516,202 @@ fn n_the_table_router_is_unchanged() {
     assert_eq!(routed(&table, Method::GET, TargetKind::Bucket, "x-id=NoSuchOp"), Ok("ListObjects"));
     assert_eq!(routed(&table, Method::GET, TargetKind::Bucket, "replication-check"), Ok("ListObjects"));
 }
+
+/// Positive — a plain object `PUT` carrying `versionId` (with or without `x-id=PutObject`)
+/// delegates to the route table so an installed `minio:PutObjectReplica` dialect row wins while an
+/// assembly without the dialect falls back to `PutObject`.
+#[test]
+fn a_versioned_put_object_delegates_to_the_table_for_optional_replica_dialects() {
+    assert_eq!(select(Method::PUT, TargetKind::Object, "versionId=v1", &[]), LegacySelection::Table);
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "x-id=PutObject&versionId=v1", &[]),
+        LegacySelection::Table
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "versionId=v1&custom=1", &[]),
+        LegacySelection::Table
+    );
+}
+
+/// Negative — a versioned `PUT` carrying any sub-resource key, copy source, or conflicting `x-id`
+/// keeps its exact legacy selection rather than delegating to the table.
+#[test]
+fn n_a_versioned_put_object_with_other_keys_or_headers_keeps_legacy_selection() {
+    let copy = [("x-amz-copy-source", "src/obj")];
+    assert_eq!(select(Method::PUT, TargetKind::Object, "", &[]), op("PutObject"));
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "tagging&versionId=v1", &[]),
+        op("PutObjectTagging")
+    );
+    assert_eq!(select(Method::PUT, TargetKind::Object, "acl&versionId=v1", &[]), op("PutObjectAcl"));
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "retention&versionId=v1", &[]),
+        op("PutObjectRetention")
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "legal-hold&versionId=v1", &[]),
+        op("PutObjectLegalHold")
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "annotation&versionId=v1", &[]),
+        op("PutObjectAnnotation")
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "renameObject&versionId=v1", &[]),
+        op("RenameObject")
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "encryption&versionId=v1", &[]),
+        op("UpdateObjectEncryption")
+    );
+    assert_eq!(select(Method::PUT, TargetKind::Object, "partNumber=1&versionId=v1", &[]), op("PutObject"));
+    assert_eq!(select(Method::PUT, TargetKind::Object, "uploadId=u1&versionId=v1", &[]), op("PutObject"));
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "partNumber=1&uploadId=u1&versionId=v1", &[]),
+        op("UploadPart")
+    );
+    assert_eq!(select(Method::PUT, TargetKind::Object, "versionId=v1", &copy), op("CopyObject"));
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "x-id=PutObject&acl&versionId=v1", &[]),
+        op("PutObject")
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "x-id=PutObjectTagging&versionId=v1", &[]),
+        op("PutObjectTagging")
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "x-id=minio:PutObjectReplica&versionId=v1", &[]),
+        LegacySelection::Undeclared
+    );
+    assert_eq!(
+        select(Method::PUT, TargetKind::Object, "x-id=NoSuchOp&versionId=v1", &[]),
+        LegacySelection::Undeclared
+    );
+}
+
+/// Positive & negative — `Selection::RustfsLegacy` selects `minio:PutObjectReplica` when that
+/// dialect is mounted, and falls back to `PutObject` when it is not.
+#[test]
+fn a_legacy_router_routes_versioned_put_object_to_replica_dialect_when_installed() {
+    use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
+    use crate::dialect::{Dialect, DialectOverlay, DialectRoute, OverlayRow};
+    use crate::op::{AuthRequirement, Operation, ResourceShape};
+    use crate::registry::{HandlerDeadlineClass, OperationSpec, RouterBuilder};
+    use crate::route::{Predicate, ShadowingDecl};
+    use rustfs_gateway_sig::{OperationFloor, SigService};
+
+    const REPLICA_NAME: &str = "minio:PutObjectReplica";
+    struct ReplicaFixture;
+    static SPEC: OperationSpec = OperationSpec::builder(REPLICA_NAME, 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:ReplicateObject", ResourceShape::Object))
+        .build();
+    static FLOOR: OperationFloor = OperationFloor::custom(REPLICA_NAME, SigService::S3);
+    static SELECTOR: &[Predicate] = &[
+        Predicate::Method(Method::PUT),
+        Predicate::Target(TargetKind::Object),
+        Predicate::QueryPresent("versionId"),
+        Predicate::QueryAbsent("acl"),
+        Predicate::QueryAbsent("annotation"),
+        Predicate::QueryAbsent("encryption"),
+        Predicate::QueryAbsent("legal-hold"),
+        Predicate::QueryAbsent("partNumber"),
+        Predicate::QueryAbsent("renameObject"),
+        Predicate::QueryAbsent("retention"),
+        Predicate::QueryAbsent("tagging"),
+        Predicate::QueryAbsent("uploadId"),
+        Predicate::HeaderPresent {
+            header: "x-amz-copy-source",
+            negated: true,
+        },
+    ];
+    static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
+        winner: REPLICA_NAME,
+        shadowed: "PutObject",
+        reason: "replica write overrides plain PutObject when versionId is present",
+        evidence: &["https://github.com/rustfs/gateway/issues/752"],
+    }];
+    static OVERLAY: DialectOverlay = DialectOverlay {
+        name: "minio-replication-test",
+        vendor: "minio",
+        claims: &[],
+        operations: &[OverlayRow {
+            name: REPLICA_NAME,
+            precedence: 795,
+            selector: "Method(PUT) ∧ Target(Object) ∧ QueryPresent(\"versionId\") ∧ QueryAbsent(\"acl\") ∧ \
+                       QueryAbsent(\"annotation\") ∧ QueryAbsent(\"encryption\") ∧ QueryAbsent(\"legal-hold\") ∧ \
+                       QueryAbsent(\"partNumber\") ∧ QueryAbsent(\"renameObject\") ∧ QueryAbsent(\"retention\") ∧ \
+                       QueryAbsent(\"tagging\") ∧ QueryAbsent(\"uploadId\") ∧ HeaderAbsent(\"x-amz-copy-source\")",
+            action: "s3:ReplicateObject",
+            resource: ResourceShape::Object,
+            success_status: 200,
+            anonymous: false,
+            evidence: &["https://github.com/rustfs/gateway/issues/752"],
+        }],
+    };
+    impl Operation for ReplicaFixture {
+        const NAME: &'static str = REPLICA_NAME;
+        type Input = ();
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
+        fn derive_resources(_: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+        fn seal_derived_input(_: &mut Self::Input) {}
+        fn spec() -> &'static OperationSpec {
+            &SPEC
+        }
+        fn floor() -> &'static OperationFloor {
+            &FLOOR
+        }
+    }
+    impl OperationCodec for ReplicaFixture {
+        const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
+        fn decode(_: &MetaView<'_>, _: RequestBody) -> Result<Self::Input, CodecError> {
+            Ok(())
+        }
+        fn encode(_: Self::Output, _: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
+            Ok(EncodedResponse::of(status))
+        }
+    }
+
+    #[allow(clippy::expect_used, reason = "test fixture dialect always builds")]
+    let dialect = Dialect::assemble(&OVERLAY)
+        .declare::<ReplicaFixture>(DialectRoute {
+            precedence: 795,
+            selector: SELECTOR,
+            path_shape: "/{Bucket}/{Key+}",
+            shadows: SHADOWS,
+        })
+        .build()
+        .expect("replica dialect builds");
+    #[allow(clippy::expect_used, reason = "test router always builds")]
+    let with_dialect = RouterBuilder::new()
+        .dialect(&dialect)
+        .build()
+        .expect("router with replica dialect")
+        .selecting(Selection::RustfsLegacy);
+    let without_dialect = router(Selection::RustfsLegacy);
+
+    assert_eq!(routed(&with_dialect, Method::PUT, TargetKind::Object, "versionId=v1"), Ok(REPLICA_NAME));
+    assert_eq!(
+        routed(&with_dialect, Method::PUT, TargetKind::Object, "x-id=PutObject&versionId=v1"),
+        Ok(REPLICA_NAME)
+    );
+    assert_eq!(routed(&with_dialect, Method::PUT, TargetKind::Object, ""), Ok("PutObject"));
+    assert_eq!(
+        routed(&with_dialect, Method::PUT, TargetKind::Object, "tagging&versionId=v1"),
+        Ok("PutObjectTagging")
+    );
+    assert_eq!(
+        routed(&with_dialect, Method::PUT, TargetKind::Object, "x-id=PutObject&acl&versionId=v1"),
+        Ok("PutObject")
+    );
+    // Negative: without the dialect mounted, versioned PUT stays PutObject under RustfsLegacy.
+    assert_eq!(routed(&without_dialect, Method::PUT, TargetKind::Object, "versionId=v1"), Ok("PutObject"));
+    assert_eq!(
+        routed(&without_dialect, Method::PUT, TargetKind::Object, "x-id=PutObject&versionId=v1"),
+        Ok("PutObject")
+    );
+}

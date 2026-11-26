@@ -435,6 +435,37 @@ fn is_form_post(parts: &RouteRequestParts<'_>) -> bool {
     media.eq_ignore_ascii_case("multipart/form-data")
 }
 
+/// Whether `parts` is a plain object `PUT` carrying `versionId` and none of the sub-resource keys
+/// or copy-source header that select another `PUT` operation. Delegating this shape to
+/// [`LegacySelection::Table`] lets an installed optional replica dialect row (such as
+/// `minio:PutObjectReplica`) win, while falling back to `PutObject` when absent.
+fn is_versioned_plain_put(parts: &RouteRequestParts<'_>) -> bool {
+    const EXCLUDED_KEYS: &[&str] = &[
+        "acl",
+        "annotation",
+        "encryption",
+        "legal-hold",
+        "partNumber",
+        "renameObject",
+        "retention",
+        "tagging",
+        "uploadId",
+    ];
+    *parts.method == Method::PUT
+        && parts.target == TargetKind::Object
+        && parts.query.contains("versionId")
+        && !EXCLUDED_KEYS.iter().any(|key| parts.query.contains(key))
+        && !has_header(parts, COPY_SOURCE)
+}
+
+fn select_operation(op: &'static str, parts: &RouteRequestParts<'_>) -> LegacySelection {
+    if op == "PutObject" && is_versioned_plain_put(parts) {
+        LegacySelection::Table
+    } else {
+        LegacySelection::Selected(op)
+    }
+}
+
 /// The operation legacy RustFS selects for a request outside every dialect claim, or what it
 /// answers instead: see the module documentation for the rules and where they were measured.
 #[must_use]
@@ -466,7 +497,7 @@ pub fn legacy_rustfs_selection(parts: &RouteRequestParts<'_>) -> LegacySelection
                     .map(|candidate| candidate.op)
                     .chain(partition.otherwise)
                     .find(|op| *op == name)
-                    .map_or(LegacySelection::Undeclared, LegacySelection::Selected),
+                    .map_or(LegacySelection::Undeclared, |op| select_operation(op, parts)),
                 _ => LegacySelection::Undeclared,
             };
         }
@@ -481,7 +512,7 @@ pub fn legacy_rustfs_selection(parts: &RouteRequestParts<'_>) -> LegacySelection
         .find(|candidate| candidate.when.iter().all(|cond| holds(*cond, parts)))
         .map(|candidate| candidate.op)
         .or(partition.otherwise)
-        .map_or(LegacySelection::Unknown, LegacySelection::Selected)
+        .map_or(LegacySelection::Unknown, |op| select_operation(op, parts))
 }
 
 #[cfg(test)]
