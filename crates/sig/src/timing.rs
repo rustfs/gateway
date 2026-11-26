@@ -47,7 +47,7 @@
 //! | T1 | Access key lookup returns before any HMAC runs, so an unknown key answers faster than a known one — access key enumeration without ever knowing a secret, which is step one of CVE-2025-31489 | Closed by contract: the unknown-key path signs with [`placeholder_secret`], runs the full derivation and comparison, and receives the same wire answer as another unusable credential |
 //! | T2 | The credential provider is a remote async call on the *unauthenticated* path: cache hit and miss differ in latency, and every forged request costs one IAM or database round trip | Closed by the facade's mandatory guarded provider: a hard timeout and bounded jittered negative cache keep a miss from hanging or becoming an amplifier. [`LookupBudget`] remains the primitive policy vocabulary; per-IP quota is `Governor` (P6-08) |
 //! | T3 | A derived-signing-key cache keyed on `(secret, date, region, service)` leaks, on a hit, that this access key was used recently — and keeps secret-equivalent material alive past the request | Closed by omission: this crate implements no such cache. If one is ever added it must be opt-in, TTL-bounded, and zeroized on eviction, and the trade-off documented at the type |
-//! | T4 | Bucket existence: authentication that resolves the bucket before verifying answers faster for a bucket that does not exist, turning an unauthenticated probe into a namespace oracle | Deferred to P2-04 with the interface constrained here: a [`Verdict`](crate::Verdict) is computed from the request and its credentials alone. Nothing in this crate accepts a bucket, so the authentication stage cannot depend on one |
+//! | T4 | Bucket existence: authentication that resolves the bucket before verifying answers faster for a bucket that does not exist, turning an unauthenticated probe into a namespace oracle | Closed here and enforced by the authentication stage: [`SecurityFloor::admit`](crate::SecurityFloor::admit) and [`Verdict`](crate::Verdict) accept no bucket, so authentication cannot depend on bucket existence |
 //! | T5 | Policy evaluation time varies with statement count and match position, leaking policy shape and whether a principal matched | Accepted risk, recorded: it lives in `rustfs-gateway-core`'s authorization stage, after authentication has already succeeded, so it is reachable only by a caller holding valid credentials |
 //! | T6 | The rejection ladder — a malformed header fails in microseconds, a bad signature in tens of microseconds, a policy denial in milliseconds — tells an attacker how far the forgery got, which turns forging into a field-by-field binary search | Closed here: [`FailureFloor`] holds every authentication failure to one configurable minimum, non-zero by default |
 //! | T7 | SigV2's HMAC-SHA1 guarantees a second signature type exists, and the second type is the one somebody gives a derived `PartialEq` | Closed by P2-01's [`Signature`](crate::Signature) enum over `CtBytes<N>`, plus `scripts/check_ct_eq.sh` so it cannot come back |
@@ -108,7 +108,7 @@ pub const SIDE_CHANNELS: [SideChannel; 10] = [
     SideChannel {
         id: "T4",
         leak: "bucket existence probed through an unauthenticated request",
-        disposition: Disposition::DeferredTo("P2-04 authentication stage"),
+        disposition: Disposition::ClosedHere,
     },
     SideChannel {
         id: "T5",

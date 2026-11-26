@@ -207,19 +207,32 @@ impl PostPolicy {
         for required in REQUIRED_FIELDS {
             fields.required(required)?;
         }
-        if fields.required("x-amz-algorithm")? != ALGORITHM {
+        let algorithm = fields.required("x-amz-algorithm")?;
+        if algorithm != ALGORITHM {
             return Err(PostPolicyError::Malformed);
         }
-        let (encoded, conditions) = parse_policy_document(&fields, limits, now, PolicyReading::Strict)?;
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now, PolicyReading::StrictSigV4)?;
 
         let credential = fields.required("x-amz-credential")?;
         let scope = CredentialScope::parse_with(credential, rule).map_err(|_| PostPolicyError::Malformed)?;
-        let signed_at = AmzDate::parse(fields.required("x-amz-date")?).map_err(|_| PostPolicyError::Malformed)?;
+        let date = fields.required("x-amz-date")?;
+        let signed_at = AmzDate::parse(date).map_err(|_| PostPolicyError::Malformed)?;
         if scope.date().as_str() != &signed_at.as_str()[..8] {
             return Err(PostPolicyError::Malformed);
         }
         let signature = parse_signature(fields.required("x-amz-signature")?)?;
-        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions, PolicyReading::Strict)?;
+        let exact_bound = |name: &str, value: &str| {
+            conditions
+                .iter()
+                .any(|condition| matches!(condition, Condition::Exact(field, expected) if field == name && expected == value))
+        };
+        if !exact_bound("x-amz-algorithm", algorithm)
+            || !exact_bound("x-amz-credential", credential)
+            || !exact_bound("x-amz-date", date)
+        {
+            return Err(PostPolicyError::ConditionFailed);
+        }
+        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions, PolicyReading::StrictSigV4)?;
 
         Ok(Self {
             encoded: common.encoded,
@@ -707,23 +720,8 @@ fn parse_expiration(value: &str) -> Result<AmzDate, PostPolicyError> {
 }
 
 fn parse_signature(value: &str) -> Result<Signature, PostPolicyError> {
-    if value.len() != 64 {
-        return Err(PostPolicyError::Malformed);
-    }
-    let mut decoded = [0u8; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
-        decoded[index] = (hex_nibble(pair[0])? << 4) | hex_nibble(pair[1])?;
-    }
+    let decoded = crate::codec::decode_hex_lower::<32>(value).map_err(|_| PostPolicyError::Malformed)?;
     Ok(Signature::HmacSha256(CtBytes::from_array(decoded)))
-}
-
-fn hex_nibble(byte: u8) -> Result<u8, PostPolicyError> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(PostPolicyError::Malformed),
-    }
 }
 
 fn decode_base64(encoded: &str, maximum: usize) -> Result<Vec<u8>, PostPolicyError> {

@@ -26,6 +26,8 @@ mod compile_fail;
 mod effective_host;
 #[path = "frozen_dimensions.rs"]
 mod frozen_dimensions;
+#[path = "hardening_regressions.rs"]
+mod hardening_regressions;
 #[path = "header_token.rs"]
 mod header_token;
 #[path = "header_token_binding.rs"]

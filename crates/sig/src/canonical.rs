@@ -672,30 +672,34 @@ impl StringToSign {
 /// It has no `Debug` and no `Display`, so the only way to render it is to ask, and asking means
 /// passing the deployment's answer.
 pub struct SignatureMismatchDetail {
-    canonical_request: String,
-    string_to_sign: String,
+    canonical_request: zeroize::Zeroizing<Box<[u8]>>,
+    string_to_sign: zeroize::Zeroizing<Box<[u8]>>,
 }
 
+impl zeroize::ZeroizeOnDrop for SignatureMismatchDetail {}
+
 impl SignatureMismatchDetail {
-    /// Captures the two intermediates of one failed candidate.
+    /// Captures the two intermediates of one failed candidate into fixed, zeroized-on-drop buffers.
     #[must_use]
     pub fn new(canonical_request: &CanonicalRequest, string_to_sign: &StringToSign) -> Self {
         Self {
-            canonical_request: canonical_request.text().to_owned(),
-            string_to_sign: string_to_sign.text().to_owned(),
+            canonical_request: zeroize::Zeroizing::new(Box::<[u8]>::from(canonical_request.text().as_bytes())),
+            string_to_sign: zeroize::Zeroizing::new(Box::<[u8]>::from(string_to_sign.text().as_bytes())),
         }
     }
 
     /// The canonical request. Available for structured `debug` logging regardless of the gate.
     #[must_use]
     pub fn canonical_request(&self) -> &str {
-        &self.canonical_request
+        // Constructed exclusively from `CanonicalRequest::text()`, which is valid UTF-8.
+        core::str::from_utf8(&self.canonical_request).unwrap_or("")
     }
 
     /// The string-to-sign. Available for structured `debug` logging regardless of the gate.
     #[must_use]
     pub fn string_to_sign(&self) -> &str {
-        &self.string_to_sign
+        // Constructed exclusively from `StringToSign::text()`, which is valid UTF-8.
+        core::str::from_utf8(&self.string_to_sign).unwrap_or("")
     }
 
     /// What may go into the HTTP response body.
@@ -704,7 +708,7 @@ impl SignatureMismatchDetail {
     /// to off. There is deliberately no `Default` route to the `true` case.
     #[must_use]
     pub fn for_response(&self, verbose: bool) -> Option<(&str, &str)> {
-        verbose.then_some((self.canonical_request.as_str(), self.string_to_sign.as_str()))
+        verbose.then_some((self.canonical_request(), self.string_to_sign()))
     }
 }
 

@@ -42,7 +42,7 @@ impl SecurityFloor {
         if operation.requires_sigv4_under_every_policy() {
             return Err(AuthError::AccessDenied);
         }
-        if let Some(scheme) = self.custom_schemes.matching(&view) {
+        if let Some(scheme) = self.custom_schemes.resolve(&view)? {
             self.enforce_scheme_allowed(operation, SchemeSlot::Header, SigFamily::V4)?;
             return Ok(Admission::Custom(CustomAuthRequest::new(view, scheme, presence, now)));
         }

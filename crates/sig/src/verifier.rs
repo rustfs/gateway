@@ -182,6 +182,21 @@ pub fn detect_aws_credential_marker(view: &WireView<'_>) -> Option<AwsCredential
     None
 }
 
+/// Whether the query string or POST form simultaneously carries both SigV4 and SigV2 credential
+/// markers, creating same-surface H4 ambiguity.
+#[must_use]
+pub(crate) fn has_same_surface_sigv4_sigv2_ambiguity(view: &WireView<'_>) -> bool {
+    let query_v4 = [X_AMZ_ALGORITHM, X_AMZ_SIGNATURE, X_AMZ_CREDENTIAL]
+        .iter()
+        .any(|name| view.query_contains(name));
+    let query_v2 = view.query_contains(AWS_ACCESS_KEY_ID_PARAM) || view.query_contains(SIGV2_SIGNATURE_PARAM);
+    let form_v4 = ["x-amz-algorithm", "x-amz-signature", "x-amz-credential"]
+        .iter()
+        .any(|name| view.form_contains(name));
+    let form_v2 = view.form_contains(AWS_ACCESS_KEY_ID_PARAM) || view.form_contains("signature");
+    (query_v4 && query_v2) || (form_v4 && form_v2)
+}
+
 /// Why a custom scheme could not be registered.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -240,7 +255,10 @@ impl CustomAuthScheme {
             return Err(SchemeRegistrationError::Empty);
         }
         let lowered = header_prefix.to_ascii_lowercase();
-        if lowered.starts_with("x-amz-") || lowered.starts_with(AUTHORIZATION_HEADER) {
+        if lowered.starts_with("x-amz-")
+            || (lowered.ends_with('-') && "x-amz-".starts_with(lowered.as_str()))
+            || lowered.starts_with(AUTHORIZATION_HEADER)
+        {
             return Err(SchemeRegistrationError::ReservedPrefix);
         }
         let shaped = header_prefix.ends_with('-')
@@ -312,10 +330,37 @@ impl CustomSchemeRegistry {
         &self.schemes
     }
 
-    /// The scheme whose prefix this request carries, if any.
+    /// The unique scheme whose prefix this request carries, if exactly one matches.
+    ///
+    /// Returns `None` when no scheme matches or when multiple registered schemes match the same
+    /// request (which [`crate::SecurityFloor::admit`] refuses as ambiguous).
     #[must_use]
     pub fn matching(&self, view: &WireView<'_>) -> Option<CustomAuthScheme> {
-        self.schemes.iter().copied().find(|scheme| scheme.matches(view))
+        let mut matches = self.schemes.iter().copied().filter(|scheme| scheme.matches(view));
+        let first = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(first)
+    }
+
+    /// Whether any registered scheme's prefix is present on this request, including an ambiguous
+    /// multi-scheme match.
+    #[must_use]
+    pub fn any_matches(&self, view: &WireView<'_>) -> bool {
+        self.schemes.iter().any(|scheme| scheme.matches(view))
+    }
+
+    /// Resolves a unique matching custom scheme, refusing simultaneous matches across schemes.
+    pub(crate) fn resolve(&self, view: &WireView<'_>) -> Result<Option<CustomAuthScheme>, crate::verdict::AuthError> {
+        let mut matches = self.schemes.iter().copied().filter(|scheme| scheme.matches(view));
+        let Some(first) = matches.next() else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            return Err(crate::verdict::AuthError::AuthorizationHeaderMalformed);
+        }
+        Ok(Some(first))
     }
 }
 

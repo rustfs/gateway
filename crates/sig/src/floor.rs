@@ -118,9 +118,10 @@ const SIGNED_QUERY_PARAMS: [&str; 12] = [
 ];
 
 /// Every header that carries part of a signature, and must therefore appear at most once.
-const SIGNED_HEADERS: [&str; 6] = [
+const SIGNED_HEADERS: [&str; 7] = [
     AUTHORIZATION_HEADER,
     X_AMZ_DATE_HEADER,
+    "date",
     "x-amz-content-sha256",
     X_AMZ_SECURITY_TOKEN_HEADER,
     X_AMZ_S3SESSION_TOKEN_HEADER,
@@ -262,10 +263,6 @@ impl fmt::Debug for WireView<'_> {
 }
 
 /// H4, the detection half — which authentication surfaces this request touched.
-///
-/// The answer feeds [`CredentialPresence::into_evidence`], which is the only producer of the
-/// [`AnonymousAck`] an anonymous verdict needs. So a request that touched any surface cannot be
-/// answered anonymously: not by this crate, and not by an extension point either.
 #[must_use]
 pub fn detect_credentials(view: &WireView<'_>) -> CredentialPresence {
     let mut presence = CredentialPresence::NONE;
@@ -289,6 +286,9 @@ pub fn detect_credentials(view: &WireView<'_>) -> CredentialPresence {
         || view.form_contains(X_AMZ_S3SESSION_TOKEN_HEADER)
     {
         presence = presence.with_s3_express_session_token();
+    }
+    if crate::verifier::has_same_surface_sigv4_sigv2_ambiguity(view) {
+        presence = presence.with_same_surface_ambiguity();
     }
     presence
 }

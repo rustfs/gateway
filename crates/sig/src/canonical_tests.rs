@@ -205,3 +205,11 @@ fn the_mismatch_detail_stays_out_of_the_response_unless_asked() {
     assert!(detail.for_response(true).is_some());
     assert!(detail.canonical_request().starts_with("GET\n"));
 }
+
+/// Negative — `SignatureMismatchDetail` carries signed header values and must zeroize its
+/// buffers on drop (`ZeroizeOnDrop`) rather than leaving unredacted `String` buffers on the heap.
+#[test]
+fn n_mismatch_detail_zeroizes_buffers_on_drop() {
+    fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<SignatureMismatchDetail>();
+}

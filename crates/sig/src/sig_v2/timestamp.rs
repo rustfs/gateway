@@ -56,21 +56,32 @@ const RFC1123_GMT_LEN: usize = 29;
 /// The length of `Www, DD Mmm YYYY HH:MM:SS +0000`.
 const RFC1123_NUMERIC_LEN: usize = 31;
 
+fn single_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a http::HeaderValue>, AuthError> {
+    let mut values = headers.get_all(name).iter();
+    let first = values.next();
+    if values.next().is_some() {
+        return Err(AuthError::AuthorizationHeaderMalformed);
+    }
+    Ok(first)
+}
+
 /// Reads the timestamp a SigV2 header-authenticated request was signed at.
 ///
 /// `x-amz-date` wins when it is present, which is the same precedence the string-to-sign uses for
 /// its `{Date}` slot: a client that sends both signs against `x-amz-date`, so the skew check must
-/// judge the same field the signature covers. A request carrying neither is refused — SigV2 with
-/// no timestamp is a signature with no expiry.
+/// judge the same field the signature covers. A request carrying neither, or duplicating either,
+/// is refused — SigV2 with no timestamp is a signature with no expiry.
 ///
 /// # Errors
 ///
-/// [`AuthError::AuthorizationHeaderMalformed`] when neither header is present, when the chosen one
-/// is not UTF-8, or when it is in neither accepted spelling.
+/// [`AuthError::AuthorizationHeaderMalformed`] when neither header is present, when either header
+/// appears more than once, when the chosen one is not UTF-8, or when it is in neither accepted
+/// spelling.
 pub fn signed_timestamp(headers: &HeaderMap) -> Result<AmzDate, AuthError> {
-    let raw = headers
-        .get(X_AMZ_DATE_HEADER)
-        .or_else(|| headers.get(DATE_HEADER))
+    let amz = single_header(headers, X_AMZ_DATE_HEADER)?;
+    let date = single_header(headers, DATE_HEADER)?;
+    let raw = amz
+        .or(date)
         .ok_or(AuthError::AuthorizationHeaderMalformed)?
         .to_str()
         .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
@@ -82,16 +93,20 @@ pub fn signed_timestamp(headers: &HeaderMap) -> Result<AmzDate, AuthError> {
 ///
 /// `x-amz-date` wins when both are present, which is the header the string-to-sign is dated with;
 /// whether a `Date` that supplies the timestamp is signed is `SignedHeaderSet::parse_and_enforce`'s
-/// to refuse. A request carrying neither is refused.
+/// to refuse. A request carrying neither, or duplicating either, is refused.
 ///
 /// # Errors
 ///
-/// [`AuthError::AuthorizationHeaderMalformed`] when neither header is present, when the chosen one
-/// is not UTF-8, or when it is not in the spelling its header admits.
+/// [`AuthError::AuthorizationHeaderMalformed`] when neither header is present, when either header
+/// appears more than once, when the chosen one is not UTF-8, or when it is not in the spelling its
+/// header admits.
 pub fn sigv4_header_timestamp(headers: &HeaderMap) -> Result<AmzDate, AuthError> {
-    let (value, http_date) = match headers.get(X_AMZ_DATE_HEADER) {
-        Some(value) => (value, false),
-        None => (headers.get(DATE_HEADER).ok_or(AuthError::AuthorizationHeaderMalformed)?, true),
+    let amz = single_header(headers, X_AMZ_DATE_HEADER)?;
+    let date = single_header(headers, DATE_HEADER)?;
+    let (value, http_date) = match (amz, date) {
+        (Some(value), _) => (value, false),
+        (None, Some(value)) => (value, true),
+        (None, None) => return Err(AuthError::AuthorizationHeaderMalformed),
     };
     let raw = value.to_str().map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
     if http_date {
@@ -227,5 +242,37 @@ mod tests {
     #[test]
     fn a_request_without_a_timestamp_is_refused() {
         assert_eq!(signed_timestamp(&HeaderMap::new()).err(), Some(AuthError::AuthorizationHeaderMalformed));
+    }
+
+    /// Negative: duplicate `Date` or `x-amz-date` headers are refused by both timestamp readers so
+    /// direct callers cannot read only the first header line while canonicalization joins all lines.
+    #[test]
+    fn n_duplicate_date_or_amz_date_headers_are_refused() {
+        let mut dup_date = HeaderMap::new();
+        dup_date.append(http::header::DATE, http::HeaderValue::from_static("Mon, 14 Sep 2026 03:16:56 GMT"));
+        dup_date.append(http::header::DATE, http::HeaderValue::from_static("Mon, 14 Sep 2026 03:16:57 GMT"));
+        assert!(matches!(signed_timestamp(&dup_date), Err(AuthError::AuthorizationHeaderMalformed)));
+        assert!(matches!(sigv4_header_timestamp(&dup_date), Err(AuthError::AuthorizationHeaderMalformed)));
+
+        let mut amz_with_dup_date = dup_date;
+        amz_with_dup_date.insert(
+            http::header::HeaderName::from_static("x-amz-date"),
+            http::HeaderValue::from_static("20260914T031656Z"),
+        );
+        assert!(matches!(
+            signed_timestamp(&amz_with_dup_date),
+            Err(AuthError::AuthorizationHeaderMalformed)
+        ));
+        assert!(matches!(
+            sigv4_header_timestamp(&amz_with_dup_date),
+            Err(AuthError::AuthorizationHeaderMalformed)
+        ));
+
+        let mut dup_amz = HeaderMap::new();
+        let amz_name = http::header::HeaderName::from_static("x-amz-date");
+        dup_amz.append(amz_name.clone(), http::HeaderValue::from_static("20260914T031656Z"));
+        dup_amz.append(amz_name, http::HeaderValue::from_static("20260914T031657Z"));
+        assert!(matches!(signed_timestamp(&dup_amz), Err(AuthError::AuthorizationHeaderMalformed)));
+        assert!(matches!(sigv4_header_timestamp(&dup_amz), Err(AuthError::AuthorizationHeaderMalformed)));
     }
 }

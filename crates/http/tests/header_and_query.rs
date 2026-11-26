@@ -735,3 +735,18 @@ fn n_raw_htab_in_query_string_is_rejected() {
     }
     assert!(QueryIndex::parse("a=1%09b", &Limits::default()).is_ok());
 }
+
+/// Negative — two `Date` headers create timestamp ambiguity between H1/H3 and canonicalization,
+/// so `date` is enforced single-valued at the wire boundary alongside `x-amz-date`.
+#[test]
+fn n_a_repeated_date_header_is_refused() {
+    assert!(
+        rustfs_gateway_http::SINGLE_VALUED_HEADERS.contains(&"date"),
+        "`date` must be listed in SINGLE_VALUED_HEADERS"
+    );
+    let request = put(vec![
+        (name("date"), raw_value(b"Sun, 30 Aug 2015 12:36:00 GMT")),
+        (name("date"), raw_value(b"Sun, 30 Aug 2015 12:36:01 GMT")),
+    ]);
+    assert_eq!(accept(request).err(), Some(WireReject::DuplicateSingleValuedHeader("date")));
+}

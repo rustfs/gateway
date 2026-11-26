@@ -160,16 +160,17 @@ fn the_side_channel_register_is_complete() {
         .iter()
         .filter(|channel| channel.disposition == Disposition::ClosedHere)
         .count();
-    assert!(closed >= 7, "most channels must be closed here, not deferred; saw {closed}");
+    assert!(closed >= 9, "every channel except documented accepted risks must be closed; saw {closed}");
     assert!(
         SIDE_CHANNELS
             .iter()
             .any(|channel| matches!(channel.disposition, Disposition::AcceptedRisk(_)))
     );
     assert!(
-        SIDE_CHANNELS
+        !SIDE_CHANNELS
             .iter()
-            .any(|channel| matches!(channel.disposition, Disposition::DeferredTo(_)))
+            .any(|channel| matches!(channel.disposition, Disposition::DeferredTo(_))),
+        "no side channel should remain deferred once P2-04 has landed"
     );
 }
 

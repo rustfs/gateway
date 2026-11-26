@@ -448,6 +448,7 @@ pub struct CredentialPresence {
     post_policy_signature: bool,
     security_token: bool,
     s3_express_session_token: bool,
+    ambiguous_same_surface: bool,
 }
 
 impl CredentialPresence {
@@ -458,6 +459,7 @@ impl CredentialPresence {
         post_policy_signature: false,
         security_token: false,
         s3_express_session_token: false,
+        ambiguous_same_surface: false,
     };
 
     /// Records that an `Authorization` header was present.
@@ -507,6 +509,13 @@ impl CredentialPresence {
         self.s3_express_session_token
     }
 
+    /// Records that both SigV4 and SigV2 credential markers appeared on the same surface.
+    #[must_use]
+    pub(crate) const fn with_same_surface_ambiguity(mut self) -> Self {
+        self.ambiguous_same_surface = true;
+        self
+    }
+
     /// Whether any authentication surface was touched.
     #[must_use]
     pub const fn any(&self) -> bool {
@@ -515,18 +524,20 @@ impl CredentialPresence {
             || self.post_policy_signature
             || self.security_token
             || self.s3_express_session_token
+            || self.ambiguous_same_surface
     }
 
-    /// Whether more than one signature surface or conflicting session-token headers were populated.
+    /// Whether more than one signature surface, conflicting session-token headers, or both SigV4
+    /// and SigV2 markers on the same surface were populated.
     ///
-    /// A request carrying both an `Authorization` header and `X-Amz-Signature` is ambiguous: the
-    /// two surfaces sign different canonical forms, so accepting either one lets a client pick
-    /// which of two verifications it would rather pass. Mixing `x-amz-security-token` and
-    /// `x-amz-s3session-token` is likewise ambiguous between STS and S3 Express session auth.
+    /// A request carrying both an `Authorization` header and `X-Amz-Signature`, simultaneous
+    /// SigV4 and SigV2 parameters on the same query or form surface, or both
+    /// `x-amz-security-token` and `x-amz-s3session-token` is ambiguous. P2-04 rejects the
+    /// combination; this predicate is what it asks.
     #[must_use]
     pub const fn is_ambiguous(&self) -> bool {
         let surfaces = self.authorization_header as u8 + self.query_signature as u8 + self.post_policy_signature as u8;
-        surfaces > 1 || (self.security_token && self.s3_express_session_token)
+        surfaces > 1 || (self.security_token && self.s3_express_session_token) || self.ambiguous_same_surface
     }
 
     /// Turns "nothing was presented" into the evidence [`Verdict::anonymous`] requires.
