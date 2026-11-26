@@ -12,14 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Family: S3 Metadata configuration reads.
+# Family: S3 Metadata configurations (V1 table and V2 configuration read, create, update, delete).
 #
-# Both generations are GET bucket subresources with the same IAM action. Their distinct query
-# keys keep the V2 configuration response and the legacy V1 table response out of ListObjects.
+# Distinct subresource query keys separate V2 metadata configurations from legacy V1 table
+# configurations and keep reads, creates, updates, and deletes out of bucket fallbacks.
 
 include = [
+  "CreateBucketMetadataConfiguration",
+  "CreateBucketMetadataTableConfiguration",
+  "DeleteBucketMetadataConfiguration",
+  "DeleteBucketMetadataTableConfiguration",
   "GetBucketMetadataConfiguration",
   "GetBucketMetadataTableConfiguration",
+  "UpdateBucketMetadataAnnotationTableConfiguration",
+  "UpdateBucketMetadataInventoryTableConfiguration",
+  "UpdateBucketMetadataJournalTableConfiguration",
 ]
 
 [op.GetBucketMetadataConfiguration]
@@ -37,3 +44,67 @@ response_max_bytes = 1048576
 error_codes = ["NoSuchBucket", "AccessDenied", "MethodNotAllowed"]
 url_encoded_fields = []
 input_hot = ["ExpectedBucketOwner"]
+
+[op.CreateBucketMetadataConfiguration]
+precedence = 285
+auth_action = "s3:CreateBucketMetadataTableConfiguration"
+request_max_bytes = 1048576
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["MetadataConfiguration"]
+output_hot = []
+
+[op.CreateBucketMetadataTableConfiguration]
+precedence = 286
+auth_action = "s3:CreateBucketMetadataTableConfiguration"
+request_max_bytes = 1048576
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["MetadataTableConfiguration"]
+output_hot = []
+
+[op.DeleteBucketMetadataConfiguration]
+precedence = 287
+auth_action = "s3:DeleteBucketMetadataTableConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["ExpectedBucketOwner"]
+output_hot = []
+
+[op.DeleteBucketMetadataTableConfiguration]
+precedence = 288
+auth_action = "s3:DeleteBucketMetadataTableConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["ExpectedBucketOwner"]
+output_hot = []
+
+[op.UpdateBucketMetadataAnnotationTableConfiguration]
+precedence = 289
+auth_action = "s3:UpdateBucketMetadataAnnotationTableConfiguration"
+request_max_bytes = 1048576
+request_root = "AnnotationTableConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["AnnotationTableConfiguration"]
+output_hot = []
+
+[op.UpdateBucketMetadataInventoryTableConfiguration]
+precedence = 290
+auth_action = "s3:UpdateBucketMetadataInventoryTableConfiguration"
+request_max_bytes = 1048576
+request_root = "InventoryTableConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["InventoryTableConfiguration"]
+output_hot = []
+
+[op.UpdateBucketMetadataJournalTableConfiguration]
+precedence = 291
+auth_action = "s3:UpdateBucketMetadataJournalTableConfiguration"
+request_max_bytes = 1048576
+request_root = "JournalTableConfiguration"
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["JournalTableConfiguration"]
+output_hot = []

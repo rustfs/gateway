@@ -1,0 +1,47 @@
+# c-sig-0607 — mixing STS x-amz-security-token and S3 Express x-amz-s3session-token is malformed.
+
+[case]
+id = "c-sig-0607"
+schema_version = 1
+title = "Mixing x-amz-security-token and x-amz-s3session-token headers is refused"
+rationale = """
+STS temporary credentials and S3 Express session tokens bind to different signing services (s3 \
+versus s3express). Presenting both headers in one request is ambiguous between the two session \
+mechanisms and must be rejected as malformed before credential verification."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-security-iam.html"
+summary = "S3 Express session auth uses x-amz-s3session-token exclusively in place of x-amz-security-token."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "s3express-mixed-tokens"
+body = { utf8 = "protected" }
+
+[request]
+method = "GET"
+target = "/conf-sig/s3express-mixed-tokens"
+headers = { "x-amz-security-token" = "sts-token", "x-amz-s3session-token" = "express-token" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true

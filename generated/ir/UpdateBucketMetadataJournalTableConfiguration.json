@@ -1,0 +1,181 @@
+{
+  "ir_version": "3",
+  "operation": "UpdateBucketMetadataJournalTableConfiguration",
+  "http": {
+            "method": "PUT",
+            "target": "Bucket",
+            "precedence": 291,
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "metadataJournalTable" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:UpdateBucketMetadataJournalTableConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 },
+               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+             },
+  "checksum": {
+                "http_checksum_required": false,
+                "request_algorithms": [
+                                        "CRC32",
+                                        "CRC32C",
+                                        "CRC64NVME",
+                                        "SHA1",
+                                        "SHA256",
+                                        "SHA512",
+                                        "MD5",
+                                        "XXHASH64",
+                                        "XXHASH3",
+                                        "XXHASH128"
+                                      ],
+                "response_algorithms": []
+              },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContentMD5",
+                           "wire_name": "content-md5",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumAlgorithm",
+                           "wire_name": "x-amz-sdk-checksum-algorithm",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "StringEnum",
+                                     "values": [
+                                                 "CRC32",
+                                                 "CRC32C",
+                                                 "SHA1",
+                                                 "SHA256",
+                                                 "CRC64NVME",
+                                                 "SHA512",
+                                                 "MD5",
+                                                 "XXHASH64",
+                                                 "XXHASH3",
+                                                 "XXHASH128"
+                                               ]
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "JournalTableConfiguration",
+                           "wire_name": null,
+                           "required": true,
+                           "binding": { "kind": "Payload" },
+                           "type": { "kind": "Structure", "shape": "JournalTableConfigurationUpdates" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": { "fields": [] },
+  "shapes": {
+              "JournalTableConfigurationUpdates": {
+                                                    "kind": "Structure",
+                                                    "fields": [
+                                                                {
+                                                                  "name": "RecordExpiration",
+                                                                  "wire_name": "RecordExpiration",
+                                                                  "required": true,
+                                                                  "binding": { "kind": "BodyXml" },
+                                                                  "type": {
+                                                                            "kind": "Structure",
+                                                                            "shape": "RecordExpiration"
+                                                                          },
+                                                                  "hot": false,
+                                                                  "quirk_refs": []
+                                                                }
+                                                              ],
+                                                    "xml": {
+                                                             "element_order": ["RecordExpiration"],
+                                                             "empty_value_policy": { "RecordExpiration": "emit" },
+                                                             "attributes": []
+                                                           }
+                                                  },
+              "RecordExpiration": {
+                                    "kind": "Structure",
+                                    "fields": [
+                                                {
+                                                  "name": "Expiration",
+                                                  "wire_name": "Expiration",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "StringEnum", "values": ["ENABLED", "DISABLED"] },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Days",
+                                                  "wire_name": "Days",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Integer" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                }
+                                              ],
+                                    "xml": {
+                                             "element_order": ["Expiration", "Days"],
+                                             "empty_value_policy": { "Expiration": "emit", "Days": "emit" },
+                                             "attributes": []
+                                           }
+                                  }
+            },
+  "xml": {
+           "request_root": "JournalTableConfiguration",
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

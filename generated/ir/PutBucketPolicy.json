@@ -10,7 +10,7 @@
                             { "kind": "Target", "target": "Bucket" },
                             { "kind": "QueryPresent", "key": "policy" }
                           ],
-            "success_status": 200,
+            "success_status": 204,
             "alt_success_statuses": [],
             "path_shape": "/{Bucket}"
           },

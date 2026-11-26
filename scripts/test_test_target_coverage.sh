@@ -37,7 +37,7 @@ initialize_sandbox() {
     # does not exist can be told apart from one whose guard stopped naming its crate.
     for guard in check_test_target_consolidation.sh check_server_test_target_consolidation.sh \
         check_sig_test_target_consolidation.sh check_xtask_test_target_consolidation.sh \
-        check_http_test_target_consolidation.sh check_ext_field_test_target_consolidation.sh; do
+        check_http_test_target_consolidation.sh; do
         cp "$REPO_ROOT/scripts/$guard" "$SANDBOX/scripts/"
     done
     # The member set is resolved from the root manifest's own patterns, not listed here. A list

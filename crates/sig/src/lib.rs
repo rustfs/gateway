@@ -134,8 +134,8 @@ pub use clock::{
 pub use derive::{VerifiedScope, calculate_signature, signing_key};
 pub use error::{SigParseError, Unimplemented};
 pub use floor::{
-    Admission, SecurityFloor, WireView, X_AMZ_DATE_HEADER, X_AMZ_EXPIRES, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER,
-    detect_credentials, enforce_no_duplicate_sig_params,
+    Admission, SecurityFloor, WireView, X_AMZ_DATE_HEADER, X_AMZ_EXPIRES, X_AMZ_S3SESSION_TOKEN, X_AMZ_S3SESSION_TOKEN_HEADER,
+    X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, detect_credentials, enforce_no_duplicate_sig_params,
 };
 pub use header_token::{
     HeaderTokenAdmission, HeaderTokenClaim, HeaderTokenReceipt, HeaderTokenRefused, HeaderTokenVerifier, InvalidHeaderTokenClaim,

@@ -35,17 +35,25 @@ use crate::emit::codec::document::{
 };
 
 /// Every operation whose request carries an XML document.
-const DOCUMENT_OPERATIONS: [&str; 24] = [
+const DOCUMENT_OPERATIONS: [&str; 35] = [
     "CompleteMultipartUpload",
     "CreateBucket",
+    "CreateBucketMetadataConfiguration",
+    "CreateBucketMetadataTableConfiguration",
     "DeleteObjects",
+    "PutBucketAbac",
     "PutBucketAccelerateConfiguration",
     "PutBucketAcl",
+    "PutBucketAnalyticsConfiguration",
     "PutBucketCors",
     "PutBucketEncryption",
+    "PutBucketIntelligentTieringConfiguration",
+    "PutBucketInventoryConfiguration",
     "PutBucketLifecycleConfiguration",
     "PutBucketLogging",
+    "PutBucketMetricsConfiguration",
     "PutBucketNotificationConfiguration",
+    "PutBucketOwnershipControls",
     "PutBucketReplication",
     "PutBucketRequestPayment",
     "PutBucketTagging",
@@ -59,6 +67,9 @@ const DOCUMENT_OPERATIONS: [&str; 24] = [
     "PutPublicAccessBlock",
     "RestoreObject",
     "SelectObjectContent",
+    "UpdateBucketMetadataAnnotationTableConfiguration",
+    "UpdateBucketMetadataInventoryTableConfiguration",
+    "UpdateBucketMetadataJournalTableConfiguration",
     "UpdateObjectEncryption",
 ];
 

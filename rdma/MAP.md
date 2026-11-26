@@ -25,7 +25,7 @@ build helper prints the exact command when the checkout is missing and refuses
 any other commit. Build with `../scripts/build-rdma.sh` from this directory or
 use the documented manifest command. From the repository root, load
 `source vendor/rustfs-ucx/scripts/build-env.sh` before running integration tests with
-`cargo +1.98.1 test --manifest-path rdma/Cargo.toml --features rdma -j 2`.
+`cargo +1.97.1 test --manifest-path rdma/Cargo.toml --features rdma -j 2`.
 The pinned private implementation provides the connected data and authenticated
 external wire path. The host supplies explicit service and storage composition;
 see the private documentation for validation requirements.

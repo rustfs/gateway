@@ -29,36 +29,39 @@ pub use crate::ops::enums::{
     Frequency, IncludedObjectVersions, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectAttributes,
     ObjectLockEnabled, ObjectLockEventHold, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, OptionalFields,
     OptionalObjectAttributes, OutputSchemaVersion, PartitionDateSource, Payer, Permission, Protocol, QuoteFields,
-    ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TableBucketType,
-    TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
+    ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SessionMode, SseAlgorithm, Status, StorageClass,
+    TableBucketType, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
     AnalyticsAndOperator, AnalyticsConfiguration, AnalyticsExportDestination, AnalyticsFilter, AnalyticsS3BucketDestination,
-    AnnotationEntry, AnnotationTableConfigurationResult, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration,
-    BucketLoggingStatus, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Condition, ContinuationEvent,
-    CorsConfiguration, CorsRule, CreateBucketConfiguration, CsvInput, CsvOutput, DefaultRetention, DelMarkerExpiration, Delete,
-    DeleteMarkerEntry, DeleteMarkerReplication, DeleteReplication, DeletedObject, Destination, DestinationResult, Encryption,
+    AnnotationEntry, AnnotationTableConfiguration, AnnotationTableConfigurationResult, AnnotationTableConfigurationUpdates,
+    BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
+    CompletedMultipartUpload, CompletedPart, Condition, ContinuationEvent, CorsConfiguration, CorsRule,
+    CreateBucketConfiguration, CsvInput, CsvOutput, DefaultRetention, DelMarkerExpiration, Delete, DeleteMarkerEntry,
+    DeleteMarkerReplication, DeleteReplication, DeletedObject, Destination, DestinationResult, Encryption,
     EncryptionConfiguration, EndEvent, Error, ErrorDetails, ErrorDocument, EventBridgeConfiguration, EventHoldDuration,
     ExcludedPrefix, ExistingObjectReplication, FilterRule, GetBucketMetadataConfigurationResult,
     GetBucketMetadataTableConfigurationResult, GetObjectAttributesParts, GlacierJobParameters, Grant, Grantee, IndexDocument,
     Initiator, InputSerialization, IntelligentTieringAndOperator, IntelligentTieringConfiguration, IntelligentTieringFilter,
     InventoryConfiguration, InventoryDestination, InventoryEncryption, InventoryFilter, InventoryS3BucketDestination,
-    InventorySchedule, InventoryTableConfigurationResult, JournalTableConfigurationResult, JsonInput, JsonOutput,
+    InventorySchedule, InventoryTableConfiguration, InventoryTableConfigurationResult, InventoryTableConfigurationUpdates,
+    JournalTableConfiguration, JournalTableConfigurationResult, JournalTableConfigurationUpdates, JsonInput, JsonOutput,
     LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
-    LoggingEnabled, MetadataConfigurationResult, MetadataEntry, MetadataTableConfigurationResult, Metrics, MetricsAndOperator,
-    MetricsConfiguration, MetricsFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectEncryption, ObjectIdentifier,
-    ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation,
-    OutputSerialization, Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus,
-    Progress, ProgressEvent, PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, RecordsEvent, Redirect,
-    RedirectAllRequestsTo, ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator,
-    ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest,
-    RestoreStatus, RoutingRule, S3KeyFilter, S3Location, S3TablesDestinationResult, ScanRange, SelectObjectContentEventStream,
-    SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix,
-    SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, SsekmsEncryption, Sses3, Stats, StatsEvent, StorageClassAnalysis,
-    StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition,
-    VersioningConfiguration, WebsiteConfiguration,
+    LoggingEnabled, MetadataConfiguration, MetadataConfigurationResult, MetadataEntry, MetadataTableConfiguration,
+    MetadataTableConfigurationResult, MetadataTableEncryptionConfiguration, Metrics, MetricsAndOperator, MetricsConfiguration,
+    MetricsFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration,
+    NotificationConfigurationFilter, Object, ObjectEncryption, ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold,
+    ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization, Owner,
+    OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus, Progress, ProgressEvent,
+    PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, RecordsEvent, Redirect, RedirectAllRequestsTo,
+    ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter,
+    ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus,
+    RoutingRule, S3KeyFilter, S3Location, S3TablesDestination, S3TablesDestinationResult, ScanRange,
+    SelectObjectContentEventStream, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
+    ServerSideEncryptionRule, SessionCredentials, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms,
+    SsekmsEncryption, Sses3, Stats, StatsEvent, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant,
+    TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -75,12 +78,27 @@ pub use crate::ops::copy_object::{
 pub use crate::ops::create_bucket::{
     CreateBucket, Input as CreateBucketInput, InputBuilder as CreateBucketInputBuilder, Output as CreateBucketOutput,
 };
+pub use crate::ops::create_bucket_metadata_configuration::{
+    CreateBucketMetadataConfiguration, Input as CreateBucketMetadataConfigurationInput,
+    InputBuilder as CreateBucketMetadataConfigurationInputBuilder, Output as CreateBucketMetadataConfigurationOutput,
+};
+pub use crate::ops::create_bucket_metadata_table_configuration::{
+    CreateBucketMetadataTableConfiguration, Input as CreateBucketMetadataTableConfigurationInput,
+    InputBuilder as CreateBucketMetadataTableConfigurationInputBuilder, Output as CreateBucketMetadataTableConfigurationOutput,
+};
 pub use crate::ops::create_multipart_upload::{
     CreateMultipartUpload, Input as CreateMultipartUploadInput, InputBuilder as CreateMultipartUploadInputBuilder,
     Output as CreateMultipartUploadOutput,
 };
+pub use crate::ops::create_session::{
+    CreateSession, Input as CreateSessionInput, InputBuilder as CreateSessionInputBuilder, Output as CreateSessionOutput,
+};
 pub use crate::ops::delete_bucket::{
     DeleteBucket, Input as DeleteBucketInput, InputBuilder as DeleteBucketInputBuilder, Output as DeleteBucketOutput,
+};
+pub use crate::ops::delete_bucket_analytics_configuration::{
+    DeleteBucketAnalyticsConfiguration, Input as DeleteBucketAnalyticsConfigurationInput,
+    InputBuilder as DeleteBucketAnalyticsConfigurationInputBuilder, Output as DeleteBucketAnalyticsConfigurationOutput,
 };
 pub use crate::ops::delete_bucket_cors::{
     DeleteBucketCors, Input as DeleteBucketCorsInput, InputBuilder as DeleteBucketCorsInputBuilder,
@@ -90,9 +108,34 @@ pub use crate::ops::delete_bucket_encryption::{
     DeleteBucketEncryption, Input as DeleteBucketEncryptionInput, InputBuilder as DeleteBucketEncryptionInputBuilder,
     Output as DeleteBucketEncryptionOutput,
 };
+pub use crate::ops::delete_bucket_intelligent_tiering_configuration::{
+    DeleteBucketIntelligentTieringConfiguration, Input as DeleteBucketIntelligentTieringConfigurationInput,
+    InputBuilder as DeleteBucketIntelligentTieringConfigurationInputBuilder,
+    Output as DeleteBucketIntelligentTieringConfigurationOutput,
+};
+pub use crate::ops::delete_bucket_inventory_configuration::{
+    DeleteBucketInventoryConfiguration, Input as DeleteBucketInventoryConfigurationInput,
+    InputBuilder as DeleteBucketInventoryConfigurationInputBuilder, Output as DeleteBucketInventoryConfigurationOutput,
+};
 pub use crate::ops::delete_bucket_lifecycle::{
     DeleteBucketLifecycle, Input as DeleteBucketLifecycleInput, InputBuilder as DeleteBucketLifecycleInputBuilder,
     Output as DeleteBucketLifecycleOutput,
+};
+pub use crate::ops::delete_bucket_metadata_configuration::{
+    DeleteBucketMetadataConfiguration, Input as DeleteBucketMetadataConfigurationInput,
+    InputBuilder as DeleteBucketMetadataConfigurationInputBuilder, Output as DeleteBucketMetadataConfigurationOutput,
+};
+pub use crate::ops::delete_bucket_metadata_table_configuration::{
+    DeleteBucketMetadataTableConfiguration, Input as DeleteBucketMetadataTableConfigurationInput,
+    InputBuilder as DeleteBucketMetadataTableConfigurationInputBuilder, Output as DeleteBucketMetadataTableConfigurationOutput,
+};
+pub use crate::ops::delete_bucket_metrics_configuration::{
+    DeleteBucketMetricsConfiguration, Input as DeleteBucketMetricsConfigurationInput,
+    InputBuilder as DeleteBucketMetricsConfigurationInputBuilder, Output as DeleteBucketMetricsConfigurationOutput,
+};
+pub use crate::ops::delete_bucket_ownership_controls::{
+    DeleteBucketOwnershipControls, Input as DeleteBucketOwnershipControlsInput,
+    InputBuilder as DeleteBucketOwnershipControlsInputBuilder, Output as DeleteBucketOwnershipControlsOutput,
 };
 pub use crate::ops::delete_bucket_policy::{
     DeleteBucketPolicy, Input as DeleteBucketPolicyInput, InputBuilder as DeleteBucketPolicyInputBuilder,
@@ -306,6 +349,9 @@ pub use crate::ops::list_objects_v2::{
 pub use crate::ops::list_parts::{
     Input as ListPartsInput, InputBuilder as ListPartsInputBuilder, ListParts, Output as ListPartsOutput,
 };
+pub use crate::ops::put_bucket_abac::{
+    Input as PutBucketAbacInput, InputBuilder as PutBucketAbacInputBuilder, Output as PutBucketAbacOutput, PutBucketAbac,
+};
 pub use crate::ops::put_bucket_accelerate_configuration::{
     Input as PutBucketAccelerateConfigurationInput, InputBuilder as PutBucketAccelerateConfigurationInputBuilder,
     Output as PutBucketAccelerateConfigurationOutput, PutBucketAccelerateConfiguration,
@@ -313,12 +359,24 @@ pub use crate::ops::put_bucket_accelerate_configuration::{
 pub use crate::ops::put_bucket_acl::{
     Input as PutBucketAclInput, InputBuilder as PutBucketAclInputBuilder, Output as PutBucketAclOutput, PutBucketAcl,
 };
+pub use crate::ops::put_bucket_analytics_configuration::{
+    Input as PutBucketAnalyticsConfigurationInput, InputBuilder as PutBucketAnalyticsConfigurationInputBuilder,
+    Output as PutBucketAnalyticsConfigurationOutput, PutBucketAnalyticsConfiguration,
+};
 pub use crate::ops::put_bucket_cors::{
     Input as PutBucketCorsInput, InputBuilder as PutBucketCorsInputBuilder, Output as PutBucketCorsOutput, PutBucketCors,
 };
 pub use crate::ops::put_bucket_encryption::{
     Input as PutBucketEncryptionInput, InputBuilder as PutBucketEncryptionInputBuilder, Output as PutBucketEncryptionOutput,
     PutBucketEncryption,
+};
+pub use crate::ops::put_bucket_intelligent_tiering_configuration::{
+    Input as PutBucketIntelligentTieringConfigurationInput, InputBuilder as PutBucketIntelligentTieringConfigurationInputBuilder,
+    Output as PutBucketIntelligentTieringConfigurationOutput, PutBucketIntelligentTieringConfiguration,
+};
+pub use crate::ops::put_bucket_inventory_configuration::{
+    Input as PutBucketInventoryConfigurationInput, InputBuilder as PutBucketInventoryConfigurationInputBuilder,
+    Output as PutBucketInventoryConfigurationOutput, PutBucketInventoryConfiguration,
 };
 pub use crate::ops::put_bucket_lifecycle_configuration::{
     Input as PutBucketLifecycleConfigurationInput, InputBuilder as PutBucketLifecycleConfigurationInputBuilder,
@@ -328,9 +386,17 @@ pub use crate::ops::put_bucket_logging::{
     Input as PutBucketLoggingInput, InputBuilder as PutBucketLoggingInputBuilder, Output as PutBucketLoggingOutput,
     PutBucketLogging,
 };
+pub use crate::ops::put_bucket_metrics_configuration::{
+    Input as PutBucketMetricsConfigurationInput, InputBuilder as PutBucketMetricsConfigurationInputBuilder,
+    Output as PutBucketMetricsConfigurationOutput, PutBucketMetricsConfiguration,
+};
 pub use crate::ops::put_bucket_notification_configuration::{
     Input as PutBucketNotificationConfigurationInput, InputBuilder as PutBucketNotificationConfigurationInputBuilder,
     Output as PutBucketNotificationConfigurationOutput, PutBucketNotificationConfiguration,
+};
+pub use crate::ops::put_bucket_ownership_controls::{
+    Input as PutBucketOwnershipControlsInput, InputBuilder as PutBucketOwnershipControlsInputBuilder,
+    Output as PutBucketOwnershipControlsOutput, PutBucketOwnershipControls,
 };
 pub use crate::ops::put_bucket_policy::{
     Input as PutBucketPolicyInput, InputBuilder as PutBucketPolicyInputBuilder, Output as PutBucketPolicyOutput, PutBucketPolicy,
@@ -394,6 +460,21 @@ pub use crate::ops::restore_object::{
 pub use crate::ops::select_object_content::{
     Input as SelectObjectContentInput, InputBuilder as SelectObjectContentInputBuilder, Output as SelectObjectContentOutput,
     SelectObjectContent,
+};
+pub use crate::ops::update_bucket_metadata_annotation_table_configuration::{
+    Input as UpdateBucketMetadataAnnotationTableConfigurationInput,
+    InputBuilder as UpdateBucketMetadataAnnotationTableConfigurationInputBuilder,
+    Output as UpdateBucketMetadataAnnotationTableConfigurationOutput, UpdateBucketMetadataAnnotationTableConfiguration,
+};
+pub use crate::ops::update_bucket_metadata_inventory_table_configuration::{
+    Input as UpdateBucketMetadataInventoryTableConfigurationInput,
+    InputBuilder as UpdateBucketMetadataInventoryTableConfigurationInputBuilder,
+    Output as UpdateBucketMetadataInventoryTableConfigurationOutput, UpdateBucketMetadataInventoryTableConfiguration,
+};
+pub use crate::ops::update_bucket_metadata_journal_table_configuration::{
+    Input as UpdateBucketMetadataJournalTableConfigurationInput,
+    InputBuilder as UpdateBucketMetadataJournalTableConfigurationInputBuilder,
+    Output as UpdateBucketMetadataJournalTableConfigurationOutput, UpdateBucketMetadataJournalTableConfiguration,
 };
 pub use crate::ops::update_object_encryption::{
     Input as UpdateObjectEncryptionInput, InputBuilder as UpdateObjectEncryptionInputBuilder,

@@ -178,3 +178,31 @@ fn sanitize_redacts_sigv2_and_sse_c_query_params_and_admits() {
     assert!(entry.target.contains("partNumber=1"));
     admit(&entry).expect("sanitized SigV2 and SSE-C query params must pass admit");
 }
+
+/// Negative and positive — live `x-amz-s3session-token` in a header or presigned query is refused
+/// by `admit`, rewritten to `PLACEHOLDER` by `sanitize`, and then admitted cleanly.
+#[test]
+fn sanitize_redacts_s3_express_session_token_header_and_query_and_admits() {
+    let mut entry = entry_with_target(
+        "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256\
+         &X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20260902%2Fus-east-1%2Fs3express%2Faws4_request\
+         &X-Amz-Date=20260902T000000Z&X-Amz-Expires=300\
+         &X-Amz-S3session-Token=AQoDYXdzS3EXPRESSLIVEVALUE%3D%3D\
+         &X-Amz-SignedHeaders=host\
+         &X-Amz-Signature=1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+    );
+    entry
+        .headers
+        .push(("x-amz-s3session-token".to_owned(), "AQoDYXdzS3EXPRESSHEADERLIVE".to_owned()));
+    assert!(admit(&entry).is_err(), "live s3session token must be refused before sanitize");
+    let touched = sanitize(&mut entry);
+    assert_eq!(touched, ["x-amz-credential", "x-amz-s3session-token", "x-amz-signature"]);
+    assert!(entry.target.contains(&format!("X-Amz-S3session-Token={PLACEHOLDER}")));
+    assert!(
+        entry
+            .headers
+            .iter()
+            .any(|(name, value)| name == "x-amz-s3session-token" && value == PLACEHOLDER)
+    );
+    admit(&entry).expect("sanitized S3 Express session token entry must pass admit");
+}

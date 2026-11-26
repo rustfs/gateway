@@ -50,7 +50,6 @@ COVERED = {
     "crates/http": "check_http_test_target_consolidation.sh",
     "crates/server": "check_server_test_target_consolidation.sh",
     "crates/sig": "check_sig_test_target_consolidation.sh",
-    "spikes/ext-field": "check_ext_field_test_target_consolidation.sh",
     "xtask": "check_xtask_test_target_consolidation.sh",
 }
 

@@ -447,6 +447,7 @@ pub struct CredentialPresence {
     query_signature: bool,
     post_policy_signature: bool,
     security_token: bool,
+    s3_express_session_token: bool,
 }
 
 impl CredentialPresence {
@@ -456,6 +457,7 @@ impl CredentialPresence {
         query_signature: false,
         post_policy_signature: false,
         security_token: false,
+        s3_express_session_token: false,
     };
 
     /// Records that an `Authorization` header was present.
@@ -486,22 +488,45 @@ impl CredentialPresence {
         self
     }
 
+    /// Records that an `x-amz-s3session-token` (or presigned `X-Amz-S3session-Token`) was present.
+    #[must_use]
+    pub const fn with_s3_express_session_token(mut self) -> Self {
+        self.s3_express_session_token = true;
+        self
+    }
+
+    /// Whether an `X-Amz-Security-Token` was presented.
+    #[must_use]
+    pub const fn has_security_token(&self) -> bool {
+        self.security_token
+    }
+
+    /// Whether an S3 Express `x-amz-s3session-token` was presented.
+    #[must_use]
+    pub const fn has_s3_express_session_token(&self) -> bool {
+        self.s3_express_session_token
+    }
+
     /// Whether any authentication surface was touched.
     #[must_use]
     pub const fn any(&self) -> bool {
-        self.authorization_header || self.query_signature || self.post_policy_signature || self.security_token
+        self.authorization_header
+            || self.query_signature
+            || self.post_policy_signature
+            || self.security_token
+            || self.s3_express_session_token
     }
 
-    /// Whether more than one signature surface was populated.
+    /// Whether more than one signature surface or conflicting session-token headers were populated.
     ///
     /// A request carrying both an `Authorization` header and `X-Amz-Signature` is ambiguous: the
     /// two surfaces sign different canonical forms, so accepting either one lets a client pick
-    /// which of two verifications it would rather pass. P2-04 rejects the combination; this
-    /// predicate is what it asks.
+    /// which of two verifications it would rather pass. Mixing `x-amz-security-token` and
+    /// `x-amz-s3session-token` is likewise ambiguous between STS and S3 Express session auth.
     #[must_use]
     pub const fn is_ambiguous(&self) -> bool {
         let surfaces = self.authorization_header as u8 + self.query_signature as u8 + self.post_policy_signature as u8;
-        surfaces > 1
+        surfaces > 1 || (self.security_token && self.s3_express_session_token)
     }
 
     /// Turns "nothing was presented" into the evidence [`Verdict::anonymous`] requires.

@@ -44,10 +44,10 @@ mechanisms, different blast radii and different rules.
 claimed-operation rows described below. Dimensions 2 and 3 are `ExtField` and `CodecPolicy` in
 `rustfs_gateway_types::ext` (`crates/types/src/ext.rs`): a typed vtable registered below a static
 parent shape, and a borrowed per-codec policy. `rustfs-gateway-dialect-minio` is the first
-consumer, registering the lifecycle `DelMarkerExpiration` field through that mechanism. The
-feasibility spike that decided the mechanism, `docs/adr/ADR-0007-ext-field-codec.md` with the
-`spikes/ext-field` crate as its evidence, remains the record of why a runtime vtable won over a
-second generated codec; the spike itself is not the production implementation.
+consumer, registering the lifecycle `DelMarkerExpiration` field through that mechanism. The feasibility spike that decided the mechanism, recorded in `docs/adr/ADR-0007-ext-field-codec.md`,
+proved why a runtime vtable won over a second generated codec; the temporary `spikes/ext-field` crate
+has since been retired now that the production implementation lives in `crates/types/src/ext.rs` and
+`crates/dialect-minio` (rustfs/gateway#1631).
 
 One vendor exception does not wait for dimension 2. ADR-0033 makes six MinIO bucket-configuration
 members (`ExpiryUpdatedAt`, `DelMarkerExpiration`, `ExpiredObjectAllVersions`, `DeleteReplication`,

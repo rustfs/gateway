@@ -685,8 +685,8 @@ fn require_reports_the_missing_operations_on_one_line() {
     assert_eq!(
         text,
         "backend is missing handlers for: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, \
-         CreateBucket, CreateMultipartUpload, DeleteBucket, DeleteBucketCors, DeleteBucketEncryption, DeleteBucketLifecycle, \
-         DeleteBucketPolicy, ... and 82 more (92 of 93)"
+         CreateBucket, CreateBucketMetadataConfiguration, CreateBucketMetadataTableConfiguration, CreateMultipartUpload, \
+         CreateSession, DeleteBucket, DeleteBucketAnalyticsConfiguration, ... and 101 more (111 of 112)"
     );
     assert_eq!(
         missing.missing(),
@@ -695,11 +695,21 @@ fn require_reports_the_missing_operations_on_one_line() {
             "CompleteMultipartUpload",
             "CopyObject",
             "CreateBucket",
+            "CreateBucketMetadataConfiguration",
+            "CreateBucketMetadataTableConfiguration",
             "CreateMultipartUpload",
+            "CreateSession",
             "DeleteBucket",
+            "DeleteBucketAnalyticsConfiguration",
             "DeleteBucketCors",
             "DeleteBucketEncryption",
+            "DeleteBucketIntelligentTieringConfiguration",
+            "DeleteBucketInventoryConfiguration",
             "DeleteBucketLifecycle",
+            "DeleteBucketMetadataConfiguration",
+            "DeleteBucketMetadataTableConfiguration",
+            "DeleteBucketMetricsConfiguration",
+            "DeleteBucketOwnershipControls",
             "DeleteBucketPolicy",
             "DeleteBucketReplication",
             "DeleteBucketTagging",
@@ -757,13 +767,19 @@ fn require_reports_the_missing_operations_on_one_line() {
             "ListObjectsV2",
             "ListParts",
             "PostObject",
+            "PutBucketAbac",
             "PutBucketAccelerateConfiguration",
             "PutBucketAcl",
+            "PutBucketAnalyticsConfiguration",
             "PutBucketCors",
             "PutBucketEncryption",
+            "PutBucketIntelligentTieringConfiguration",
+            "PutBucketInventoryConfiguration",
             "PutBucketLifecycleConfiguration",
             "PutBucketLogging",
+            "PutBucketMetricsConfiguration",
             "PutBucketNotificationConfiguration",
+            "PutBucketOwnershipControls",
             "PutBucketPolicy",
             "PutBucketReplication",
             "PutBucketRequestPayment",
@@ -780,12 +796,15 @@ fn require_reports_the_missing_operations_on_one_line() {
             "RenameObject",
             "RestoreObject",
             "SelectObjectContent",
+            "UpdateBucketMetadataAnnotationTableConfiguration",
+            "UpdateBucketMetadataInventoryTableConfiguration",
+            "UpdateBucketMetadataJournalTableConfiguration",
             "UpdateObjectEncryption",
             "UploadPart",
             "UploadPartCopy"
         ]
     );
-    assert_eq!(missing.required(), 93);
+    assert_eq!(missing.required(), 112);
 }
 
 /// Negative — a long list is truncated and still says how much is missing in total.

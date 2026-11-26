@@ -55,7 +55,15 @@
 # `PutObjectAcl -> PutObject` lines of the route-coverage debt register, and this family retires
 # all three.
 
-include = ["GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl", "GetBucketOwnershipControls"]
+include = [
+  "DeleteBucketOwnershipControls",
+  "GetBucketAcl",
+  "GetBucketOwnershipControls",
+  "GetObjectAcl",
+  "PutBucketAcl",
+  "PutBucketOwnershipControls",
+  "PutObjectAcl",
+]
 
 # =============================================================================================
 # The `?acl` bands: 250 / 260 on a bucket, 550 / 560 on an object
@@ -115,6 +123,23 @@ error_codes = ["NoSuchBucket", "AccessDenied"]
 url_encoded_fields = []
 input_hot = []
 output_hot = ["OwnershipControls"]
+
+[op.PutBucketOwnershipControls]
+precedence = 261
+auth_action = "s3:PutBucketOwnershipControls"
+request_max_bytes = 4096
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["OwnershipControls"]
+output_hot = []
+
+[op.DeleteBucketOwnershipControls]
+precedence = 262
+auth_action = "s3:PutBucketOwnershipControls"
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = []
 
 # =============================================================================================
 # PutBucketAcl

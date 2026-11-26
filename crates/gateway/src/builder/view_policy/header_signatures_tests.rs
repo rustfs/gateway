@@ -471,3 +471,25 @@ fn n_s3vectors_scope_still_refuses_malformed_date_and_payload_under_legacy_profi
         )
     );
 }
+
+/// Positive — `s3express`-scoped header signatures carrying `x-amz-content-sha256` are left to
+/// the security floor and authenticator instead of being refused before lookup.
+#[test]
+fn s3express_scope_with_payload_declaration_is_left_to_the_pipeline() {
+    let with_digest = signed(|pairs| set(pairs, "authorization", &authorization("s3express", "20150830")));
+    assert_eq!(legacy(&with_digest), None);
+}
+
+/// Negative — an `s3express`-scoped header signature without `x-amz-content-sha256` still receives
+/// legacy RustFS's missing-payload-header refusal.
+#[test]
+fn n_s3express_scope_without_payload_declaration_is_still_refused() {
+    let without_digest = signed(|pairs| {
+        set(pairs, "authorization", &authorization("s3express", "20150830"));
+        remove(pairs, "x-amz-content-sha256");
+    });
+    assert_eq!(
+        legacy(&without_digest),
+        answer(400, "InvalidRequest", "missing header: x-amz-content-sha256")
+    );
+}

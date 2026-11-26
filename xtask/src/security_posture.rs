@@ -164,12 +164,14 @@ fn validate_operation_impl_uses_floor(file: &syn::File, path: &Path) -> Result<(
 fn parse_floor_expression(expression: &syn::Expr, path: &Path) -> Result<(String, ParsedFloor), String> {
     let mut expression = expression;
     let mut anonymous = false;
+    let mut privileged = false;
     while let syn::Expr::MethodCall(call) = expression {
         if !call.args.is_empty() {
             return Err(unsupported_floor(path));
         }
         match call.method.to_string().as_str() {
-            "allow_post_policy" => {}
+            "allow_post_policy" | "require_sigv4_under_every_policy" | "refuse_s3_express_session_auth" => {}
+            "mark_privileged" if !privileged => privileged = true,
             "allow_anonymous_after_listing_in_the_posture_report" if !anonymous => anonymous = true,
             _ => return Err(unsupported_floor(path)),
         }
@@ -202,6 +204,7 @@ fn parse_floor_expression(expression: &syn::Expr, path: &Path) -> Result<(String
         "builtin_presigned" => true,
         _ => return Err(unsupported_floor(path)),
     };
+    let presigned = presigned && !privileged;
     Ok((name, ParsedFloor { presigned, anonymous }))
 }
 
@@ -246,6 +249,22 @@ mod tests {
         assert_eq!(name, "PostObject");
         assert!(!floor.presigned);
         assert!(floor.anonymous);
+    }
+
+    #[test]
+    fn audited_narrowings_for_create_session_parse_as_non_presigned_and_non_anonymous() {
+        let expression: syn::Expr = syn::parse_str(
+            r#"OperationFloor::builtin("CreateSession", SigService::S3Express)
+                .mark_privileged()
+                .require_sigv4_under_every_policy()
+                .refuse_s3_express_session_auth()"#,
+        )
+        .expect("fixture must parse");
+
+        let (name, floor) = parse_floor_expression(&expression, Path::new("create_session.rs")).expect("audited narrowings");
+        assert_eq!(name, "CreateSession");
+        assert!(!floor.presigned);
+        assert!(!floor.anonymous);
     }
 
     #[test]

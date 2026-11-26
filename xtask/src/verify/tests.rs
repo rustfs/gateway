@@ -27,9 +27,9 @@ fn the_facade_accepts_its_current_and_legacy_crate_names() {
 
 #[test]
 fn an_exact_workspace_package_wins_before_prefix_compatibility() {
-    let packages = vec!["ext-field-spike".to_owned(), "rustfs-gateway-ext-field-spike".to_owned()];
+    let packages = vec!["compat-sut".to_owned(), "rustfs-gateway-compat-sut".to_owned()];
 
-    assert_eq!(resolve_package_name("ext-field-spike", &packages), Ok("ext-field-spike".to_owned()));
+    assert_eq!(resolve_package_name("compat-sut", &packages), Ok("compat-sut".to_owned()));
 }
 
 #[test]

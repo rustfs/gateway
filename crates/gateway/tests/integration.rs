@@ -239,6 +239,8 @@ mod rustfs_profile;
 mod rustfs_selection;
 #[path = "rustfs_vhost.rs"]
 mod rustfs_vhost;
+#[path = "s3_express_runtime.rs"]
+mod s3_express_runtime;
 #[path = "scope_refusals.rs"]
 mod scope_refusals;
 #[path = "select_frame_records.rs"]

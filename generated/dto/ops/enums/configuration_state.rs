@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ConfigurationState` string enumeration. Bound by: GetBucketMetadataConfiguration.
+/// The `ConfigurationState` string enumeration. Bound by: CreateBucketMetadataConfiguration, GetBucketMetadataConfiguration, UpdateBucketMetadataAnnotationTableConfiguration, UpdateBucketMetadataInventoryTableConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ConfigurationState::custom`]. Adding a constant is a minor version

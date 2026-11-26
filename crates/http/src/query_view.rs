@@ -89,6 +89,7 @@ pub const SINGLE_VALUED_QUERY_PARAMS: &[&str] = &[
     "X-Amz-SignedHeaders",
     "X-Amz-Algorithm",
     "X-Amz-Security-Token",
+    "X-Amz-S3session-Token",
 ];
 
 /// One parameter's position within the query string.

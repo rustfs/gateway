@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `SseAlgorithm` string enumeration. Bound by: GetBucketEncryption, PutBucketEncryption.
+/// The `SseAlgorithm` string enumeration. Bound by: CreateBucketMetadataConfiguration, GetBucketEncryption, PutBucketEncryption, UpdateBucketMetadataAnnotationTableConfiguration, UpdateBucketMetadataInventoryTableConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`SseAlgorithm::custom`]. Adding a constant is a minor version
@@ -32,19 +32,19 @@ use std::borrow::Cow;
 pub struct SseAlgorithm(Cow<'static, str>);
 
 impl SseAlgorithm {
+    /// `aws:kms`
+    pub const AWS_KMS: Self = Self(Cow::Borrowed("aws:kms"));
     /// `AES256`
     pub const AES256: Self = Self(Cow::Borrowed("AES256"));
     /// `aws:fsx`
     pub const AWS_FSX: Self = Self(Cow::Borrowed("aws:fsx"));
     /// `aws:backup`
     pub const AWS_BACKUP: Self = Self(Cow::Borrowed("aws:backup"));
-    /// `aws:kms`
-    pub const AWS_KMS: Self = Self(Cow::Borrowed("aws:kms"));
     /// `aws:kms:dsse`
     pub const AWS_KMS_DSSE: Self = Self(Cow::Borrowed("aws:kms:dsse"));
 
     /// Every value the pinned model declares, in model order.
-    pub const VALUES: &'static [&'static str] = &["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"];
+    pub const VALUES: &'static [&'static str] = &["aws:kms", "AES256", "aws:fsx", "aws:backup", "aws:kms:dsse"];
 
     /// Wraps a value this build has no constant for.
     ///

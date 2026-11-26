@@ -6,6 +6,7 @@ The private checkout is replaced by a local stand-in repository; nothing here co
 
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -97,7 +98,7 @@ class RdmaBuildTests(unittest.TestCase):
         self.prepare_private()
         result = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[:2], ["+1.98.1", "build"])
+        self.assertEqual(result.stdout.splitlines()[:2], ["+1.97.1", "build"])
 
     def test_checkout_at_another_commit_names_both_commits(self):
         pinned = self.prepare_private()
@@ -202,9 +203,23 @@ class RdmaBuildTests(unittest.TestCase):
         self.prepare_private()
         result = self.run_build("--release", "--offline")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["+1.98.1", "build", "--manifest-path",
+        self.assertEqual(result.stdout.splitlines(), ["+1.97.1", "build", "--manifest-path",
             str(self.root / "rdma/Cargo.toml"), "--features", "rdma", "-j", "2",
             "--release", "--offline"])
+
+    def test_rdma_msrv_and_default_toolchain_match_workspace(self):
+        workspace_manifest = (REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8")
+        rdma_manifest = (REPO_ROOT / "rdma/Cargo.toml").read_text(encoding="utf-8")
+        ws_match = re.search(r'(?m)^rust-version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', workspace_manifest)
+        rdma_match = re.search(r'(?m)^rust-version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', rdma_manifest)
+        self.assertIsNotNone(ws_match, "workspace Cargo.toml must declare rust-version")
+        self.assertIsNotNone(rdma_match, "rdma/Cargo.toml must declare rust-version")
+        expected = ws_match.group(1)
+        self.assertEqual(rdma_match.group(1), expected)
+        self.prepare_private()
+        result = self.run_build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0], f"+{expected}")
 
     def test_toolchain_and_parallelism_are_explicit(self):
         self.prepare_private()

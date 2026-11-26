@@ -39,6 +39,12 @@ use crate::verdict::Identity;
 
 use super::SignerError;
 
+#[derive(Clone, Copy)]
+enum SessionHeaderSurface {
+    Security,
+    S3Express,
+}
+
 /// The credentials one signer signs with.
 ///
 /// It holds a [`SecretBytes`] and an optional [`SessionToken`], so it has no `Debug`, no `Display`
@@ -54,6 +60,7 @@ pub struct SigningCredentials {
     access_key_id: Identity,
     secret: SecretBytes,
     session_token: Option<SessionToken>,
+    session_surface: SessionHeaderSurface,
 }
 
 impl SigningCredentials {
@@ -70,13 +77,23 @@ impl SigningCredentials {
             access_key_id: Identity::new(access_key_id)?,
             secret: SecretBytes::new(secret_access_key),
             session_token: None,
+            session_surface: SessionHeaderSurface::Security,
         })
     }
 
-    /// Attaches an STS session token.
+    /// Attaches an STS session token (`x-amz-security-token` / `X-Amz-Security-Token`).
     #[must_use]
     pub fn with_session_token(mut self, token: SessionToken) -> Self {
         self.session_token = Some(token);
+        self.session_surface = SessionHeaderSurface::Security;
+        self
+    }
+
+    /// Attaches an S3 Express session token (`x-amz-s3session-token` / `X-Amz-S3session-Token`).
+    #[must_use]
+    pub fn with_s3_express_session_token(mut self, token: SessionToken) -> Self {
+        self.session_token = Some(token);
+        self.session_surface = SessionHeaderSurface::S3Express;
         self
     }
 
@@ -96,6 +113,12 @@ impl SigningCredentials {
     #[must_use]
     pub fn session_token(&self) -> Option<&SessionToken> {
         self.session_token.as_ref()
+    }
+
+    /// Whether the attached session token travels as `x-amz-s3session-token`.
+    #[must_use]
+    pub const fn is_s3_express_session_token(&self) -> bool {
+        self.session_token.is_some() && matches!(self.session_surface, SessionHeaderSurface::S3Express)
     }
 }
 

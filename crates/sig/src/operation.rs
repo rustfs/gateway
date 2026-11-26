@@ -184,6 +184,8 @@ pub struct OperationFloor {
     /// Set by [`OperationFloor::refuse_sigv2_under_every_policy`]. Read only through
     /// [`OperationFloor::refuses_sigv2_under_every_policy`], which `sigv4_required` also implies.
     sigv2_refused: bool,
+    /// Set by [`OperationFloor::refuse_s3_express_session_auth`].
+    s3_express_session_auth_refused: bool,
     bearer: Option<QueryBearerClaim>,
     pub(crate) signed_event_list: bool,
 }
@@ -199,6 +201,7 @@ impl OperationFloor {
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
             sigv4_required: false,
             sigv2_refused: false,
+            s3_express_session_auth_refused: false,
             bearer: None,
             signed_event_list: false,
         }
@@ -219,6 +222,7 @@ impl OperationFloor {
             },
             sigv4_required: false,
             sigv2_refused: false,
+            s3_express_session_auth_refused: false,
             bearer: None,
             signed_event_list: false,
         }
@@ -234,6 +238,7 @@ impl OperationFloor {
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
             sigv4_required: false,
             sigv2_refused: false,
+            s3_express_session_auth_refused: false,
             bearer: None,
             signed_event_list: false,
         }
@@ -299,6 +304,17 @@ impl OperationFloor {
     #[must_use]
     pub const fn refuse_sigv2_under_every_policy(mut self) -> Self {
         self.sigv2_refused = true;
+        self
+    }
+
+    /// Refuses S3 Express `x-amz-s3session-token` authentication on this operation.
+    ///
+    /// Used by `CreateSession`, which mints S3 Express sessions and therefore refuses session
+    /// tokens themselves (`DisableS3ExpressSessionAuth`), while keeping long-term IAM and STS
+    /// temporary credentials eligible.
+    #[must_use]
+    pub const fn refuse_s3_express_session_auth(mut self) -> Self {
+        self.s3_express_session_auth_refused = true;
         self
     }
 
@@ -404,6 +420,12 @@ impl OperationFloor {
     #[must_use]
     pub const fn refuses_sigv2_under_every_policy(&self) -> bool {
         self.sigv2_refused || self.sigv4_required
+    }
+
+    /// Whether this operation refuses S3 Express `x-amz-s3session-token` authentication.
+    #[must_use]
+    pub const fn refuses_s3_express_session_auth(&self) -> bool {
+        self.s3_express_session_auth_refused
     }
 
     /// Whether this operation admits a request that presented nothing, under `policy`.

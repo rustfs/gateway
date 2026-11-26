@@ -406,8 +406,11 @@ pub const REDACTED_WIRE_NAMES: &[&str] = &[
     "ReplicaKmsKeyID",
     "KeyId",
     "KMSKeyId",
+    "KmsKeyArn",
     "KMSContext",
     "Account",
+    "SecretAccessKey",
+    "SessionToken",
 ];
 
 /// Model members whose string value must use the dedicated zeroizing DTO carrier.

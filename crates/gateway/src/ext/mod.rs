@@ -71,6 +71,7 @@ mod bucket_owner;
 mod client_facts;
 mod cors;
 mod credential_guard;
+mod credential_provider;
 mod credentials;
 mod filter;
 mod governor;

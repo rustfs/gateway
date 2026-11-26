@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Frequency` string enumeration. Bound by: GetBucketInventoryConfiguration, ListBucketInventoryConfigurations.
+/// The `Frequency` string enumeration. Bound by: GetBucketInventoryConfiguration, ListBucketInventoryConfigurations, PutBucketInventoryConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Frequency::custom`]. Adding a constant is a minor version

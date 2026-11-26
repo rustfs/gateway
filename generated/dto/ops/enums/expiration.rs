@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Expiration` string enumeration. Bound by: GetBucketMetadataConfiguration.
+/// The `Expiration` string enumeration. Bound by: CreateBucketMetadataConfiguration, GetBucketMetadataConfiguration, UpdateBucketMetadataJournalTableConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Expiration::custom`]. Adding a constant is a minor version

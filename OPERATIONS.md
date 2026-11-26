@@ -17,10 +17,10 @@ such a row as though the key selected the operation is the opposite of what the 
 
 | Query key | Operations |
 | --- | --- |
-| `abac` | [CreateBucket](#createbucket) (absent), [GetBucketAbac](#getbucketabac) |
+| `abac` | [CreateBucket](#createbucket) (absent), [GetBucketAbac](#getbucketabac), [PutBucketAbac](#putbucketabac) |
 | `accelerate` | [CreateBucket](#createbucket) (absent), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration) |
 | `acl` | [CreateBucket](#createbucket) (absent), [GetBucketAcl](#getbucketacl), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation) (absent), [GetObjectTorrent](#getobjecttorrent) (absent), [ListObjectAnnotations](#listobjectannotations) (absent), [PutBucketAcl](#putbucketacl), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation) (absent) |
-| `analytics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations) |
+| `analytics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration) |
 | `annotation` | [DeleteObjectAnnotation](#deleteobjectannotation), [GetObjectAnnotation](#getobjectannotation), [GetObjectTorrent](#getobjecttorrent) (absent), [ListObjectAnnotations](#listobjectannotations), [PutObjectAnnotation](#putobjectannotation), [UpdateObjectEncryption](#updateobjectencryption) (absent) |
 | `annotation-prefix` | [ListObjectAnnotations](#listobjectannotations) |
 | `annotationName` | [DeleteObjectAnnotation](#deleteobjectannotation), [GetObjectAnnotation](#getobjectannotation), [ListObjectAnnotations](#listobjectannotations) (absent), [PutObjectAnnotation](#putobjectannotation) |
@@ -33,9 +33,9 @@ such a row as though the key selected the operation is the opposite of what the 
 | `encoding-type` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `encryption` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketEncryption](#deletebucketencryption), [GetBucketEncryption](#getbucketencryption), [PutBucketEncryption](#putbucketencryption), [UpdateObjectEncryption](#updateobjectencryption) |
 | `fetch-owner` | [ListObjectsV2](#listobjectsv2) |
-| `id` | [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration) |
-| `intelligent-tiering` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations) |
-| `inventory` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations) |
+| `id` | [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration), [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration), [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration), [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration) |
+| `intelligent-tiering` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration) |
+| `inventory` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration) |
 | `key-marker` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions) |
 | `legal-hold` | [GetObjectAnnotation](#getobjectannotation) (absent), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectTorrent](#getobjecttorrent) (absent), [ListObjectAnnotations](#listobjectannotations) (absent), [PutObjectAnnotation](#putobjectannotation) (absent), [PutObjectLegalHold](#putobjectlegalhold) |
 | `lifecycle` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketLifecycle](#deletebucketlifecycle), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) |
@@ -49,15 +49,15 @@ such a row as though the key selected the operation is the opposite of what the 
 | `max-keys` | [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `max-parts` | [ListParts](#listparts) |
 | `max-uploads` | [ListMultipartUploads](#listmultipartuploads) |
-| `metadataAnnotationTable` | [CreateBucket](#createbucket) (absent) |
-| `metadataConfiguration` | [DeleteBucket](#deletebucket) (absent), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration) |
-| `metadataInventoryTable` | [CreateBucket](#createbucket) (absent) |
-| `metadataJournalTable` | [CreateBucket](#createbucket) (absent) |
-| `metadataTable` | [DeleteBucket](#deletebucket) (absent), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration) |
-| `metrics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations) |
+| `metadataAnnotationTable` | [CreateBucket](#createbucket) (absent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration) |
+| `metadataConfiguration` | [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [DeleteBucket](#deletebucket) (absent), [DeleteBucketMetadataConfiguration](#deletebucketmetadataconfiguration), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration) |
+| `metadataInventoryTable` | [CreateBucket](#createbucket) (absent), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration) |
+| `metadataJournalTable` | [CreateBucket](#createbucket) (absent), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration) |
+| `metadataTable` | [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [DeleteBucket](#deletebucket) (absent), [DeleteBucketMetadataTableConfiguration](#deletebucketmetadatatableconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration) |
+| `metrics` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration) |
 | `notification` | [CreateBucket](#createbucket) (absent), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration) |
 | `object-lock` | [CreateBucket](#createbucket) (absent), [GetObjectLockConfiguration](#getobjectlockconfiguration), [PutObjectLockConfiguration](#putobjectlockconfiguration) |
-| `ownershipControls` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [GetBucketOwnershipControls](#getbucketownershipcontrols) |
+| `ownershipControls` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketOwnershipControls](#deletebucketownershipcontrols), [GetBucketOwnershipControls](#getbucketownershipcontrols), [PutBucketOwnershipControls](#putbucketownershipcontrols) |
 | `part-number-marker` | [ListParts](#listparts) |
 | `partNumber` | [GetObject](#getobject), [HeadObject](#headobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `policy` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketPolicy](#deletebucketpolicy), [GetBucketPolicy](#getbucketpolicy), [PutBucketPolicy](#putbucketpolicy) |
@@ -77,6 +77,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `retention` | [GetObjectAnnotation](#getobjectannotation) (absent), [GetObjectRetention](#getobjectretention), [GetObjectTorrent](#getobjecttorrent) (absent), [ListObjectAnnotations](#listobjectannotations) (absent), [PutObjectAnnotation](#putobjectannotation) (absent), [PutObjectRetention](#putobjectretention) |
 | `select` | [SelectObjectContent](#selectobjectcontent) |
 | `select-type` | [SelectObjectContent](#selectobjectcontent) |
+| `session` | [CreateSession](#createsession) |
 | `start-after` | [ListObjectsV2](#listobjectsv2) |
 | `tagging` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketTagging](#deletebuckettagging), [DeleteObjectTagging](#deleteobjecttagging), [GetBucketTagging](#getbuckettagging), [GetObjectAnnotation](#getobjectannotation) (absent), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent) (absent), [ListObjectAnnotations](#listobjectannotations) (absent), [PutBucketTagging](#putbuckettagging), [PutObjectAnnotation](#putobjectannotation) (absent), [PutObjectTagging](#putobjecttagging) |
 | `torrent` | [GetObjectTorrent](#getobjecttorrent) |
@@ -99,7 +100,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `content-encoding` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `content-language` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `content-length` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart) |
-| `content-md5` | [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart) |
+| `content-md5` | [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [PutBucketAbac](#putbucketabac), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLogging](#putbucketlogging), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart) |
 | `content-range` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `content-type` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `etag` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectAnnotation](#putobjectannotation), [UploadPart](#uploadpart) |
@@ -146,8 +147,9 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-copy-source-server-side-encryption-customer-key` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-server-side-encryption-customer-key-md5` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-copy-source-version-id` | [CopyObject](#copyobject), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-create-session-mode` | [CreateSession](#createsession) |
 | `x-amz-delete-marker` | [DeleteObject](#deleteobject), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject) |
-| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectAnnotation](#deleteobjectannotation), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [ListMultipartUploads](#listmultipartuploads), [ListObjectAnnotations](#listobjectannotations), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-expected-bucket-owner` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration), [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketMetadataConfiguration](#deletebucketmetadataconfiguration), [DeleteBucketMetadataTableConfiguration](#deletebucketmetadatatableconfiguration), [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration), [DeleteBucketOwnershipControls](#deletebucketownershipcontrols), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectAnnotation](#deleteobjectannotation), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [ListMultipartUploads](#listmultipartuploads), [ListObjectAnnotations](#listobjectannotations), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-expiration` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-grant-full-control` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
 | `x-amz-grant-read` | [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [PutBucketAcl](#putbucketacl), [PutObject](#putobject), [PutObjectAcl](#putobjectacl) |
@@ -187,11 +189,11 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-request-payer` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjectAnnotation](#deleteobjectannotation), [DeleteObjects](#deleteobjects), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [HeadObject](#headobject), [ListMultipartUploads](#listmultipartuploads), [ListObjectAnnotations](#listobjectannotations), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-restore` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-restore-output-path` | [RestoreObject](#restoreobject) |
-| `x-amz-sdk-checksum-algorithm` | [DeleteObjects](#deleteobjects), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart) |
-| `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectAnnotation](#putobjectannotation), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
-| `x-amz-server-side-encryption-context` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [PutObject](#putobject) |
+| `x-amz-sdk-checksum-algorithm` | [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [DeleteObjects](#deleteobjects), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart) |
+| `x-amz-server-side-encryption` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectAnnotation](#putobjectannotation), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-aws-kms-key-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-bucket-key-enabled` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `x-amz-server-side-encryption-context` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [PutObject](#putobject) |
 | `x-amz-server-side-encryption-customer-algorithm` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-customer-key` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-server-side-encryption-customer-key-md5` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
@@ -212,7 +214,7 @@ such a row as though the key selected the operation is the opposite of what the 
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [ListBuckets](#listbuckets), [ListDirectoryBuckets](#listdirectorybuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RenameObject](#renameobject), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [DeleteBucket](#deletebucket), [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration), [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketMetadataConfiguration](#deletebucketmetadataconfiguration), [DeleteBucketMetadataTableConfiguration](#deletebucketmetadatatableconfiguration), [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration), [DeleteBucketOwnershipControls](#deletebucketownershipcontrols), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [ListBuckets](#listbuckets), [ListDirectoryBuckets](#listdirectorybuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RenameObject](#renameobject), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `AnnotationLimitExceeded` | [PutObjectAnnotation](#putobjectannotation) |
 | `AnnotationNameTooLong` | [PutObjectAnnotation](#putobjectannotation) |
 | `BadDigest` | [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutPublicAccessBlock](#putpublicaccessblock), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart) |
@@ -228,7 +230,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `IdempotencyParameterMismatch` | [RenameObject](#renameobject) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `InvalidAnnotationName` | [PutObjectAnnotation](#putobjectannotation) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidBucketName` | [CreateBucket](#createbucket) |
 | `InvalidColumnIndex` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidCompressionFormat` | [SelectObjectContent](#selectobjectcontent) |
@@ -249,11 +251,11 @@ such a row as though the key selected the operation is the opposite of what the 
 | `InvalidWriteOffset` | [PutObject](#putobject) |
 | `JSONParsingError` | [SelectObjectContent](#selectobjectcontent) |
 | `MalformedPolicy` | [PutBucketPolicy](#putbucketpolicy) |
-| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [DeleteObjects](#deleteobjects), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateObjectEncryption](#updateobjectencryption) |
+| `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [DeleteObjects](#deleteobjects), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption) |
 | `MethodNotAllowed` | [CopyObject](#copyobject), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetObject](#getobject), [HeadObject](#headobject), [UploadPartCopy](#uploadpartcopy) |
 | `MissingContentLength` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `NoSuchAnnotation` | [GetObjectAnnotation](#getobjectannotation) |
-| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectAnnotation](#deleteobjectannotation), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [ListMultipartUploads](#listmultipartuploads), [ListObjectAnnotations](#listobjectannotations), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `NoSuchBucket` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [DeleteBucket](#deletebucket), [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration), [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketMetadataConfiguration](#deletebucketmetadataconfiguration), [DeleteBucketMetadataTableConfiguration](#deletebucketmetadatatableconfiguration), [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration), [DeleteBucketOwnershipControls](#deletebucketownershipcontrols), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectAnnotation](#deleteobjectannotation), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketAnalyticsConfigurations](#listbucketanalyticsconfigurations), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations), [ListMultipartUploads](#listmultipartuploads), [ListObjectAnnotations](#listobjectannotations), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `NoSuchBucketPolicy` | [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus) |
 | `NoSuchCORSConfiguration` | [GetBucketCors](#getbucketcors) |
 | `NoSuchKey` | [CopyObject](#copyobject), [DeleteObjectAnnotation](#deleteobjectannotation), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAnnotation](#getobjectannotation), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [HeadObject](#headobject), [ListObjectAnnotations](#listobjectannotations), [PutObjectAcl](#putobjectacl), [PutObjectAnnotation](#putobjectannotation), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateObjectEncryption](#updateobjectencryption), [UploadPartCopy](#uploadpartcopy) |
@@ -290,11 +292,21 @@ such a row as though the key selected the operation is the opposite of what the 
 | [CompleteMultipartUpload](#completemultipartupload) | POST | `/{Bucket}/{Key+}` | `uploadId` | `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`, `MalformedXML`, `InvalidArgument`, `InvalidRequest`, `PreconditionFailed`, `ConditionalRequestConflict` | `q-mpu-etag-0028`, `q-mpu-request-root-0030`, `q-mpu-late-error-0033`, `q-mpu-trailer-0034`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038`, `q-mpu-metadata-0039` |
 | [CopyObject](#copyobject) | PUT | `/{Bucket}/{Key+}` | — | `x-amz-copy-source`, `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `MethodNotAllowed`, `EntityTooLarge`, `ObjectNotInActiveTierError` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-directive-0079`, `q-copy-self-0080`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083` |
 | [CreateBucket](#createbucket) | PUT | `/{Bucket}` | `abac`, `accelerate`, `acl`, `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `logging`, `metadataAnnotationTable`, `metadataInventoryTable`, `metadataJournalTable`, `metrics`, `notification`, `object-lock`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `requestPayment`, `tagging`, `versioning`, `website` | — | 200 | `InvalidLocationConstraint`, `MalformedXML`, `InvalidBucketName`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect`, `BucketAlreadyExists`, `BucketAlreadyOwnedByYou` | `q-bkt-0001`, `q-bkt-0002`, `q-bkt-0003`, `q-bkt-0004`, `q-bkt-0005`, `q-bkt-0006`, `q-bkt-0011` |
+| [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration) | POST | `/{Bucket}` | `metadataConfiguration` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
+| [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration) | POST | `/{Bucket}` | `metadataTable` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [CreateMultipartUpload](#createmultipartupload) | POST | `/{Bucket}/{Key+}` | `uploads` | `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `InvalidRequest`, `InvalidStorageClass` | `q-mpu-root-0029`, `q-mpu-metadata-0039` |
+| [CreateSession](#createsession) | GET | `/{Bucket}` | `session` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | — |
 | [DeleteBucket](#deletebucket) | DELETE | `/{Bucket}` | `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `metadataConfiguration`, `metadataTable`, `metrics`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `tagging`, `website` | — | 204 | `NoSuchBucket`, `BucketNotEmpty`, `AccessDenied`, `PermanentRedirect` | `q-bkt-0007`, `q-bkt-0008` |
+| [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration) | DELETE | `/{Bucket}` | `analytics`, `id` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
 | [DeleteBucketCors](#deletebucketcors) | DELETE | `/{Bucket}` | `cors` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-cors-0006` |
 | [DeleteBucketEncryption](#deletebucketencryption) | DELETE | `/{Bucket}` | `encryption` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-enc-0003` |
+| [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration) | DELETE | `/{Bucket}` | `id`, `intelligent-tiering` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
+| [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration) | DELETE | `/{Bucket}` | `id`, `inventory` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
 | [DeleteBucketLifecycle](#deletebucketlifecycle) | DELETE | `/{Bucket}` | `lifecycle` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-lc-0004` |
+| [DeleteBucketMetadataConfiguration](#deletebucketmetadataconfiguration) | DELETE | `/{Bucket}` | `metadataConfiguration` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
+| [DeleteBucketMetadataTableConfiguration](#deletebucketmetadatatableconfiguration) | DELETE | `/{Bucket}` | `metadataTable` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
+| [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration) | DELETE | `/{Bucket}` | `id`, `metrics` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
+| [DeleteBucketOwnershipControls](#deletebucketownershipcontrols) | DELETE | `/{Bucket}` | `ownershipControls` | — | 204 | `NoSuchBucket`, `AccessDenied` | — |
 | [DeleteBucketPolicy](#deletebucketpolicy) | DELETE | `/{Bucket}` | `policy` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-pol-0004` |
 | [DeleteBucketReplication](#deletebucketreplication) | DELETE | `/{Bucket}` | `replication` | — | 204 | `NoSuchBucket`, `AccessDenied` | `q-repl-0003` |
 | [DeleteBucketTagging](#deletebuckettagging) | DELETE | `/{Bucket}` | `tagging` | — | 204 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument` | `q-tag-delete-idempotent-0091` |
@@ -351,14 +363,20 @@ such a row as though the key selected the operation is the opposite of what the 
 | [ListObjects](#listobjects) | GET | `/{Bucket}` | `delimiter`, `encoding-type`, `marker`, `max-keys`, `prefix` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0013`, `q-empty-0063`, `q-marker-0064`, `q-owner-0065`, `q-order-0066`, `q-encoding-0067`, `q-maxkeys-0068` |
 | [ListObjectsV2](#listobjectsv2) | GET | `/{Bucket}` | `continuation-token`, `delimiter`, `encoding-type`, `fetch-owner`, `list-type`, `max-keys`, `prefix`, `start-after` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0013`, `q-order-0014`, `q-encoding-0015` |
 | [ListParts](#listparts) | GET | `/{Bucket}/{Key+}` | `max-parts`, `part-number-marker`, `uploadId` | — | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-part-0031`, `q-mpu-upload-id-0037`, `q-mpu-marker-0040` |
+| [PutBucketAbac](#putbucketabac) | PUT | `/{Bucket}` | `abac` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration) | PUT | `/{Bucket}` | `accelerate` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | `q-acc-0002`, `q-acc-0003` |
 | [PutBucketAcl](#putbucketacl) | PUT | `/{Bucket}` | `acl` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-acl-0002`, `q-acl-0003`, `q-acl-0004`, `q-acl-0005`, `q-acl-0006`, `q-acl-0007`, `q-acl-0009`, `q-acl-0010`, `q-acl-0011`, `q-acl-0012`, `q-acl-0013` |
+| [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration) | PUT | `/{Bucket}` | `analytics`, `id` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [PutBucketCors](#putbucketcors) | PUT | `/{Bucket}` | `cors` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-cors-0003`, `q-cors-0004`, `q-cors-0005`, `q-cors-0007`, `q-cors-0008` |
 | [PutBucketEncryption](#putbucketencryption) | PUT | `/{Bucket}` | `encryption` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-enc-0004`, `q-enc-0005`, `q-enc-0006`, `q-enc-0007`, `q-enc-0008`, `q-enc-0009` |
+| [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration) | PUT | `/{Bucket}` | `id`, `intelligent-tiering` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
+| [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration) | PUT | `/{Bucket}` | `id`, `inventory` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) | PUT | `/{Bucket}` | `lifecycle` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lc-0002`, `q-lc-0005`, `q-lc-0006`, `q-lc-0007`, `q-lc-0008`, `q-lc-0009`, `q-lc-0010`, `q-lc-0011`, `q-lc-0012`, `q-lc-0013`, `q-lc-0014` |
 | [PutBucketLogging](#putbucketlogging) | PUT | `/{Bucket}` | `logging` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-log-0002`, `q-log-0003`, `q-log-0004` |
+| [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration) | PUT | `/{Bucket}` | `id`, `metrics` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration) | PUT | `/{Bucket}` | `notification` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | `q-ntf-0002`, `q-ntf-0003`, `q-ntf-0004`, `q-ntf-0005` |
-| [PutBucketPolicy](#putbucketpolicy) | PUT | `/{Bucket}` | `policy` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedPolicy`, `InvalidPolicyDocument`, `BadDigest` | `q-pol-0001`, `q-pol-0006`, `q-pol-0007`, `q-pol-0008` |
+| [PutBucketOwnershipControls](#putbucketownershipcontrols) | PUT | `/{Bucket}` | `ownershipControls` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
+| [PutBucketPolicy](#putbucketpolicy) | PUT | `/{Bucket}` | `policy` | — | 204 | `NoSuchBucket`, `AccessDenied`, `MalformedPolicy`, `InvalidPolicyDocument`, `BadDigest` | `q-pol-0001`, `q-pol-0006`, `q-pol-0007`, `q-pol-0008` |
 | [PutBucketReplication](#putbucketreplication) | PUT | `/{Bucket}` | `replication` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-repl-0004`, `q-repl-0005`, `q-repl-0006`, `q-repl-0007`, `q-repl-0008`, `q-repl-0009`, `q-repl-0010`, `q-repl-0011`, `q-repl-0012`, `q-repl-0013`, `q-repl-0014` |
 | [PutBucketRequestPayment](#putbucketrequestpayment) | PUT | `/{Bucket}` | `requestPayment` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-rqp-0002`, `q-rqp-0003` |
 | [PutBucketTagging](#putbuckettagging) | PUT | `/{Bucket}` | `tagging` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
@@ -375,6 +393,9 @@ such a row as though the key selected the operation is the opposite of what the 
 | [RenameObject](#renameobject) | PUT | `/{Bucket}/{Key+}` | `renameObject` | `x-amz-rename-source` | 200 | `AccessDenied`, `InvalidRequest`, `IdempotencyParameterMismatch` | — |
 | [RestoreObject](#restoreobject) | POST | `/{Bucket}/{Key+}` | `restore`, `versionId` | — | 202 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `RestoreAlreadyInProgress`, `InvalidObjectState`, `ObjectAlreadyInActiveTierError` | `q-restore-0001`, `q-restore-0002`, `q-restore-0003`, `q-restore-0004`, `q-restore-0005`, `q-restore-0006`, `q-restore-0007`, `q-restore-0008` |
 | [SelectObjectContent](#selectobjectcontent) | POST | `/{Bucket}/{Key+}` | `select`, `select-type` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `InvalidExpressionType`, `ExpressionTooLong`, `InvalidTextEncoding`, `InvalidCompressionFormat`, `ObjectSerializationConflict`, `UnsupportedFunction`, `ParseUnexpectedToken`, `CSVParsingError`, `JSONParsingError`, `InvalidColumnIndex`, `InvalidDataType`, `OverMaxRecordSize` | `q-select-0001`, `q-select-0002`, `q-select-0003`, `q-select-0004`, `q-select-0005`, `q-select-0006`, `q-select-0007`, `q-select-0008`, `q-select-0009` |
+| [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration) | PUT | `/{Bucket}` | `metadataAnnotationTable` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
+| [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration) | PUT | `/{Bucket}` | `metadataInventoryTable` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
+| [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration) | PUT | `/{Bucket}` | `metadataJournalTable` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [UpdateObjectEncryption](#updateobjectencryption) | PUT | `/{Bucket}/{Key+}` | `annotation`, `encryption`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `MalformedXML`, `InvalidArgument`, `BadDigest` | — |
 | [UploadPart](#uploadpart) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `content-length`, `etag`, `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `BadDigest`, `InvalidDigest`, `XAmzContentChecksumMismatch` | `q-checksum-0006`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038` |
 | [UploadPartCopy](#uploadpartcopy) | PUT | `/{Bucket}/{Key+}` | `partNumber`, `uploadId` | `x-amz-copy-source` | 200 | `NoSuchBucket`, `NoSuchKey`, `NoSuchUpload`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `InvalidRange`, `PreconditionFailed`, `MethodNotAllowed` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083`, `q-copy-part-root-0084`, `q-copy-range-0085` |
@@ -413,7 +434,17 @@ First match wins; lower precedence is tried first.
 | 242 | [DeleteBucketWebsite](#deletebucketwebsite) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?website` |
 | 250 | [GetBucketAcl](#getbucketacl) | `Method GET` AND `Target Bucket` AND `QueryPresent ?acl` |
 | 260 | [PutBucketAcl](#putbucketacl) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?acl` |
+| 261 | [PutBucketOwnershipControls](#putbucketownershipcontrols) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?ownershipControls` |
+| 262 | [DeleteBucketOwnershipControls](#deletebucketownershipcontrols) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?ownershipControls` |
+| 263 | [PutBucketAbac](#putbucketabac) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?abac` |
+| 264 | [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?intelligent-tiering` |
+| 265 | [DeleteBucketIntelligentTieringConfiguration](#deletebucketintelligenttieringconfiguration) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?intelligent-tiering` |
+| 266 | [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?analytics` |
+| 267 | [DeleteBucketAnalyticsConfiguration](#deletebucketanalyticsconfiguration) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?analytics` |
+| 268 | [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?inventory` |
+| 269 | [DeleteBucketInventoryConfiguration](#deletebucketinventoryconfiguration) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?inventory` |
 | 270 | [GetBucketOwnershipControls](#getbucketownershipcontrols) | `Method GET` AND `Target Bucket` AND `QueryPresent ?ownershipControls` |
+| 271 | [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?metrics` |
 | 272 | [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?intelligent-tiering` AND `QueryPresent ?id` |
 | 273 | [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations) | `Method GET` AND `Target Bucket` AND `QueryPresent ?intelligent-tiering` |
 | 274 | [GetBucketAnalyticsConfiguration](#getbucketanalyticsconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?analytics` AND `QueryPresent ?id` |
@@ -421,10 +452,19 @@ First match wins; lower precedence is tried first.
 | 276 | [GetBucketAbac](#getbucketabac) | `Method GET` AND `Target Bucket` AND `QueryPresent ?abac` |
 | 277 | [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?inventory` AND `QueryPresent ?id` |
 | 278 | [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations) | `Method GET` AND `Target Bucket` AND `QueryPresent ?inventory` |
+| 279 | [CreateSession](#createsession) | `Method GET` AND `Target Bucket` AND `QueryPresent ?session` |
 | 280 | [GetBucketMetadataConfiguration](#getbucketmetadataconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?metadataConfiguration` |
 | 281 | [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?metadataTable` |
 | 282 | [GetBucketMetricsConfiguration](#getbucketmetricsconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?metrics` AND `QueryPresent ?id` |
 | 283 | [ListBucketMetricsConfigurations](#listbucketmetricsconfigurations) | `Method GET` AND `Target Bucket` AND `QueryPresent ?metrics` |
+| 284 | [DeleteBucketMetricsConfiguration](#deletebucketmetricsconfiguration) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?metrics` |
+| 285 | [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration) | `Method POST` AND `Target Bucket` AND `QueryPresent ?metadataConfiguration` |
+| 286 | [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration) | `Method POST` AND `Target Bucket` AND `QueryPresent ?metadataTable` |
+| 287 | [DeleteBucketMetadataConfiguration](#deletebucketmetadataconfiguration) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?metadataConfiguration` |
+| 288 | [DeleteBucketMetadataTableConfiguration](#deletebucketmetadatatableconfiguration) | `Method DELETE` AND `Target Bucket` AND `QueryPresent ?metadataTable` |
+| 289 | [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?metadataAnnotationTable` |
+| 290 | [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?metadataInventoryTable` |
+| 291 | [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?metadataJournalTable` |
 | 300 | [GetBucketLocation](#getbucketlocation) | `Method GET` AND `Target Bucket` AND `QueryPresent ?location` |
 | 310 | [GetBucketCors](#getbucketcors) | `Method GET` AND `Target Bucket` AND `QueryPresent ?cors` |
 | 320 | [PutBucketCors](#putbucketcors) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?cors` |
@@ -710,6 +750,94 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `CreateBucketConfiguration` (Structure) — `LocationConstraint: StringEnum`
 
+### CreateBucketMetadataConfiguration
+
+`POST /{Bucket}` &rarr; 200 · target Bucket · precedence 285 · auth Required (`s3:CreateBucketMetadataTableConfiguration`, presigned allowed) · spec `spec/operations/CreateBucketMetadataConfiguration.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Bucket`
+- `QueryPresent ?metadataConfiguration`
+
+**Query keys**
+
+- routed on, present: `metadataConfiguration`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `AnnotationTableConfiguration` (Structure) — `ConfigurationState: StringEnum`, `EncryptionConfiguration: Structure(MetadataTableEncryptionConfiguration)`, `Role: String`
+- `InventoryTableConfiguration` (Structure) — `ConfigurationState: StringEnum`, `EncryptionConfiguration: Structure(MetadataTableEncryptionConfiguration)`
+- `JournalTableConfiguration` (Structure) — `RecordExpiration: Structure(RecordExpiration)`, `EncryptionConfiguration: Structure(MetadataTableEncryptionConfiguration)`
+- `MetadataConfiguration` (Structure) — `JournalTableConfiguration: Structure(JournalTableConfiguration)`, `InventoryTableConfiguration: Structure(InventoryTableConfiguration)`, `AnnotationTableConfiguration: Structure(AnnotationTableConfiguration)`
+- `MetadataTableEncryptionConfiguration` (Structure) — `SseAlgorithm: StringEnum`, `KmsKeyArn: String`
+- `RecordExpiration` (Structure) — `Expiration: StringEnum`, `Days: Integer`
+
+### CreateBucketMetadataTableConfiguration
+
+`POST /{Bucket}` &rarr; 200 · target Bucket · precedence 286 · auth Required (`s3:CreateBucketMetadataTableConfiguration`, presigned allowed) · spec `spec/operations/CreateBucketMetadataTableConfiguration.toml`
+
+**Route predicates**
+
+- `Method POST`
+- `Target Bucket`
+- `QueryPresent ?metadataTable`
+
+**Query keys**
+
+- routed on, present: `metadataTable`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `MetadataTableConfiguration` (Structure) — `S3TablesDestination: Structure(S3TablesDestination)`
+- `S3TablesDestination` (Structure) — `TableBucketArn: String`, `TableName: String`
+
 ### CreateMultipartUpload
 
 `POST /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 450 · auth Required (`s3:PutObject`, presigned allowed) · spec `spec/operations/CreateMultipartUpload.toml`
@@ -755,6 +883,44 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-mpu-metadata-0039` (deferred_metadata on `CreateMultipartUpload`) — User metadata, content type, storage class and the encryption settings are carried on the initiating request alone and take effect on the assembled object; a part upload carries none of them, so losing them at initiation loses them permanently.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### CreateSession
+
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 279 · auth Required (`s3express:CreateSession`, presigned refused) · spec `spec/operations/CreateSession.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Bucket`
+- `QueryPresent ?session`
+
+**Query keys**
+
+- routed on, present: `session`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-create-session-mode`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`
+- response: `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 65536 bytes)
+- response root: `<CreateSessionResult>`, xmlns emit
+- element order: `Credentials`
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `InvalidArgument`
+
+**Body shapes**
+
+- `SessionCredentials` (Structure) — `AccessKeyId: String`, `SecretAccessKey: String`, `SessionToken: String`, `Expiration: Timestamp(Iso8601)`
 
 ### DeleteBucket
 
@@ -808,6 +974,38 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-bkt-0008` (error_code on `DeleteBucket`) — Deleting a bucket that still holds an object, an object version or a delete marker is refused with 409 BucketNotEmpty rather than performed; pending multipart uploads are not content, and are discarded with the bucket.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### DeleteBucketAnalyticsConfiguration
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 267 · auth Required (`s3:PutAnalyticsConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketAnalyticsConfiguration.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?analytics`
+
+**Query keys**
+
+- routed on, present: `analytics`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
 
 ### DeleteBucketCors
 
@@ -885,6 +1083,70 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+### DeleteBucketIntelligentTieringConfiguration
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 265 · auth Required (`s3:PutIntelligentTieringConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketIntelligentTieringConfiguration.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?intelligent-tiering`
+
+**Query keys**
+
+- routed on, present: `intelligent-tiering`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+### DeleteBucketInventoryConfiguration
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 269 · auth Required (`s3:PutInventoryConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketInventoryConfiguration.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?inventory`
+
+**Query keys**
+
+- routed on, present: `inventory`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
 ### DeleteBucketLifecycle
 
 `DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 390 · auth Required (`s3:PutLifecycleConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketLifecycle.toml`
@@ -922,6 +1184,134 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-lc-0004` (idempotent_delete on `DeleteBucketLifecycle`) — The delete answers 204 with no body whether or not a configuration existed, so removing the lifecycle document of an unconfigured bucket is a success rather than a 404.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+### DeleteBucketMetadataConfiguration
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 287 · auth Required (`s3:DeleteBucketMetadataTableConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketMetadataConfiguration.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?metadataConfiguration`
+
+**Query keys**
+
+- routed on, present: `metadataConfiguration`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+### DeleteBucketMetadataTableConfiguration
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 288 · auth Required (`s3:DeleteBucketMetadataTableConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketMetadataTableConfiguration.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?metadataTable`
+
+**Query keys**
+
+- routed on, present: `metadataTable`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+### DeleteBucketMetricsConfiguration
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 284 · auth Required (`s3:PutMetricsConfiguration`, presigned allowed) · spec `spec/operations/DeleteBucketMetricsConfiguration.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?metrics`
+
+**Query keys**
+
+- routed on, present: `metrics`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
+
+### DeleteBucketOwnershipControls
+
+`DELETE /{Bucket}` &rarr; 204 · target Bucket · precedence 262 · auth Required (`s3:PutBucketOwnershipControls`, presigned allowed) · spec `spec/operations/DeleteBucketOwnershipControls.toml`
+
+**Route predicates**
+
+- `Method DELETE`
+- `Target Bucket`
+- `QueryPresent ?ownershipControls`
+
+**Query keys**
+
+- routed on, present: `ownershipControls`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`
 
 ### DeleteBucketPolicy
 
@@ -3450,6 +3840,47 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Owner` (Structure) — `DisplayName: String`, `ID: String`
 - `Part` (Structure) — `PartNumber: Integer`, `LastModified: Timestamp(Iso8601)`, `ETag: ETag(XmlQuoted)`, `Size: Long`, `ChecksumCRC32: String`, `ChecksumCRC32C: String`, `ChecksumCRC64NVME: String`, `ChecksumSHA1: String`, `ChecksumSHA256: String`, `ChecksumSHA512: String`, `ChecksumMD5: String`, `ChecksumXXHASH64: String`, `ChecksumXXHASH3: String`, `ChecksumXXHASH128: String`
 
+### PutBucketAbac
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 263 · auth Required (`s3:PutBucketAbac`, presigned allowed) · spec `spec/operations/PutBucketAbac.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?abac`
+
+**Query keys**
+
+- routed on, present: `abac`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 4096 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `AbacStatus` (Structure) — `Status: StringEnum`
+
 ### PutBucketAccelerateConfiguration
 
 `PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 201 · auth Required (`s3:PutAccelerateConfiguration`, presigned allowed) · spec `spec/operations/PutBucketAccelerateConfiguration.toml`
@@ -3560,6 +3991,49 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
 - `Owner` (Structure) — `DisplayName: String`, `ID: String`
 
+### PutBucketAnalyticsConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 266 · auth Required (`s3:PutAnalyticsConfiguration`, presigned allowed) · spec `spec/operations/PutBucketAnalyticsConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?analytics`
+
+**Query keys**
+
+- routed on, present: `analytics`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Body shapes**
+
+- `AnalyticsAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
+- `AnalyticsConfiguration` (Structure) — `Id: String`, `Filter: Union(AnalyticsFilter)`, `StorageClassAnalysis: Structure(StorageClassAnalysis)`
+- `AnalyticsExportDestination` (Structure) — `S3BucketDestination: Structure(AnalyticsS3BucketDestination)`
+- `AnalyticsFilter` (Union) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(AnalyticsAndOperator)`
+- `AnalyticsS3BucketDestination` (Structure) — `Format: StringEnum`, `BucketAccountId: String`, `Bucket: BucketName`, `Prefix: String`
+- `StorageClassAnalysis` (Structure) — `DataExport: Structure(StorageClassAnalysisDataExport)`
+- `StorageClassAnalysisDataExport` (Structure) — `OutputSchemaVersion: StringEnum`, `Destination: Structure(AnalyticsExportDestination)`
+- `Tag` (Structure) — `Key: String`, `Value: String`
+
 ### PutBucketCors
 
 `PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 320 · auth Required (`s3:PutBucketCORS`, presigned allowed) · spec `spec/operations/PutBucketCors.toml`
@@ -3666,6 +4140,89 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `ServerSideEncryptionByDefault` (Structure) — `SSEAlgorithm: StringEnum`, `KMSMasterKeyID: String`
 - `ServerSideEncryptionConfiguration` (Structure) — `Rules: List<Structure(ServerSideEncryptionRule)>(flattened)`
 - `ServerSideEncryptionRule` (Structure) — `ApplyServerSideEncryptionByDefault: Structure(ServerSideEncryptionByDefault)`, `BucketKeyEnabled: Boolean`, `BlockedEncryptionTypes: Structure(BlockedEncryptionTypes)`
+
+### PutBucketIntelligentTieringConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 264 · auth Required (`s3:PutIntelligentTieringConfiguration`, presigned allowed) · spec `spec/operations/PutBucketIntelligentTieringConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?intelligent-tiering`
+
+**Query keys**
+
+- routed on, present: `intelligent-tiering`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Body shapes**
+
+- `IntelligentTieringAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
+- `IntelligentTieringConfiguration` (Structure) — `Id: String`, `Filter: Structure(IntelligentTieringFilter)`, `Status: StringEnum`, `Tierings: List<Structure(Tiering)>(flattened)`
+- `IntelligentTieringFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(IntelligentTieringAndOperator)`
+- `Tag` (Structure) — `Key: String`, `Value: String`
+- `Tiering` (Structure) — `Days: Integer`, `AccessTier: StringEnum`
+
+### PutBucketInventoryConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 268 · auth Required (`s3:PutInventoryConfiguration`, presigned allowed) · spec `spec/operations/PutBucketInventoryConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?inventory`
+
+**Query keys**
+
+- routed on, present: `inventory`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Body shapes**
+
+- `InventoryConfiguration` (Structure) — `Destination: Structure(InventoryDestination)`, `IsEnabled: Boolean`, `Filter: Structure(InventoryFilter)`, `Id: String`, `IncludedObjectVersions: StringEnum`, `OptionalFields: List<StringEnum>(Field)`, `Schedule: Structure(InventorySchedule)`
+- `InventoryDestination` (Structure) — `S3BucketDestination: Structure(InventoryS3BucketDestination)`
+- `InventoryEncryption` (Structure) — `SSES3: Structure(SSES3)`, `SSEKMS: Structure(SSEKMS)`
+- `InventoryFilter` (Structure) — `Prefix: String`
+- `InventoryS3BucketDestination` (Structure) — `AccountId: String`, `Bucket: BucketName`, `Format: StringEnum`, `Prefix: String`, `Encryption: Structure(InventoryEncryption)`
+- `InventorySchedule` (Structure) — `Frequency: StringEnum`
+- `SSEKMS` (Structure) — `KeyId: String`
+- `SSES3` (Structure)
 
 ### PutBucketLifecycleConfiguration
 
@@ -3793,6 +4350,45 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `TargetGrant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
 - `TargetObjectKeyFormat` (Structure) — `SimplePrefix: Structure(SimplePrefix)`, `PartitionedPrefix: Structure(PartitionedPrefix)`
 
+### PutBucketMetricsConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 271 · auth Required (`s3:PutMetricsConfiguration`, presigned allowed) · spec `spec/operations/PutBucketMetricsConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?metrics`
+
+**Query keys**
+
+- routed on, present: `metrics`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `id`
+
+**Headers**
+
+- request: `x-amz-expected-bucket-owner`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 65536 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Body shapes**
+
+- `MetricsAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `AccessPointArn: String`
+- `MetricsConfiguration` (Structure) — `Id: String`, `Filter: Union(MetricsFilter)`
+- `MetricsFilter` (Union) — `Prefix: String`, `Tag: Structure(Tag)`, `AccessPointArn: String`, `And: Structure(MetricsAndOperator)`
+- `Tag` (Structure) — `Key: String`, `Value: String`
+
 ### PutBucketNotificationConfiguration
 
 `PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 211 · auth Required (`s3:PutBucketNotification`, presigned allowed) · spec `spec/operations/PutBucketNotificationConfiguration.toml`
@@ -3845,9 +4441,51 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `S3KeyFilter` (Structure) — `FilterRules: List<Structure(FilterRule)>(flattened)`
 - `TopicConfiguration` (Structure) — `Id: String`, `TopicArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
 
+### PutBucketOwnershipControls
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 261 · auth Required (`s3:PutBucketOwnershipControls`, presigned allowed) · spec `spec/operations/PutBucketOwnershipControls.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?ownershipControls`
+
+**Query keys**
+
+- routed on, present: `ownershipControls`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 4096 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `OwnershipControls` (Structure) — `Rules: List<Structure(OwnershipControlsRule)>(flattened)`
+- `OwnershipControlsRule` (Structure) — `ObjectOwnership: StringEnum`
+
 ### PutBucketPolicy
 
-`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 216 · auth Required (`s3:PutBucketPolicy`, presigned allowed) · spec `spec/operations/PutBucketPolicy.toml`
+`PUT /{Bucket}` &rarr; 204 · target Bucket · precedence 216 · auth Required (`s3:PutBucketPolicy`, presigned allowed) · spec `spec/operations/PutBucketPolicy.toml`
 
 **Route predicates**
 
@@ -4763,6 +5401,132 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Stats` (Structure) — `BytesScanned: Long`, `BytesProcessed: Long`, `BytesReturned: Long`
 - `StatsEvent` (Structure) — `Details: Structure(Stats)`
 
+### UpdateBucketMetadataAnnotationTableConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 289 · auth Required (`s3:UpdateBucketMetadataAnnotationTableConfiguration`, presigned allowed) · spec `spec/operations/UpdateBucketMetadataAnnotationTableConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?metadataAnnotationTable`
+
+**Query keys**
+
+- routed on, present: `metadataAnnotationTable`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `AnnotationTableConfigurationUpdates` (Structure) — `ConfigurationState: StringEnum`, `EncryptionConfiguration: Structure(MetadataTableEncryptionConfiguration)`, `Role: String`
+- `MetadataTableEncryptionConfiguration` (Structure) — `SseAlgorithm: StringEnum`, `KmsKeyArn: String`
+
+### UpdateBucketMetadataInventoryTableConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 290 · auth Required (`s3:UpdateBucketMetadataInventoryTableConfiguration`, presigned allowed) · spec `spec/operations/UpdateBucketMetadataInventoryTableConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?metadataInventoryTable`
+
+**Query keys**
+
+- routed on, present: `metadataInventoryTable`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `InventoryTableConfigurationUpdates` (Structure) — `ConfigurationState: StringEnum`, `EncryptionConfiguration: Structure(MetadataTableEncryptionConfiguration)`
+- `MetadataTableEncryptionConfiguration` (Structure) — `SseAlgorithm: StringEnum`, `KmsKeyArn: String`
+
+### UpdateBucketMetadataJournalTableConfiguration
+
+`PUT /{Bucket}` &rarr; 200 · target Bucket · precedence 291 · auth Required (`s3:UpdateBucketMetadataJournalTableConfiguration`, presigned allowed) · spec `spec/operations/UpdateBucketMetadataJournalTableConfiguration.toml`
+
+**Route predicates**
+
+- `Method PUT`
+- `Target Bucket`
+- `QueryPresent ?metadataJournalTable`
+
+**Query keys**
+
+- routed on, present: `metadataJournalTable`
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: —
+
+**Headers**
+
+- request: `content-md5`, `x-amz-expected-bucket-owner`, `x-amz-sdk-checksum-algorithm`
+- response: —
+- required: —
+
+**Body**
+
+- request: XmlBody (Full, at most 1048576 bytes)
+- response: None (None)
+
+**Error codes**
+
+`NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`
+
+**Checksums**
+
+- required before the handler runs: false
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
+
+**Body shapes**
+
+- `JournalTableConfigurationUpdates` (Structure) — `RecordExpiration: Structure(RecordExpiration)`
+- `RecordExpiration` (Structure) — `Expiration: StringEnum`, `Days: Integer`
+
 ### UpdateObjectEncryption
 
 `PUT /{Bucket}/{Key+}` &rarr; 200 · target Object · precedence 596 · auth Required (`s3:UpdateObjectEncryption`, presigned allowed) · spec `spec/operations/UpdateObjectEncryption.toml`
@@ -4921,7 +5685,6 @@ operation spec and handler-registration surface in handwritten modules.
 
 | Operation | Method and path | Selector | Reason |
 | --- | --- | --- | --- |
-| CreateSession | `GET /{Bucket}` | `Method GET` AND `Target Bucket` AND `QueryPresent ?session` | The request shape is protocol-known, but session credential DTOs and codecs remain deliberately unavailable. |
 | PostObject | `POST /{Bucket}` | `Method POST` AND `Target Bucket` AND `HeaderPrefix content-type: multipart/form-data` | manually implemented operation |
 ## Deferred operations
 
@@ -4930,22 +5693,4 @@ in none of the included, route-only or deferred lists, so these tables are exhau
 
 | Operation | Reason |
 | --- | --- |
-| CreateBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| CreateBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| DeleteBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| DeleteBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| DeleteBucketInventoryConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| DeleteBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| DeleteBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| DeleteBucketMetricsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| DeleteBucketOwnershipControls | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| PutBucketAbac | The ?abac write changes the access-control mode and remains deferred for its own validation and migration review; routing the read does not define or weaken that write contract. |
-| PutBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| PutBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| PutBucketInventoryConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| PutBucketMetricsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| PutBucketOwnershipControls | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| UpdateBucketMetadataAnnotationTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| UpdateBucketMetadataInventoryTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| UpdateBucketMetadataJournalTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | WriteGetObjectResponse | Out of scope for the gateway: S3 Object Lambda, which requires the Object Lambda access point host class. |
