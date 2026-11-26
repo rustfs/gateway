@@ -331,36 +331,34 @@ where
 /// Reads `body` until EOF, a transport error, `drain.idle` without a frame, `drain.max_duration`
 /// total elapsed time, or `drain.max_bytes` discarded bytes, holding `_permit` for the task's life.
 async fn discard<B: Body>(mut body: Pin<Box<B>>, drain: UnreadBodyDrain, _permit: Option<OwnedSemaphorePermit>) {
-    let deadline = tokio::time::Instant::now() + drain.max_duration;
+    if !drain.allows_draining() {
+        return;
+    }
     let mut drained_bytes = 0_u64;
-    loop {
-        let now = tokio::time::Instant::now();
-        let Some(remaining) = deadline.checked_duration_since(now) else {
-            return;
-        };
-        if remaining.is_zero() {
-            return;
-        }
-        let step_timeout = match drain.idle {
-            Some(idle) => idle.min(remaining),
-            None => remaining,
-        };
-        let next = poll_fn(|context| body.as_mut().poll_frame(context));
-        let Ok(frame) = tokio::time::timeout(step_timeout, next).await else {
-            return;
-        };
-        match frame {
-            Some(Ok(frame)) => {
-                if let Some(data) = frame.data_ref() {
-                    drained_bytes = drained_bytes.saturating_add(data.remaining() as u64);
-                    if drained_bytes >= drain.max_bytes {
-                        return;
+    let _ = tokio::time::timeout(drain.max_duration, async {
+        loop {
+            let next = poll_fn(|context| body.as_mut().poll_frame(context));
+            let frame = match drain.idle {
+                Some(idle) => match tokio::time::timeout(idle, next).await {
+                    Ok(frame) => frame,
+                    Err(_) => return,
+                },
+                None => next.await,
+            };
+            match frame {
+                Some(Ok(frame)) => {
+                    if let Some(data) = frame.data_ref() {
+                        drained_bytes = drained_bytes.saturating_add(data.remaining() as u64);
+                        if drained_bytes >= drain.max_bytes {
+                            return;
+                        }
                     }
                 }
+                Some(Err(_)) | None => return,
             }
-            Some(Err(_)) | None => return,
         }
-    }
+    })
+    .await;
 }
 
 #[cfg(test)]

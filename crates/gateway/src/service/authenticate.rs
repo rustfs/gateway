@@ -24,11 +24,11 @@
 //! Upstream: `super::S3Service::run` after `.governed()`. Downstream: `super::S3Service::run` before `.meta_auth()`.
 
 use http::{HeaderMap, Response};
-use rustfs_gateway_core::{ErrorContext, HandlerError, RegionLabel, RequestBodyMode, ResponseKind};
+use rustfs_gateway_core::{HandlerError, RequestBodyMode, ResponseKind};
 use rustfs_gateway_http::WireRequest;
 use rustfs_gateway_sig::{
     Admission, AuthError, CredentialPresence, OperationFloor, PayloadMode, PostPolicyLimits, QueryBearerClaim, RequestNow,
-    SecurityFloor, Verdict, WireView,
+    SealedAws, SecurityFloor, Verdict, WireView,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
@@ -40,8 +40,17 @@ use crate::config::ConfigSnapshot;
 use crate::ext::{Authentication, AuthenticationOutcome, ChunkSink, SigV2Authentication};
 use crate::gate::{BodyDigestObligation, StsBodyReader};
 use crate::logging::{Extension, Refused};
-use crate::render::{S3Error, from_auth, from_auth_context, from_auth_with_detail};
+use crate::render::{S3Error, from_auth, from_auth_with_detail};
 use crate::request_deadline::hold_failure_floor;
+
+/// Settled payload-mode inputs extracted from `Admission::Sealed` before running verification.
+pub(super) struct PreparedSealedPayload {
+    payload: PayloadMode,
+    trailer_refusal: Option<S3Error>,
+    signed_length: crate::builder::buffered_lengths::SignedLength,
+    body_digest: BodyDigestObligation,
+    replay_fingerprint: Option<rustfs_gateway_sig::ReplayFingerprint>,
+}
 
 /// Inputs passed from `S3Service::run` into [`S3Service::complete_auth_stage`].
 pub(super) struct AuthStageInput<'a> {
@@ -61,7 +70,8 @@ pub(super) struct AuthStageInput<'a> {
     pub(super) wire: &'a WireRequest<()>,
     pub(super) view: WireView<'a>,
     pub(super) presence: CredentialPresence,
-    pub(super) signed_head: SignedHead<'a>,
+    pub(super) prepared_sealed: Option<PreparedSealedPayload>,
+    pub(super) replacement_verdict: Option<Verdict>,
     pub(super) post_policy_limits: Option<PostPolicyLimits>,
     pub(super) post_filename: Option<&'a str>,
     pub(super) sts_body_reader: Option<&'a dyn StsBodyReader>,
@@ -108,6 +118,47 @@ impl S3Service {
         Some(outcome.refuse(refusal))
     }
 
+    /// Extracts and validates the signed payload mode from `Admission::Sealed` before running
+    /// signature verification, holding [`Self::hold_auth_failure_floor`] on rejection.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn prepare_sealed_payload(
+        &self,
+        sealed: &SealedAws<'_>,
+        signed_head: &SignedHead<'_>,
+        operation: &'static str,
+        request_body_mode: RequestBodyMode,
+        response_kind: ResponseKind,
+        body_owed: bool,
+        auth_started: MonotonicNow,
+        outcome: &mut Outcome<'_>,
+    ) -> Result<PreparedSealedPayload, Response<Body>> {
+        let location = sealed.marker().location();
+        let replay_fingerprint = sealed.replay_fingerprint();
+        let mut trailer_refusal = None;
+        let (payload, obligation) =
+            match self
+                .inner
+                .view_policy
+                .signed_payload(signed_head, operation, location, &mut trailer_refusal)
+            {
+                Ok(declared) => declared,
+                Err(refusal) => {
+                    self.hold_auth_failure_floor(auth_started).await;
+                    return Err(outcome.refuse_at(Refused::Authentication, refusal.render(response_kind, body_owed)));
+                }
+            };
+        let signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
+        let body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
+        let payload = self.inner.view_policy.signed_payload_mode(payload);
+        Ok(PreparedSealedPayload {
+            payload,
+            trailer_refusal,
+            signed_length,
+            body_digest,
+            replay_fingerprint,
+        })
+    }
+
     /// Completes authentication from the result of `SecurityFloor::admit`, holding
     /// [`Self::hold_auth_failure_floor`] on every authentication failure exit path.
     pub(super) async fn complete_auth_stage<'a>(
@@ -133,14 +184,14 @@ impl S3Service {
             wire,
             view,
             presence,
-            signed_head,
+            prepared_sealed,
+            replacement_verdict,
             post_policy_limits,
             post_filename,
             sts_body_reader,
             config,
         } = input;
 
-        let policy = &self.inner.view_policy;
         let body_owed = wire.framing().has_body();
         let chunk_sink = ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
@@ -157,44 +208,18 @@ impl S3Service {
         // Whether this request's own admission was a bearer or header-token one; such a verdict from any other path is refused below.
         let (mut bearer_admitted, mut header_token_admitted) = (false, false);
         let (authentication, signature_mismatch) = match admission {
-            // Unsigned: anonymous, or admitted by the header token claim (ADR-0054). One framing rule serves both.
-            Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
-                framing_mode = match crate::payload_header::anonymous_framing(headers, self.inner.decode_anonymous_framing) {
-                    Ok(mode) => mode,
-                    Err(error) => return Err(outcome.refuse_at(Refused::Decode, error)),
-                };
-                let verdict = match unsigned {
-                    Admission::Anonymous(evidence) => Verdict::anonymous(evidence),
-                    Admission::HeaderToken(admission) => {
-                        header_token_admitted = true;
-                        self.header_token_verdict(admission, wire.transport_extensions(), outcome.trace, operation)
-                    }
-                    _ => Verdict::reject(AuthError::AccessDenied), // not reachable: the pattern admits only those two
-                };
-                (AuthenticationOutcome::ordinary(verdict), None)
-            }
             Ok(Admission::Sealed(sealed)) => {
-                let location = sealed.marker().location();
-                replay_fingerprint = sealed.replay_fingerprint();
-                let (payload, obligation) = match policy.signed_payload(&signed_head, operation, location, &mut trailer_refusal) {
-                    Ok(declared) => declared,
-                    Err(refusal) => {
-                        self.hold_auth_failure_floor(auth_started).await;
-                        return Err(outcome.refuse_at(Refused::Authentication, refusal.render(response_kind, body_owed)));
-                    }
+                let Some(prepared) = prepared_sealed else {
+                    return Err(outcome.refuse_handler(HandlerError::internal_error(
+                        "sealed admission arrived without prepared payload metadata",
+                    )));
                 };
-                signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
-                body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
-                let payload = self.inner.view_policy.signed_payload_mode(payload);
+                replay_fingerprint = prepared.replay_fingerprint;
+                trailer_refusal = prepared.trailer_refusal;
+                signed_length = prepared.signed_length;
+                body_digest = prepared.body_digest;
+                let payload = prepared.payload;
                 framing_mode = Some(payload.clone());
-                #[cfg(feature = "dangerous-replace-signature-verifier")]
-                let replacement_verdict = self
-                    .inner
-                    .dangerously_replaced_signature_verifier
-                    .as_ref()
-                    .map(|verifier| verifier.verify_sealed(&sealed));
-                #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
-                let replacement_verdict: Option<Verdict> = None;
                 if let Some(verdict) = replacement_verdict {
                     (AuthenticationOutcome::ordinary(verdict), None)
                 } else {
@@ -230,6 +255,22 @@ impl S3Service {
                         }
                     }
                 }
+            }
+            // Unsigned: anonymous, or admitted by the header token claim (ADR-0054). One framing rule serves both.
+            Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
+                framing_mode = match crate::payload_header::anonymous_framing(headers, self.inner.decode_anonymous_framing) {
+                    Ok(mode) => mode,
+                    Err(error) => return Err(outcome.refuse_at(Refused::Decode, error)),
+                };
+                let verdict = match unsigned {
+                    Admission::Anonymous(evidence) => Verdict::anonymous(evidence),
+                    Admission::HeaderToken(admission) => {
+                        header_token_admitted = true;
+                        self.header_token_verdict(admission, wire.transport_extensions(), outcome.trace, operation)
+                    }
+                    _ => Verdict::reject(AuthError::AccessDenied), // not reachable: the pattern admits only those two
+                };
+                (AuthenticationOutcome::ordinary(verdict), None)
             }
             // No payload mode and no framed body: SigV2 has neither, so `framing_mode` stays
             // `None` and the body read at the bottom is a plain one.
@@ -303,20 +344,7 @@ impl S3Service {
                 return Err(outcome.refuse(legacy.render(&error, response_kind, body_owed)));
             }
             if error == AuthError::AuthorizationHeaderMalformed {
-                let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
-                    Some(region) => {
-                        let Ok(region) = RegionLabel::new(region.as_str()) else {
-                            return Err(outcome.refuse_handler(HandlerError::internal_error(
-                                "the configured signing region could not be rendered",
-                            )));
-                        };
-                        ErrorContext::authorization_region_mismatch(region)
-                    }
-                    None => ErrorContext::authorization_scope_malformed(),
-                };
-                return Err(
-                    outcome.refuse_at(Refused::Authentication, from_auth_context(error, context, response_kind, body_owed))
-                );
+                return Err(Self::refuse_scope_rejection(error, scope_rejection, response_kind, body_owed, outcome));
             }
             return Err(outcome.refuse_at(
                 Refused::Authentication,

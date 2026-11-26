@@ -114,12 +114,15 @@ use rustfs_gateway_core::cors::{
     CorsPolicy, PreflightClass, PreflightRefusalCause, classify, invalid_target_is_uniform_refusal, preflight_bypasses_pipeline,
 };
 use rustfs_gateway_core::{
-    Decision, EncodedResponse, HandlerError, MetaView, OwnedResource, RedirectTarget, RequestBodyMode, RequestContextView,
-    ResourceShape, ResponseBody, RouteRequestParts, SseConfig, StaticDispatchError, StaticDispatchOutcome, TransportSecurity,
+    Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
+    RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
+    StaticDispatchOutcome, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::{RawQuery, RequestNow, SecurityFloor, SigService, WireView, detect_credentials};
+use rustfs_gateway_sig::{
+    Admission, AuthError, RawQuery, RequestNow, ScopeRejection, SecurityFloor, SigService, WireView, detect_credentials,
+};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
@@ -138,7 +141,7 @@ use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::panic_boundary::catch_boxed_future;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
-use crate::render::{from_codec, from_denial, from_handler, from_pre_auth};
+use crate::render::{from_auth_context, from_codec, from_denial, from_handler, from_pre_auth};
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
@@ -783,7 +786,36 @@ impl S3Service {
         {
             return outcome.refuse(refusal);
         }
-        let admission = self.inner.floor.admit(view, M::floor(&op), now);
+        let (admission, prepared_sealed, replacement_verdict) = match self.inner.floor.admit(view, M::floor(&op), now) {
+            Ok(Admission::Sealed(sealed)) => {
+                let prepared = match self
+                    .prepare_sealed_payload(
+                        &sealed,
+                        &signed_head,
+                        operation,
+                        request_body_mode,
+                        response_kind,
+                        body_owed,
+                        auth_started,
+                        outcome,
+                    )
+                    .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(response) => return response,
+                };
+                #[cfg(feature = "dangerous-replace-signature-verifier")]
+                let replacement_verdict = self
+                    .inner
+                    .dangerously_replaced_signature_verifier
+                    .as_ref()
+                    .map(|verifier| verifier.verify_sealed(&sealed));
+                #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
+                let replacement_verdict: Option<rustfs_gateway_sig::Verdict> = None;
+                (Ok(Admission::Sealed(sealed)), Some(prepared), replacement_verdict)
+            }
+            other => (other, None, None),
+        };
         let auth_stage = match self
             .complete_auth_stage(
                 admission,
@@ -804,7 +836,8 @@ impl S3Service {
                     wire: &wire,
                     view,
                     presence,
-                    signed_head,
+                    prepared_sealed,
+                    replacement_verdict,
                     post_policy_limits,
                     post_filename: routed_body.post_filename(),
                     sts_body_reader: routed_body.sts_body_reader(),
@@ -1484,6 +1517,26 @@ impl S3Service {
                 into_response(encoded)
             }
         }
+    }
+
+    fn refuse_scope_rejection(
+        error: AuthError,
+        scope_rejection: Option<ScopeRejection>,
+        response_kind: ResponseKind,
+        body_owed: bool,
+        outcome: &mut Outcome<'_>,
+    ) -> Response<Body> {
+        let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
+            Some(region) => {
+                let Ok(region) = RegionLabel::new(region.as_str()) else {
+                    return outcome
+                        .refuse_handler(HandlerError::internal_error("the configured signing region could not be rendered"));
+                };
+                ErrorContext::authorization_region_mismatch(region)
+            }
+            None => ErrorContext::authorization_scope_malformed(),
+        };
+        outcome.refuse_at(Refused::Authentication, from_auth_context(error, context, response_kind, body_owed))
     }
 }
 
