@@ -214,12 +214,22 @@ where
     O::Input: fmt::Debug,
 {
     /// The context's own `Debug` redacts every secret and prints no header value or query.
+    ///
+    /// Only standard S3 operations print their typed input here, because their generated and
+    /// hand-written DTO types redact every secret member (SSE-C keys, copy-source SSE-C keys, KMS
+    /// key ids and contexts, upload-id capabilities) and render streaming bodies by length
+    /// bookkeeping alone. Third-party and dialect operations may carry raw request-body bytes
+    /// (`Bytes`, `ByteStream`, or unredacted forms holding credentials or tokens), so their input
+    /// is always redacted.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Req")
-            .field("operation", &O::NAME)
-            .field("input", &self.input)
-            .field("context", &self.context)
-            .finish()
+        let mut debug = f.debug_struct("Req");
+        debug.field("operation", &O::NAME);
+        if O::ORIGIN.is_standard() {
+            debug.field("input", &self.input);
+        } else {
+            debug.field("input", &"<redacted>");
+        }
+        debug.field("context", &self.context).finish()
     }
 }
 
@@ -675,124 +685,4 @@ pub trait Handler<O: Operation>: Send + Sync + 'static {
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::indexing_slicing)]
-mod tests {
-    use super::*;
-    use bytes::Bytes;
-    use http::StatusCode;
-    use rustfs_gateway_stream::ByteStream;
-    use rustfs_gateway_types::dto::SelectObjectContent;
-
-    /// Positive — an event stream carries the operation's declared success status and no typed
-    /// output. Treating the stream as a settled empty output is the defect this response shape
-    /// exists to make impossible.
-    #[test]
-    fn an_event_stream_is_a_third_answer_shape() {
-        let response = Resp::<SelectObjectContent>::event_stream(ByteStream::from_bytes(Bytes::from_static(b"frame")));
-        assert_eq!(response.status(), 200);
-        assert!(response.is_event_stream());
-        assert!(!response.is_committed());
-        assert!(response.output().is_none());
-        assert!(response.into_output().is_none());
-    }
-
-    /// Negative — erasing an event stream must not turn it into a settled output. The facade's
-    /// dispatch matches this exact variant to bypass the generated document encoder.
-    #[test]
-    fn an_event_stream_survives_into_parts() {
-        let response = Resp::<SelectObjectContent>::event_stream(ByteStream::from_bytes(Bytes::from_static(b"frame")));
-        let (answer, status, _extra) = response.into_parts();
-        assert_eq!(status, 200);
-        assert!(matches!(answer, Answer::EventStream(_)));
-    }
-
-    /// Negative — a plain error carries no headers and no elements, so nothing this file added can
-    /// change the shape of a document that did not ask for it.
-    #[test]
-    fn a_plain_error_adds_nothing_to_the_document_or_the_head() {
-        let error = HandlerError::internal_error("no");
-        assert!(error.headers().is_empty());
-        assert!(error.details().is_empty());
-    }
-
-    /// Negative — adding the same header twice leaves one, so a response cannot carry two
-    /// `Content-Range` values for an intermediary to choose between.
-    #[test]
-    fn a_repeated_header_replaces_rather_than_appends() {
-        let error = HandlerError::internal_error("no")
-            .with_header(ErrorHeader::UnsatisfiedRange { complete_length: 1 })
-            .with_header(ErrorHeader::UnsatisfiedRange { complete_length: 2 });
-        assert_eq!(error.headers(), [ErrorHeader::UnsatisfiedRange { complete_length: 2 }]);
-    }
-
-    /// Negative — the same for elements: a document with two `<Condition>` elements names two
-    /// conditions, and only one of them failed.
-    #[test]
-    fn a_repeated_element_replaces_rather_than_appends() {
-        let error = HandlerError::internal_error("no")
-            .with_detail(ErrorDetail::Condition(Cow::Borrowed("If-Match")))
-            .with_detail(ErrorDetail::Condition(Cow::Borrowed("If-None-Match")));
-        assert_eq!(error.details().len(), 1);
-        assert_eq!(error.details()[0].text(), "If-None-Match");
-    }
-
-    /// Negative — the elements come out in the declared order whatever order they went in. This is
-    /// the assertion behind "a handler cannot get the document order wrong".
-    #[test]
-    fn elements_are_written_in_the_declared_order_not_the_order_they_were_added() {
-        let error = HandlerError::internal_error("no")
-            .with_detail(ErrorDetail::ActualObjectSize(10))
-            .with_detail(ErrorDetail::Condition(Cow::Borrowed("If-Match")))
-            .with_detail(ErrorDetail::RangeRequested(Cow::Borrowed("bytes=20-30")))
-            .with_detail(ErrorDetail::Key(Cow::Borrowed("k")));
-        let names: Vec<&str> = error.details().iter().map(ErrorDetail::element).collect();
-        assert_eq!(names, ["Key", "Condition", "RangeRequested", "ActualObjectSize"]);
-    }
-
-    /// Negative — the two facts a `416` states about the object's length come from one argument, so
-    /// the header and the document cannot disagree. A client that trusted one and retried against
-    /// the other would loop.
-    #[test]
-    fn the_range_refusal_states_one_length_in_both_places() {
-        let error = HandlerError::unsatisfiable_range("bytes=20-30", 10);
-        assert_eq!(error.code().default_status(), StatusCode::RANGE_NOT_SATISFIABLE);
-        assert_eq!(error.headers(), [ErrorHeader::UnsatisfiedRange { complete_length: 10 }]);
-        assert_eq!(error.headers()[0].value(), "bytes */10");
-        let sizes: Vec<String> = error
-            .details()
-            .iter()
-            .filter(|detail| detail.element() == "ActualObjectSize")
-            .map(|detail| detail.text().into_owned())
-            .collect();
-        assert_eq!(sizes, ["10"]);
-    }
-
-    /// Negative — a zero-length object is still a length, not an absent one: `bytes */0` is what
-    /// tells a client that no range of it is satisfiable.
-    #[test]
-    fn a_zero_length_object_still_states_its_length() {
-        let error = HandlerError::unsatisfiable_range("bytes=0-0", 0);
-        assert_eq!(error.headers()[0].value(), "bytes */0");
-        assert_eq!(error.details().last().expect("a size").text(), "0");
-    }
-
-    /// Positive — the range refusal's message and element order are the ones the wire pins.
-    #[test]
-    fn the_range_refusal_carries_the_pinned_message_and_order() {
-        let error = HandlerError::unsatisfiable_range("bytes=20-30", 10);
-        assert_eq!(error.message(), RANGE_NOT_SATISFIABLE_MESSAGE);
-        let names: Vec<&str> = error.details().iter().map(ErrorDetail::element).collect();
-        assert_eq!(names, ["RangeRequested", "ActualObjectSize"]);
-    }
-
-    /// Positive — the precondition refusal names the header that failed and adds no header of its
-    /// own; a `412` has nothing to put in its head.
-    #[test]
-    fn the_precondition_refusal_names_the_header_that_failed() {
-        let error = HandlerError::precondition_failed("If-None-Match");
-        assert_eq!(error.code().default_status(), StatusCode::PRECONDITION_FAILED);
-        assert_eq!(error.message(), PRECONDITION_FAILED_MESSAGE);
-        assert!(error.headers().is_empty());
-        assert_eq!(error.details()[0].element(), "Condition");
-        assert_eq!(error.details()[0].text(), "If-None-Match");
-    }
-}
+mod tests;
