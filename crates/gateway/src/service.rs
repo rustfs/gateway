@@ -130,7 +130,7 @@ use crate::ext::{
     AuthSchemeRef, Authenticator, BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, ClientFacts, Governor,
     GovernorRequest, HostResolver, InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView,
 };
-use crate::gate::{BodyDigestObligation, MetadataAdmission, SealedBody};
+use crate::gate::{MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};

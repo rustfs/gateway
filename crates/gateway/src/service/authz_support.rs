@@ -101,11 +101,6 @@ impl<'a> RouteQuestions<'a> {
             self.expanded.as_slice()
         }
     }
-
-    /// Whether more than one route question must be evaluated.
-    pub(super) fn is_multi(&self) -> bool {
-        !self.expanded.is_empty()
-    }
 }
 
 /// Collects the profile-required extra permission questions triggered by headers or form fields.

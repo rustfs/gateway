@@ -61,7 +61,7 @@ impl S3Service {
         &self,
         operation: &'static str,
         requirement: rustfs_gateway_core::AuthRequirement,
-        meta: &'a MetaView<'a>,
+        meta: &'a rustfs_gateway_core::MetaView<'a>,
     ) -> Result<(rustfs_gateway_core::AuthRequirement, Option<std::borrow::Cow<'a, str>>), rustfs_gateway_core::CodecError> {
         let named_version = if requirement.version_requirement().is_some() {
             meta.query("versionId").map_err(|error| error.about("VersionId"))?
