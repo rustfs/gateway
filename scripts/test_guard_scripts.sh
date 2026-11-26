@@ -9183,7 +9183,7 @@ known_diffs_append() {
     printf '\n[[diff]]\nid = "kd-decode-9999"\nkind = "decode"\noperation = "GetObject"\nitem = "GetObjectInput.guard_fixture"\n%s\n' "$1" \
         >>crates/difftest/known-diffs.toml
 }
-mut_known_diff_added() { known_diffs_append $'reason = "A guard fixture entry."\nexpires = "2026-12-31"'; }
+mut_known_diff_added() { known_diffs_append $'reason = "A guard fixture entry."\nexpires = "2027-06-30"'; }
 expect_difftest_pr check_known_diffs_ratchet.sh fail \
     'a register entry added without an argument (a-df-0016)' mut_known_diff_added
 expect_difftest_pr check_known_diffs_ratchet.sh fail \
@@ -9195,7 +9195,7 @@ expect_difftest_pr check_known_diffs_ratchet.sh fail \
 expect_difftest_pr check_known_diffs_ratchet.sh pass \
     'a register entry added with its argument in the description' mut_known_diff_added \
     $'Summary.\n- known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
-mut_known_diff_no_reason() { known_diffs_append 'expires = "2026-12-31"'; }
+mut_known_diff_no_reason() { known_diffs_append 'expires = "2027-06-30"'; }
 expect_difftest_pr check_known_diffs_ratchet.sh fail \
     'a register entry without a reason, even argued (a-df-0017)' mut_known_diff_no_reason \
     'known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
@@ -9315,18 +9315,27 @@ mut_known_diff_expiry_unreadable() { known_diffs_append 'reason = "A guard fixtu
 expect_fail check_known_diffs_expiry.sh \
     'a register entry with no review date at all' mut_known_diff_expiry_unreadable 'kd-decode-9999: no expires'
 probe_known_diffs_due_soon() {
-    local output rc=0
+    local output rc=0 entry_id expires warn_day expired_day
     cases=$((cases + 1))
     guard_case_owned "$cases" || return 0
-    output="$(GATEWAY_KNOWN_DIFFS_TODAY=2026-12-15 "${SCRIPT_DIR}/check_known_diffs_expiry.sh" 2>&1)" || rc=$?
-    [[ "$rc" -eq 0 && "$output" == *'::warning::known-diffs entry kd-decode-0001 is due for review on 2026-12-31'* ]] &&
+    read -r entry_id expires warn_day expired_day < <(python3 - "${REPO_ROOT}/crates/difftest/known-diffs.toml" <<'PYEOF'
+import datetime, pathlib, sys, tomllib
+
+doc = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
+entry = min(doc["diff"], key=lambda d: (datetime.date.fromisoformat(d["expires"]), d["id"]))
+exp = datetime.date.fromisoformat(entry["expires"])
+print(entry["id"], exp.isoformat(), (exp - datetime.timedelta(days=16)).isoformat(), (exp + datetime.timedelta(days=1)).isoformat())
+PYEOF
+    )
+    output="$(GATEWAY_KNOWN_DIFFS_TODAY="$warn_day" "${SCRIPT_DIR}/check_known_diffs_expiry.sh" 2>&1)" || rc=$?
+    [[ "$rc" -eq 0 && "$output" == *"::warning::known-diffs entry ${entry_id} is due for review on ${expires}"* ]] &&
         pass_msg 'check_known_diffs_expiry.sh warns before an entry falls due' ||
-        fail_msg 'check_known_diffs_expiry.sh said nothing about an entry due in sixteen days'
+        fail_msg "check_known_diffs_expiry.sh said nothing about an entry due in sixteen days (${output})"
     rc=0
-    output="$(GATEWAY_KNOWN_DIFFS_TODAY=2027-01-01 "${SCRIPT_DIR}/check_known_diffs_expiry.sh" --due 2>&1)" || rc=$?
-    [[ "$rc" -eq 0 && "$output" == *'kd-decode-0001 2026-12-31'* ]] &&
+    output="$(GATEWAY_KNOWN_DIFFS_TODAY="$expired_day" "${SCRIPT_DIR}/check_known_diffs_expiry.sh" --due 2>&1)" || rc=$?
+    [[ "$rc" -eq 0 && "$output" == *"${entry_id} ${expires}"* ]] &&
         pass_msg 'check_known_diffs_expiry.sh --due lists expired entries for the review issue' ||
-        fail_msg 'check_known_diffs_expiry.sh --due did not list an expired entry'
+        fail_msg "check_known_diffs_expiry.sh --due did not list an expired entry (${output})"
 }
 probe_known_diffs_due_soon
 
@@ -19270,6 +19279,24 @@ mut_stale_file_size_allowance() {
 expect_fail check_file_size.sh \
     'an allowance remaining on a file below the ordinary 800-line ceiling' mut_stale_file_size_allowance
 
+mut_unallowed_large_compat_sut_file() {
+    for _ in $(seq 1 801); do printf '// padding\n' >>compat/sut/src/clock.rs; done
+}
+expect_fail check_file_size.sh \
+    'a compat/sut Rust file exceeding 800 lines without an allowance' mut_unallowed_large_compat_sut_file
+
+mut_unallowed_large_fuzz_file() {
+    for _ in $(seq 1 801); do printf '// padding\n' >>fuzz/fuzz_targets/decode_diff.rs; done
+}
+expect_fail check_file_size.sh \
+    'a fuzz Rust file exceeding 800 lines without an allowance' mut_unallowed_large_fuzz_file
+
+mut_file_size_missing_scan_root() {
+    rm -rf fuzz
+}
+expect_fail check_file_size.sh \
+    'a missing required scan root failing closed instead of skipping' mut_file_size_missing_scan_root
+
 mut_forbidden_list_loses_alternative() {
     sed 's|`cargo tree -p <crate> -e normal`|none|' AGENTS.md >AGENTS.md.mut
     mv AGENTS.md.mut AGENTS.md
@@ -27917,6 +27944,101 @@ mut_token_sealing_trybuild_golden_missing() {
 }
 expect_fail check_token_sealing_surface.sh \
     'deleting a token_sealing trybuild golden' mut_token_sealing_trybuild_golden_missing
+
+# -- check_conformance_rulings.sh (rustfs/gateway#1631) ------------------------------------------
+# Proves the committed rulings ledger guard fails closed on missing input, expired dates,
+# unknown/stale corpus case IDs, in-process-only cases, and malformed rows.
+
+mut_conformance_ruling_expired() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/rulings/rustfs-profile.toml")
+text = path.read_text()
+anchor = 'id = "c-acl-0001"'
+start = text.index(anchor)
+at = text.index('expires = "', start)
+end = text.index('"', at + len('expires = "'))
+path.write_text(text[:at] + 'expires = "2020-01-01' + text[end:])
+PYEOF
+}
+expect_fail check_conformance_rulings.sh \
+    'a conformance ruling past its review date' mut_conformance_ruling_expired 'c-acl-0001 expired on 2020-01-01'
+
+mut_conformance_ruling_unknown_case() {
+    cat >>conformance/rulings/rustfs-profile.toml <<'RULING'
+
+[[ruling]]
+id = "c-nonexistent-9999"
+verdict = "legacy-identical"
+issue = "rustfs/gateway#1631"
+approved_by = "guard fixture"
+expires = "2027-04-07"
+RULING
+}
+expect_fail check_conformance_rulings.sh \
+    'a conformance ruling naming an unknown or removed corpus case id' \
+    mut_conformance_ruling_unknown_case 'c-nonexistent-9999'
+
+mut_conformance_ruling_in_process_only() {
+    cat >>conformance/rulings/rustfs-profile.toml <<'RULING'
+
+[[ruling]]
+id = "c-post-0020"
+verdict = "legacy-identical"
+issue = "rustfs/gateway#1631"
+approved_by = "guard fixture"
+expires = "2027-04-07"
+RULING
+}
+expect_fail check_conformance_rulings.sh \
+    'a conformance ruling naming an in-process-only case' \
+    mut_conformance_ruling_in_process_only 'c-post-0020'
+
+mut_conformance_ruling_ledger_missing() {
+    rm conformance/rulings/rustfs-profile.toml
+}
+expect_fail check_conformance_rulings.sh \
+    'a missing rulings ledger failing closed instead of skipping' \
+    mut_conformance_ruling_ledger_missing 'required input is missing: conformance/rulings/rustfs-profile.toml'
+
+mut_conformance_ruling_bad_verdict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/rulings/rustfs-profile.toml")
+text = path.read_text()
+path.write_text(text.replace('verdict = "legacy-identical"', 'verdict = "excused"', 1))
+PYEOF
+}
+expect_fail check_conformance_rulings.sh \
+    'a conformance ruling carrying an unknown verdict' \
+    mut_conformance_ruling_bad_verdict 'verdict `excused`'
+
+probe_conformance_rulings_expiry_window() {
+    local output rc=0 expires warn_day expired_day
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    read -r expires warn_day expired_day < <(python3 - "${REPO_ROOT}/conformance/rulings/rustfs-profile.toml" <<'PYEOF'
+import datetime, pathlib, sys, tomllib
+
+doc = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
+entry = next(r for r in doc["ruling"] if r["id"] == "c-acl-0001")
+exp = datetime.date.fromisoformat(entry["expires"])
+print(exp.isoformat(), (exp - datetime.timedelta(days=16)).isoformat(), (exp + datetime.timedelta(days=1)).isoformat())
+PYEOF
+    )
+    output="$(GATEWAY_RULINGS_TODAY="$warn_day" "${SCRIPT_DIR}/check_conformance_rulings.sh" 2>&1)" || rc=$?
+    [[ "$rc" -eq 0 && "$output" == *"::warning::conformance ruling c-acl-0001 is due for review on ${expires}"* ]] &&
+        pass_msg 'check_conformance_rulings.sh warns before a ruling falls due' ||
+        fail_msg "check_conformance_rulings.sh did not warn for a due ruling (${output})"
+    rc=0
+    output="$(GATEWAY_RULINGS_TODAY="$expired_day" "${SCRIPT_DIR}/check_conformance_rulings.sh" 2>&1)" || rc=$?
+    [[ "$rc" -ne 0 && "$output" == *"c-acl-0001 expired on ${expires}"* ]] &&
+        pass_msg 'check_conformance_rulings.sh fails once a ruling passes its review date' ||
+        fail_msg "check_conformance_rulings.sh did not fail past review date (${output})"
+}
+probe_conformance_rulings_expiry_window
 
 fi
 

@@ -174,6 +174,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_schema_dimensions.sh` | The frozen conformance schema retains all nine P8-01 day-one expression dimensions | P8-01 |
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |
+| `check_conformance_rulings.sh` | `conformance/rulings/rustfs-profile.toml` is schema-valid, free of expired rulings, bound to existing corpus cases, and rules no `IN_PROCESS_ONLY` case | P9 |
 | `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
 | `check_xfail_ratchet.sh` | The Ceph s3-tests tolerated set only shrinks, unless the same change raises the file's generation by exactly one | P8-05 |
 | `check_s3tests_filter.sh` | The s3-tests marker filter never grows an exclusion, never excludes `fails_on_rgw`, and always excludes `fails_on_aws` | P8-05 |
