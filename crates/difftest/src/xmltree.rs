@@ -24,6 +24,47 @@
 //! refuses is compared as bytes only.
 //! Upstream: `encode.rs`. Downstream: `encode.rs`.
 
+/// XML 1.0 Fifth Edition `Char` production (`https://www.w3.org/TR/xml/#charsets`).
+///
+/// Rust `char` already excludes UTF-16 surrogates (`U+D800..=U+DFFF`) and scalars above
+/// `U+10FFFF`. This rejects C0 control characters other than HT/LF/CR and the noncharacters
+/// `U+FFFE` and `U+FFFF`.
+pub(crate) fn is_xml_1_0_char(character: char) -> bool {
+    matches!(
+        character,
+        '\u{09}' | '\u{0A}' | '\u{0D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+    )
+}
+
+/// Validates that every numeric character reference (`&#...;` / `&#x...;`) in `text` is well
+/// formed and decodes to a valid XML 1.0 `Char`.
+fn has_valid_xml_char_refs(text: &str) -> bool {
+    let mut rest = text;
+    while let Some(start) = rest.find("&#") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find(';') else {
+            return false;
+        };
+        let digits = &after[..end];
+        let code = if let Some(hex) = digits.strip_prefix('x') {
+            if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return false;
+            }
+            u32::from_str_radix(hex, 16).ok()
+        } else {
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return false;
+            }
+            digits.parse::<u32>().ok()
+        };
+        if !code.and_then(char::from_u32).is_some_and(is_xml_1_0_char) {
+            return false;
+        }
+        rest = &after[end + 1..];
+    }
+    true
+}
+
 /// One element as written.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Element {
@@ -83,7 +124,11 @@ impl<'a> Reader<'a> {
             let (key, value_part) = attribute_text.split_once('=')?;
             let value_part = value_part.strip_prefix('"')?;
             let close = value_part.find('"')?;
-            attributes.push((key.trim().to_owned(), value_part[..close].to_owned()));
+            let value = &value_part[..close];
+            if !has_valid_xml_char_refs(value) {
+                return None;
+            }
+            attributes.push((key.trim().to_owned(), value.to_owned()));
             attribute_text = &value_part[close + 1..];
         }
         self.at += end + 1;
@@ -109,7 +154,11 @@ impl<'a> Reader<'a> {
                 continue;
             }
             let next = rest.find('<')?;
-            element.text.push_str(&rest[..next]);
+            let chunk = &rest[..next];
+            if !has_valid_xml_char_refs(chunk) {
+                return None;
+            }
+            element.text.push_str(chunk);
             self.at += next;
             if !self.rest().starts_with('<') {
                 return None;
@@ -121,8 +170,12 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Reads one document's root element, or `None` when the text is not the subset this reads.
+/// Reads one document's root element, or `None` when the text is not the subset this reads or
+/// contains a character forbidden by XML 1.0.
 pub(crate) fn parse(text: &str) -> Option<Element> {
+    if !text.chars().all(is_xml_1_0_char) {
+        return None;
+    }
     let mut reader = Reader { text, at: 0 };
     let root = reader.element()?;
     reader.skip_whitespace();
