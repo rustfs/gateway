@@ -190,6 +190,7 @@ pub use crate::probe::{BodyProgress, ObservedBody};
 pub use crate::render::{S3Error, connection_intent_of, declaration, document, document_body, render};
 pub use crate::request_config::HandlerDeadlineReport;
 pub use crate::service::{S3Service, SecurityPosture};
+pub use crate::sig::{ReplayDecision, ReplayFingerprint, ReplayNonceStore};
 pub use crate::trace::{
     FixedTrace, HOST_ID_HEADER, HostId, HostRequestId, InvalidRequestId, MintedTraces, REQUEST_ID_HEADER, RequestId,
     RequestTrace, TraceSource, X_REQUEST_ID_HEADER,

@@ -26,7 +26,10 @@ use arc_swap::ArcSwap;
 use hyper_util::server::conn::auto;
 use rustls::ServerConfig as RustlsServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::server::ResolvesServerCert;
+use rustls::server::danger::ClientCertVerifier;
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 use crate::config::ServerConfig;
 use crate::send_deadline::StreamExecutor;
@@ -35,10 +38,22 @@ use crate::send_deadline::StreamExecutor;
 /// order: HTTP/2 over TLS is identified only by `h2` (RFC 9113 section 3.2).
 pub const DEFAULT_ALPN_PROTOCOLS: [&[u8]; 2] = [b"h2", b"http/1.1"];
 
-/// Owned DER certificate chain, private key and advertised ALPN protocols for one TLS configuration.
+enum CertificateSource {
+    Single {
+        certificates: Vec<Vec<u8>>,
+        private_key: Zeroizing<Vec<u8>>,
+    },
+    Resolver(Arc<dyn ResolvesServerCert>),
+}
+
+/// Owned TLS certificate source, optional client-certificate verifier, and advertised ALPN
+/// protocols for one TLS configuration.
+///
+/// Single-certificate private key bytes are wrapped in [`Zeroizing`] so they are wiped on drop,
+/// including when material is discarded or validation fails.
 pub struct TlsMaterial {
-    certificates: Vec<Vec<u8>>,
-    private_key: Vec<u8>,
+    source: CertificateSource,
+    client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
     alpn_protocols: Vec<Vec<u8>>,
 }
 
@@ -47,10 +62,32 @@ impl TlsMaterial {
     #[must_use]
     pub fn from_der(certificates: Vec<Vec<u8>>, private_key: Vec<u8>) -> Self {
         Self {
-            certificates,
-            private_key,
+            source: CertificateSource::Single {
+                certificates,
+                private_key: Zeroizing::new(private_key),
+            },
+            client_cert_verifier: None,
             alpn_protocols: DEFAULT_ALPN_PROTOCOLS.iter().map(|protocol| protocol.to_vec()).collect(),
         }
+    }
+
+    /// Creates TLS material backed by a custom certificate resolver (for example, SNI multi-domain
+    /// selection or dynamic certificate lookup).
+    #[must_use]
+    pub fn from_cert_resolver(resolver: Arc<dyn ResolvesServerCert>) -> Self {
+        Self {
+            source: CertificateSource::Resolver(resolver),
+            client_cert_verifier: None,
+            alpn_protocols: DEFAULT_ALPN_PROTOCOLS.iter().map(|protocol| protocol.to_vec()).collect(),
+        }
+    }
+
+    /// Installs a client-certificate verifier for mutual TLS (mandatory or optional depending on
+    /// the verifier configuration, such as `WebPkiClientVerifier`).
+    #[must_use]
+    pub fn with_client_cert_verifier(mut self, verifier: Arc<dyn ClientCertVerifier>) -> Self {
+        self.client_cert_verifier = Some(verifier);
+        self
     }
 
     /// Replaces the ALPN protocols the listener advertises, in preference order. A client that
@@ -63,15 +100,28 @@ impl TlsMaterial {
     }
 
     fn into_config(self) -> Result<RustlsServerConfig, TlsReloadError> {
-        if self.certificates.is_empty() {
-            return Err(TlsReloadError::EmptyCertificateChain);
-        }
-        let certificates = self.certificates.into_iter().map(CertificateDer::from).collect();
-        let private_key = PrivateKeyDer::try_from(self.private_key).map_err(|_| TlsReloadError::InvalidPrivateKey)?;
-        let mut config = RustlsServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certificates, private_key)
-            .map_err(TlsReloadError::InvalidMaterial)?;
+        let builder = match self.client_cert_verifier {
+            Some(verifier) => RustlsServerConfig::builder().with_client_cert_verifier(verifier),
+            None => RustlsServerConfig::builder().with_no_client_auth(),
+        };
+        let mut config = match self.source {
+            CertificateSource::Single {
+                certificates,
+                private_key,
+            } => {
+                if certificates.is_empty() {
+                    return Err(TlsReloadError::EmptyCertificateChain);
+                }
+                let certificates = certificates.into_iter().map(CertificateDer::from).collect();
+                let private_key = PrivateKeyDer::try_from(private_key.as_slice())
+                    .map_err(|_| TlsReloadError::InvalidPrivateKey)?
+                    .clone_key();
+                builder
+                    .with_single_cert(certificates, private_key)
+                    .map_err(TlsReloadError::InvalidMaterial)?
+            }
+            CertificateSource::Resolver(resolver) => builder.with_cert_resolver(resolver),
+        };
         config.alpn_protocols = self.alpn_protocols;
         Ok(config)
     }
@@ -92,10 +142,19 @@ impl TlsHandle {
     /// Returns [`TlsReloadError`] if the certificate chain or key cannot build a Rustls config.
     pub fn new(material: TlsMaterial) -> Result<Self, TlsReloadError> {
         let config = material.into_config()?;
-        Ok(Self {
-            inner: Arc::new(ArcSwap::from_pointee(config)),
+        Ok(Self::from_server_config(Arc::new(config)))
+    }
+
+    /// Builds a handle directly from a caller-constructed [`rustls::ServerConfig`].
+    ///
+    /// Use this seam when a host needs protocol-version pinning, custom cipher suites, session
+    /// ticket configuration, OCSP stapling, or a custom crypto provider beyond [`TlsMaterial`].
+    #[must_use]
+    pub fn from_server_config(config: Arc<RustlsServerConfig>) -> Self {
+        Self {
+            inner: Arc::new(ArcSwap::from(config)),
             handshakes: Arc::new(AtomicUsize::new(0)),
-        })
+        }
     }
 
     /// Validates and installs material for future connections.
@@ -109,7 +168,7 @@ impl TlsHandle {
     pub fn reload(&self, material: TlsMaterial) -> Result<(), TlsReloadError> {
         match material.into_config() {
             Ok(config) => {
-                self.inner.store(Arc::new(config));
+                self.reload_server_config(Arc::new(config));
                 Ok(())
             }
             Err(error) => {
@@ -117,6 +176,12 @@ impl TlsHandle {
                 Err(error)
             }
         }
+    }
+
+    /// Atomically replaces the active [`rustls::ServerConfig`] for future connections while
+    /// preserving established TLS sessions.
+    pub fn reload_server_config(&self, config: Arc<RustlsServerConfig>) {
+        self.inner.store(config);
     }
 
     /// Loads the one configuration a new connection must retain through its handshake.
@@ -164,5 +229,32 @@ pub(crate) fn protocol_builder(negotiated: Option<&[u8]>, config: &ServerConfig)
         Some(b"http/1.1") => builder.http1_only(),
         _ if config.h2_prior_knowledge => builder,
         _ => builder.http1_only(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_zeroizing_key(key: &Zeroizing<Vec<u8>>) -> usize {
+        key.len()
+    }
+
+    #[test]
+    fn from_der_wraps_private_key_in_zeroizing() {
+        let material = TlsMaterial::from_der(vec![vec![1, 2, 3]], vec![0xAA; 32]);
+        assert!(matches!(
+            &material.source,
+            CertificateSource::Single { private_key, .. } if assert_zeroizing_key(private_key) == 32
+        ));
+    }
+
+    #[test]
+    fn empty_chain_and_invalid_key_are_rejected_without_panicking() {
+        let empty = TlsMaterial::from_der(Vec::new(), vec![0xBB; 16]);
+        assert!(matches!(TlsHandle::new(empty), Err(TlsReloadError::EmptyCertificateChain)));
+
+        let invalid = TlsMaterial::from_der(vec![vec![0x01]], vec![0xCC; 16]);
+        assert!(matches!(TlsHandle::new(invalid), Err(TlsReloadError::InvalidPrivateKey)));
     }
 }

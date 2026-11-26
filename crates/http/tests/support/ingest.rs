@@ -273,10 +273,15 @@ pub struct SignedChunker {
 impl SignedChunker {
     /// A producer chained from `seed`, which stands in for the request-head signature.
     pub fn new(key: [u8; 32], seed: [u8; 32]) -> Self {
+        Self::with_scope(key, seed, TEST_SCOPE_LINE, TEST_AMZ_DATE)
+    }
+
+    /// A producer chained from `seed` over an explicit credential scope line and timestamp.
+    pub fn with_scope(key: [u8; 32], seed: [u8; 32], scope_line: &str, amz_date: &str) -> Self {
         Self {
             key,
-            scope_line: TEST_SCOPE_LINE.to_owned(),
-            amz_date: TEST_AMZ_DATE.to_owned(),
+            scope_line: scope_line.to_owned(),
+            amz_date: amz_date.to_owned(),
             previous: seed,
             out: Vec::new(),
         }

@@ -146,6 +146,7 @@ pub struct ServiceBuilder {
     view_policy: view_policy::ViewPolicy,
     decode_anonymous_framing: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
+    replay_nonce_store: Option<Arc<dyn rustfs_gateway_sig::ReplayNonceStore + Send + Sync>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
     /// ADR-0054: the header token claim and its verifier, installed together or not at all.
@@ -177,6 +178,7 @@ impl core::fmt::Debug for ServiceBuilder {
             .field("operations", &self.registered().collect::<Vec<_>>())
             .field("has_authorizer", &self.authorizer.is_some())
             .field("has_authenticator", &self.authenticator.is_some())
+            .field("has_replay_nonce_store", &self.replay_nonce_store.is_some())
             .field("has_custom_signature_verifier", &self.custom_signature_verifier.is_some())
             .field("has_bearer_token_verifier", &self.bearer_token_verifier.is_some())
             .field("has_header_token", &self.header_token.is_some())
@@ -210,6 +212,7 @@ impl ServiceBuilder {
             view_policy: view_policy::ViewPolicy::default(),
             decode_anonymous_framing: true,
             authenticator: None,
+            replay_nonce_store: None,
             custom_signature_verifier: None,
             bearer_token_verifier: None,
             header_token: None,
@@ -263,6 +266,18 @@ impl ServiceBuilder {
     #[must_use]
     pub fn stage_filter(mut self, filter: impl StageFilter) -> Self {
         self.filters.push(Arc::new(filter));
+        self
+    }
+
+    /// Installs an optional single-use [`rustfs_gateway_sig::ReplayNonceStore`] (H7) for
+    /// presigned SigV4 URLs.
+    ///
+    /// Checked strictly after cryptographic signature verification succeeds so unauthenticated or
+    /// forged requests cannot poison the store. A replayed, unavailable, or panicking store
+    /// decision fails closed with `403 AccessDenied` and holds the security failure floor.
+    #[must_use]
+    pub fn replay_nonce_store(mut self, store: Arc<dyn rustfs_gateway_sig::ReplayNonceStore + Send + Sync>) -> Self {
+        self.replay_nonce_store = Some(store);
         self
     }
 
@@ -625,6 +640,10 @@ impl ServiceBuilder {
                 runtime: Some(Arc::clone(&runtime)),
             })
         });
+        let unread_body_drain_permits = self
+            .view_policy
+            .unread_body_drain()
+            .map(|drain| Arc::new(tokio::sync::Semaphore::new(drain.max_concurrent())));
         Ok(S3Service::from_inner(Inner {
             floor: self.floor,
             signing_service: runtime.routing.router.signing_service(),
@@ -632,6 +651,7 @@ impl ServiceBuilder {
             names: self.names,
             config: self.config,
             authenticator,
+            replay_nonce_store: self.replay_nonce_store,
             custom_signature_verifier: self.custom_signature_verifier,
             bearer_token_verifier: self.bearer_token_verifier,
             header_token_verifier,
@@ -656,6 +676,7 @@ impl ServiceBuilder {
             startup_report: startup_report.into_boxed_str(),
             decode_anonymous_framing: self.decode_anonymous_framing,
             detached_work: crate::DetachedWork::default(),
+            unread_body_drain_permits,
         }))
     }
 

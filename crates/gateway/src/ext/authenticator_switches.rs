@@ -536,6 +536,23 @@ impl SigV4Authenticator {
         self.store_faults_unavailable = true;
         self
     }
+
+    /// Installs an optional single-use [`rustfs_gateway_sig::ReplayNonceStore`] (H7) checked after
+    /// presigned SigV4 signature verification succeeds.
+    ///
+    /// Off by default because presigned URLs are reusable within their validity window under
+    /// standard S3 semantics. When installed, a replayed, unavailable, or panicking store decision
+    /// fails closed with `403 AccessDenied` and never publishes chunk-verification material.
+    /// Do not also install the same store on [`crate::ServiceBuilder::replay_nonce_store`], or
+    /// every presigned request will record its fingerprint twice.
+    #[must_use]
+    pub fn with_replay_nonce_store(
+        mut self,
+        store: std::sync::Arc<dyn rustfs_gateway_sig::ReplayNonceStore + Send + Sync>,
+    ) -> Self {
+        self.replay_nonce_store = Some(store);
+        self
+    }
 }
 
 impl SigV4Authenticator {
@@ -619,6 +636,7 @@ impl core::fmt::Debug for SigV4Authenticator {
                 &self.signed_headers.unsigned_cloudfront_id,
             )
             .field("answers_credential_store_faults_as_unavailable", &self.store_faults_unavailable)
+            .field("has_replay_nonce_store", &self.replay_nonce_store.is_some())
             .finish()
     }
 }

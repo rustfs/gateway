@@ -482,6 +482,17 @@ impl<R> IngestPipeline<R> {
         StreamError::upstream(Box::new(reject)).with_bytes_before_error(self.delivered_bytes)
     }
 
+    /// Total verified bytes currently queued for delivery from the pipeline window.
+    #[must_use]
+    pub fn deliverable_bytes(&self) -> usize {
+        self.deliverable.get(self.deliver_at..).map_or(0, |runs| {
+            runs.iter()
+                .map(|(_, len)| *len)
+                .sum::<usize>()
+                .saturating_sub(self.deliver_offset)
+        })
+    }
+
     /// The refusal that ended this body, if one did.
     ///
     /// Named rather than recovered by downcast: the response layer reads
@@ -494,6 +505,36 @@ impl<R> IngestPipeline<R> {
 }
 
 impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
+    /// Advances the pipeline until at least one verified byte is deliverable or end-of-stream is
+    /// reached, without requiring a caller-allocated delivery buffer while the wire is pending.
+    ///
+    /// Returns `Ok(n)` with `n > 0` verified bytes queued in the window, or `Ok(0)` once EOF has
+    /// been reached (the subsequent [`AsyncPayloadRead::poll_fill`] yields `ReadProgress::Eof`).
+    ///
+    /// # Errors
+    ///
+    /// Any framing, signature, or transport [`StreamError`] observed while advancing the pipeline.
+    pub fn poll_ready_deliverable(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<usize, StreamError>> {
+        let this = self.get_mut();
+        if this.failed {
+            return Poll::Ready(Err(StreamError::incomplete_body().with_bytes_before_error(this.delivered_bytes)));
+        }
+        loop {
+            let ready = this.deliverable_bytes();
+            if ready > 0 {
+                return Poll::Ready(Ok(ready));
+            }
+            if this.finished {
+                return Poll::Ready(Ok(0));
+            }
+            match this.advance(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                Poll::Ready(Ok(())) => {}
+            }
+        }
+    }
+
     /// Runs the state machine one step, reading from the inner body when it needs bytes.
     fn advance(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
         let event = match self.decoder.step(self.window.get(..self.filled).unwrap_or(&[])) {

@@ -116,9 +116,13 @@ where
     };
     let policy_limits = prelude.policy_limits();
     let fields = prelude.form_fields();
+    let auth_started = service.inner.authz_clock.monotonic();
     let policy = match UnroutedPostPolicy::read(&fields, policy_limits) {
         Ok(policy) => policy,
-        Err(error) => return outcome.refuse_at(Refused::Authentication, metadata_refusal(error)),
+        Err(error) => {
+            service.hold_auth_failure_floor(auth_started).await;
+            return outcome.refuse_at(Refused::Authentication, metadata_refusal(error));
+        }
     };
     let empty_headers = HeaderMap::new();
     let view = WireView::new(&empty_headers, RawQuery::new("")).with_form_fields(&fields);
@@ -129,7 +133,10 @@ where
         let presence = detect_credentials(&view);
         let sealed = match service.inner.floor.admit(view, crate::dto::PostObject::floor(), now) {
             Ok(Admission::SealedSigV2(sealed)) => sealed,
-            Err(error) => return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true)),
+            Err(error) => {
+                service.hold_auth_failure_floor(auth_started).await;
+                return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true));
+            }
             Ok(_) => return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NO_ROUTE_MESSAGE)),
         };
         // The form's own policy ceilings, as the routed path and the SigV4 branch below pass them.
@@ -137,10 +144,12 @@ where
             .with_post_policy_limits(Some(policy_limits));
         // A form's file part is still owed, as every refusal on this path renders it.
         let Ok(authentication) = service.inner.authenticator.authenticate_sigv2(&question).await else {
+            service.hold_auth_failure_floor(auth_started).await;
             return outcome.refuse_unavailable(FORM_UNAUTHENTICATED, true);
         };
         let (verdict, _, _) = authentication.into_parts();
         if let Some(error) = SecurityFloor::seal_verdict(verdict, presence).rejection() {
+            service.hold_auth_failure_floor(auth_started).await;
             return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true));
         }
         return method_refusal(outcome);
@@ -152,8 +161,12 @@ where
         let presence = detect_credentials(&view);
         let sealed = match service.inner.floor.admit(view, crate::dto::PostObject::floor(), now) {
             Ok(Admission::Sealed(sealed)) => sealed,
-            Err(error) => return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true)),
+            Err(error) => {
+                service.hold_auth_failure_floor(auth_started).await;
+                return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true));
+            }
             _ => {
+                service.hold_auth_failure_floor(auth_started).await;
                 return outcome.refuse_handler_at(
                     Refused::Authentication,
                     HandlerError::new(ErrorCode::ACCESS_DENIED, "the form was not authenticated"),
@@ -174,11 +187,13 @@ where
         let authentication = service.inner.authenticator.authenticate(&question).await;
         let (_, legacy, _) = question.into_published();
         let Ok(authentication) = authentication else {
+            service.hold_auth_failure_floor(auth_started).await;
             return outcome.refuse_unavailable(FORM_UNAUTHENTICATED, true);
         };
         let (verdict, _, _) = authentication.into_parts();
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
+            service.hold_auth_failure_floor(auth_started).await;
             let refusal = match legacy {
                 Some(legacy) => legacy.render(&error, ResponseKind::Other, true),
                 None => from_auth(error, ResponseKind::Other, true),

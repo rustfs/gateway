@@ -112,7 +112,7 @@ async fn until_dropped(dropped: &AtomicBool) {
 async fn n_a_body_read_to_its_end_is_left_alone() {
     let (request, probe) = owed(Version::HTTP_11);
     probe.sender.send(Bytes::from_static(b"payload")).expect("the body is open");
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     drop(probe.sender);
     {
         let mut body = std::pin::pin!(request.into_body());
@@ -130,7 +130,7 @@ async fn n_a_body_read_to_its_end_is_left_alone() {
 #[tokio::test]
 async fn a_body_left_unread_on_http1_is_drained_behind_a_closing_answer() {
     let (request, probe) = owed(Version::HTTP_11);
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     drop(request);
     let mut response = Response::new(());
     retention.settle(&mut response);
@@ -166,7 +166,7 @@ impl<B: Body + Unpin> Body for Transform<B> {
 #[tokio::test]
 async fn the_drain_reads_the_raw_body_below_the_services_transforms() {
     let (request, probe) = owed(Version::HTTP_11);
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     let polls = Arc::new(AtomicUsize::new(0));
     drop(Transform {
         inner: Box::pin(request.into_body()),
@@ -190,7 +190,7 @@ async fn the_drain_reads_the_raw_body_below_the_services_transforms() {
 #[tokio::test]
 async fn n_an_http2_body_is_released_not_drained() {
     let (request, probe) = owed(Version::HTTP_2);
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     drop(request);
     let mut response = Response::new(());
     retention.settle(&mut response);
@@ -204,7 +204,7 @@ async fn n_an_http2_body_is_released_not_drained() {
 #[tokio::test(start_paused = true)]
 async fn n_an_idle_peer_is_let_go_after_the_idle_bound() {
     let (request, probe) = owed(Version::HTTP_11);
-    let (request, retention) = retain(request, Some(UnreadBodyDrain::with_idle_timeout(Duration::from_secs(10))));
+    let (request, retention) = retain(request, Some(UnreadBodyDrain::with_idle_timeout(Duration::from_secs(10))), None);
     drop(request);
     let mut response = Response::new(());
     retention.settle(&mut response);
@@ -223,7 +223,7 @@ async fn n_an_idle_peer_is_let_go_after_the_idle_bound() {
 #[tokio::test]
 async fn n_without_the_setting_the_body_is_released() {
     let (request, probe) = owed(Version::HTTP_11);
-    let (request, retention) = retain(request, None);
+    let (request, retention) = retain(request, None, None);
     drop(request);
     let mut response = Response::new(());
     retention.settle(&mut response);
@@ -237,7 +237,7 @@ async fn n_without_the_setting_the_body_is_released() {
 async fn n_a_body_ended_on_arrival_is_not_retained() {
     let (request, probe) = owed(Version::HTTP_11);
     drop(probe.sender);
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     assert!(matches!(request.body(), Retained::Through { .. }));
     drop(request);
     let mut response = Response::new(());
@@ -262,7 +262,7 @@ impl Body for Broken {
 #[tokio::test]
 async fn n_a_failed_body_is_not_drained() {
     let request = Request::builder().body(Broken).expect("a valid request");
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     {
         let mut body = std::pin::pin!(request.into_body());
         assert!(
@@ -295,7 +295,7 @@ fn a_zero_idle_bound_is_unbounded() {
 async fn n_a_self_held_transport_body_is_not_retained() {
     let (mut request, probe) = owed(Version::HTTP_11);
     request.extensions_mut().insert(SelfHeldTransport);
-    let (request, retention) = retain(request, drain());
+    let (request, retention) = retain(request, drain(), None);
     assert!(matches!(request.body(), Retained::Through { .. }));
     drop(request);
     let mut response = Response::new(());
@@ -303,4 +303,108 @@ async fn n_a_self_held_transport_body_is_not_retained() {
     assert!(!closes(&response), "self-held transport must not be settled by unread_body");
     assert!(probe.dropped.load(Ordering::Acquire), "self-held body must be released immediately");
     assert_eq!(probe.read.load(Ordering::Relaxed), 0);
+}
+
+/// Negative — a peer that keeps trickling frames faster than the idle timeout is still stopped
+/// once the total wall-clock duration cap elapses.
+#[tokio::test(start_paused = true)]
+async fn n_a_trickling_peer_is_stopped_at_the_total_duration_cap() {
+    let (request, probe) = owed(Version::HTTP_11);
+    let policy = UnreadBodyDrain::with_idle_timeout(Duration::from_secs(10)).with_max_duration(Duration::from_secs(5));
+    let (request, retention) = retain(request, Some(policy), None);
+    drop(request);
+    let mut response = Response::new(());
+    retention.settle(&mut response);
+    assert!(closes(&response));
+    tokio::task::yield_now().await;
+
+    for _ in 0..2 {
+        tokio::time::advance(Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+        assert!(!probe.sender.is_closed(), "drain stopped before max_duration");
+        probe.sender.send(Bytes::from_static(b"x")).expect("peer can still trickle");
+        tokio::task::yield_now().await;
+    }
+
+    tokio::time::advance(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    assert!(probe.sender.is_closed(), "drain must stop once max_duration elapses");
+}
+
+/// Negative — a peer sending past the byte budget is dropped once the budget is reached.
+#[tokio::test]
+async fn n_a_body_past_the_byte_budget_stops_draining() {
+    let (request, probe) = owed(Version::HTTP_11);
+    let policy = UnreadBodyDrain::with_idle_timeout(Duration::from_secs(5)).with_max_bytes(10);
+    let (request, retention) = retain(request, Some(policy), None);
+    drop(request);
+    let mut response = Response::new(());
+    retention.settle(&mut response);
+    assert!(closes(&response));
+
+    probe
+        .sender
+        .send(Bytes::from_static(b"123456"))
+        .expect("first chunk fits under budget");
+    probe
+        .sender
+        .send(Bytes::from_static(b"789012"))
+        .expect("second chunk hits budget");
+    until_dropped(&probe.dropped).await;
+    assert!(
+        probe.sender.send(Bytes::from_static(b"excess")).is_err(),
+        "drain must drop the body once max_bytes is reached"
+    );
+}
+
+/// Negative — excess concurrent unread bodies beyond the semaphore ceiling are dropped
+/// immediately without spawning, and permits return once active drains finish.
+#[tokio::test]
+async fn n_concurrency_cap_drops_excess_unread_bodies_immediately() {
+    let permits = Arc::new(Semaphore::new(1));
+    let policy = UnreadBodyDrain::with_idle_timeout(Duration::from_secs(5)).with_max_concurrent(1);
+
+    let (req1, probe1) = owed(Version::HTTP_11);
+    let (req1, ret1) = retain(req1, Some(policy), Some(Arc::clone(&permits)));
+    drop(req1);
+    let mut resp1 = Response::new(());
+    ret1.settle(&mut resp1);
+    assert!(closes(&resp1));
+    assert!(!probe1.sender.is_closed(), "first drain holds the sole permit");
+
+    let (req2, probe2) = owed(Version::HTTP_11);
+    let (req2, ret2) = retain(req2, Some(policy), Some(Arc::clone(&permits)));
+    drop(req2);
+    let mut resp2 = Response::new(());
+    ret2.settle(&mut resp2);
+    assert!(!closes(&resp2), "saturated drain does not spawn");
+    assert!(probe2.sender.is_closed(), "excess unread body must be dropped immediately");
+
+    // Finish the first drain; the permit returns for a third request.
+    drop(probe1.sender);
+    until_dropped(&probe1.dropped).await;
+
+    let (req3, probe3) = owed(Version::HTTP_11);
+    let (req3, ret3) = retain(req3, Some(policy), Some(Arc::clone(&permits)));
+    drop(req3);
+    let mut resp3 = Response::new(());
+    ret3.settle(&mut resp3);
+    assert!(closes(&resp3));
+    assert!(!probe3.sender.is_closed(), "released permit must allow a subsequent drain");
+    drop(probe3.sender);
+    until_dropped(&probe3.dropped).await;
+}
+
+/// Negative — responses tagged with `SkipUnreadBodyDrain` (unauthenticated refusals) release the
+/// unread body immediately without spawning a drain task.
+#[tokio::test]
+async fn n_unauthenticated_refusal_extension_skips_draining() {
+    let (request, probe) = owed(Version::HTTP_11);
+    let (request, retention) = retain(request, drain(), None);
+    drop(request);
+    let mut response = Response::new(());
+    response.extensions_mut().insert(SkipUnreadBodyDrain);
+    retention.settle(&mut response);
+    assert!(!closes(&response), "skipped drain does not overwrite Connection");
+    assert!(probe.sender.is_closed(), "body must be dropped immediately when skipped");
 }

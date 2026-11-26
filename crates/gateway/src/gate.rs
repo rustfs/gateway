@@ -525,7 +525,6 @@ mod unfinished_body_tests {
             &headers,
             &wire,
             &crate::ext::ChunkSink::new(),
-            None,
             ChunkLimits::default(),
         )
         .ok()?
@@ -710,7 +709,6 @@ mod unfinished_body_tests {
             &headers,
             &wire,
             &crate::ext::ChunkSink::new(),
-            None,
             ChunkLimits::default(),
         )
         .err();

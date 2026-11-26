@@ -66,7 +66,6 @@ async fn c_ck_0002_an_unsigned_trailer_checksum_unlocks_commit_only_after_compar
         &headers,
         &wire_length(4096),
         &ChunkSink::new(),
-        None,
         ChunkLimits::default(),
     )
     .expect("the trailered mode is implemented")
@@ -96,7 +95,6 @@ async fn c_ck_0039_an_unsigned_trailer_checksum_mismatch_never_unlocks_commit() 
         &headers,
         &wire_length(4096),
         &ChunkSink::new(),
-        None,
         ChunkLimits::default(),
     )
     .expect("the trailered mode is implemented")
@@ -125,7 +123,6 @@ async fn a_parsed_trailer_without_a_checksum_witness_cannot_unlock_commit() {
         &headers,
         &wire_length(4096),
         &ChunkSink::new(),
-        None,
         ChunkLimits::default(),
     )
     .expect("the trailered mode is implemented")
@@ -145,6 +142,7 @@ fn sink_with_material() -> ChunkSink {
         rustfs_gateway_sig::SigningKey::from_array([0x5a; 32]),
         "20130524/us-east-1/s3/aws4_request".to_owned(),
         "20130524T000000Z".to_owned(),
+        [0xaa; 32],
     ));
     sink
 }
@@ -191,7 +189,6 @@ async fn c_ck_0003_a_signed_trailer_unlocks_commit_only_after_its_final_hmac() {
         &headers,
         &wire_length(4096),
         &sink_with_material(),
-        Some(&"a".repeat(64)),
         ChunkLimits::default(),
     )
     .expect("signed trailer verification is implemented")
@@ -221,7 +218,6 @@ async fn c_ck_0031_a_missing_signed_trailer_hmac_is_forbidden() {
         &headers,
         &wire_length(4096),
         &sink_with_material(),
-        Some(&"a".repeat(64)),
         ChunkLimits::default(),
     )
     .expect("signed trailer verification is implemented")
@@ -242,7 +238,6 @@ async fn a_mismatched_signed_trailer_hmac_is_forbidden() {
         &headers,
         &wire_length(4096),
         &sink_with_material(),
-        Some(&"a".repeat(64)),
         ChunkLimits::default(),
     )
     .expect("signed trailer verification is implemented")
@@ -265,7 +260,6 @@ async fn c_ck_0032_the_trailer_hmac_is_seeded_by_the_zero_chunk_signature() {
         &headers,
         &wire_length(4096),
         &sink_with_material(),
-        Some(&"a".repeat(64)),
         ChunkLimits::default(),
     )
     .expect("signed trailer verification is implemented")

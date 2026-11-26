@@ -223,3 +223,130 @@ async fn n_without_the_setting_the_answer_announces_no_close() {
     assert!(!response.contains("connection: close"), "{response}");
     server.abort();
 }
+
+/// Negative — an unauthenticated refusal (for example a bad signature) must NOT spawn a
+/// background drain task over the unread request body; the transport body is released immediately.
+#[tokio::test]
+async fn n_unauthenticated_refusal_skips_unread_body_drain() {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tower::Service;
+
+    struct ProbeBody {
+        receiver: tokio::sync::mpsc::UnboundedReceiver<Bytes>,
+    }
+
+    impl http_body::Body for ProbeBody {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            context: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+            match self.receiver.poll_recv(context) {
+                Poll::Ready(Some(bytes)) => Poll::Ready(Some(Ok(http_body::Frame::data(bytes)))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            }
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.receiver.is_closed() && self.receiver.is_empty()
+        }
+    }
+
+    let mut service = assembly(Some(UnreadBodyDrain::with_idle_timeout(Duration::from_secs(5))));
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    let date = &support::SIGNED_AT_STAMP[..8];
+    let auth = format!(
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/{date}/us-east-1/s3/aws4_request, \
+         SignedHeaders=host;x-amz-content-sha256;x-amz-date, \
+         Signature=0000000000000000000000000000000000000000000000000000000000000000"
+    );
+    let request = http::Request::builder()
+        .version(http::Version::HTTP_11)
+        .method(http::Method::PUT)
+        .uri("/bucket/object")
+        .header(http::header::HOST, "s3.example.com")
+        .header(http::header::CONTENT_LENGTH, "1024")
+        .header(http::header::AUTHORIZATION, auth)
+        .header("x-amz-date", support::SIGNED_AT_STAMP)
+        .header("x-amz-content-sha256", "UNSIGNED-PAYLOAD")
+        .body(ProbeBody { receiver })
+        .expect("valid bad-signature request");
+
+    let response = <S3Service as Service<_>>::call(&mut service, request)
+        .await
+        .expect("service is infallible");
+    assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+    assert!(
+        sender.is_closed(),
+        "an unauthenticated refusal must release the unread request body immediately instead of spawning a drain task"
+    );
+}
+
+/// Positive & negative — service-level concurrency cap (`with_max_concurrent(1)`) drains the first
+/// authenticated refusal and drops a concurrent second unread body immediately without spawning.
+#[tokio::test]
+async fn service_level_unread_body_drain_enforces_concurrency_cap() {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tower::Service;
+
+    struct ProbeBody {
+        receiver: tokio::sync::mpsc::UnboundedReceiver<Bytes>,
+    }
+
+    impl http_body::Body for ProbeBody {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            context: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+            match self.receiver.poll_recv(context) {
+                Poll::Ready(Some(bytes)) => Poll::Ready(Some(Ok(http_body::Frame::data(bytes)))),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            }
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.receiver.is_closed() && self.receiver.is_empty()
+        }
+    }
+
+    let drain = UnreadBodyDrain::with_idle_timeout(Duration::from_secs(5)).with_max_concurrent(1);
+    let mut service = assembly(Some(drain));
+
+    let signed_probe = |receiver| {
+        let template = support::signed_target_with_body(http::Method::PUT, "/bucket/object", Bytes::from_static(b"1234"));
+        let (mut parts, _) = template.into_parts();
+        parts.version = http::Version::HTTP_11;
+        parts
+            .headers
+            .insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("4"));
+        http::Request::from_parts(parts, ProbeBody { receiver })
+    };
+
+    let (tx1, rx1) = tokio::sync::mpsc::unbounded_channel();
+    let resp1 = <S3Service as Service<_>>::call(&mut service, signed_probe(rx1))
+        .await
+        .expect("service is infallible");
+    assert_eq!(resp1.status(), http::StatusCode::NOT_FOUND);
+    assert!(!tx1.is_closed(), "first authenticated refusal acquires the sole drain permit");
+
+    let (tx2, rx2) = tokio::sync::mpsc::unbounded_channel();
+    let resp2 = <S3Service as Service<_>>::call(&mut service, signed_probe(rx2))
+        .await
+        .expect("service is infallible");
+    assert_eq!(resp2.status(), http::StatusCode::NOT_FOUND);
+    assert!(
+        tx2.is_closed(),
+        "second concurrent unread body must be dropped when permits are exhausted"
+    );
+
+    drop(tx1);
+}

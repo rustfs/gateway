@@ -428,8 +428,7 @@ where
                 Poll::Ready(Ok(None)) => this.finish(true, false, true, TrailingHeaders::empty()),
             },
             Source::Framed(pipeline) => {
-                let mut buffer = vec![0_u8; DELIVERY_BYTES];
-                match Pin::new(pipeline.as_mut()).poll_fill(context, &mut buffer) {
+                match Pin::new(pipeline.as_mut()).poll_ready_deliverable(context) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(Err(_)) => {
                         let refusal = this
@@ -438,16 +437,48 @@ where
                             .unwrap_or_else(|| this.progress.mark_refusal_if_unfinished(this.codes.chunk_refusal(pipeline)));
                         this.fail(refusal)
                     }
-                    Poll::Ready(Ok(ReadProgress::Filled(0))) => this.fail(crate::gate::incomplete()),
-                    Poll::Ready(Ok(ReadProgress::Filled(written))) => {
-                        buffer.truncate(written);
-                        this.deliver(Bytes::from(buffer))
+                    Poll::Ready(Ok(0)) => {
+                        let mut dummy = [0_u8; 1];
+                        match Pin::new(pipeline.as_mut()).poll_fill(context, &mut dummy) {
+                            Poll::Pending => Poll::Pending,
+                            Poll::Ready(Err(_)) => {
+                                let refusal = this.progress.take_refusal().unwrap_or_else(|| {
+                                    this.progress.mark_refusal_if_unfinished(this.codes.chunk_refusal(pipeline))
+                                });
+                                this.fail(refusal)
+                            }
+                            Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
+                                let commit_allowed = pipeline.commit_allowed();
+                                let trailer_section_complete = pipeline.trailer_section_complete();
+                                let trailer_signature_satisfied = pipeline.trailer_signature_satisfied();
+                                this.finish(commit_allowed, trailer_section_complete, trailer_signature_satisfied, trailers)
+                            }
+                            Poll::Ready(Ok(ReadProgress::Filled(_))) => this.fail(crate::gate::incomplete()),
+                        }
                     }
-                    Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
-                        let commit_allowed = pipeline.commit_allowed();
-                        let trailer_section_complete = pipeline.trailer_section_complete();
-                        let trailer_signature_satisfied = pipeline.trailer_signature_satisfied();
-                        this.finish(commit_allowed, trailer_section_complete, trailer_signature_satisfied, trailers)
+                    Poll::Ready(Ok(ready)) => {
+                        let want = ready.min(DELIVERY_BYTES);
+                        let mut buffer = vec![0_u8; want];
+                        match Pin::new(pipeline.as_mut()).poll_fill(context, &mut buffer) {
+                            Poll::Pending => Poll::Pending,
+                            Poll::Ready(Err(_)) => {
+                                let refusal = this.progress.take_refusal().unwrap_or_else(|| {
+                                    this.progress.mark_refusal_if_unfinished(this.codes.chunk_refusal(pipeline))
+                                });
+                                this.fail(refusal)
+                            }
+                            Poll::Ready(Ok(ReadProgress::Filled(0))) => this.fail(crate::gate::incomplete()),
+                            Poll::Ready(Ok(ReadProgress::Filled(written))) => {
+                                buffer.truncate(written);
+                                this.deliver(Bytes::from(buffer))
+                            }
+                            Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
+                                let commit_allowed = pipeline.commit_allowed();
+                                let trailer_section_complete = pipeline.trailer_section_complete();
+                                let trailer_signature_satisfied = pipeline.trailer_signature_satisfied();
+                                this.finish(commit_allowed, trailer_section_complete, trailer_signature_satisfied, trailers)
+                            }
+                        }
                     }
                 }
             }

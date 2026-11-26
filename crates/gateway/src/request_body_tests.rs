@@ -46,7 +46,6 @@ fn unsigned_trailered(headers: &HeaderMap) -> Option<crate::chunked::ChunkIngest
         headers,
         &wire,
         &crate::ext::ChunkSink::new(),
-        None,
         rustfs_gateway_http::ChunkLimits::default(),
     )
     .ok()?
@@ -63,17 +62,10 @@ fn signed_trailered(headers: &HeaderMap) -> Option<crate::chunked::ChunkIngest> 
         rustfs_gateway_sig::SigningKey::from_array([0x5a; 32]),
         "20130524/us-east-1/s3/aws4_request".to_owned(),
         "20130524T000000Z".to_owned(),
+        [0xaa; 32],
     ));
     let wire = Framing::classify(http::Version::HTTP_11, headers, &rustfs_gateway_http::Limits::default()).ok()?;
-    crate::chunked::ChunkIngest::prepare(
-        &mode,
-        headers,
-        &wire,
-        &sink,
-        Some(&"a".repeat(64)),
-        rustfs_gateway_http::ChunkLimits::default(),
-    )
-    .ok()?
+    crate::chunked::ChunkIngest::prepare(&mode, headers, &wire, &sink, rustfs_gateway_http::ChunkLimits::default()).ok()?
 }
 
 fn trailer_headers(wire_len: usize) -> HeaderMap {

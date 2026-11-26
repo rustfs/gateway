@@ -53,10 +53,12 @@ impl<'a> super::Authentication<'a> {
 /// The signature material the client presented, from whichever surface carried it.
 ///
 /// One carrier for the signature surfaces keeps their reading and session checks outside the
-/// shared verification body.
+/// shared verification body. Header and query forms also carry the 32-byte presented signature so
+/// the authenticator can publish the verified seed directly into [`super::ChunkVerification`]
+/// without downstream re-parsing of wire strings.
 pub(super) enum Presented<'a> {
-    Header(Box<SigV4Authorization>),
-    Query(Box<PresignedParams>),
+    Header(Box<SigV4Authorization>, [u8; 32]),
+    Query(Box<PresignedParams>, [u8; 32]),
     Form(Box<PostPolicy>),
     UnroutedForm(&'a rustfs_gateway_sig::UnroutedPostPolicy),
 }
@@ -70,7 +72,16 @@ impl<'a> Presented<'a> {
         form: &PostAuthentication<'_>,
     ) -> Result<Self, AuthError> {
         match location {
-            SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), rule)?))),
+            SigLocation::Query => {
+                let query = sealed.view().query();
+                let parsed = PresignedParams::parse_with(&query, rule)?;
+                let raw_signature = query
+                    .decoded_value(rustfs_gateway_sig::X_AMZ_SIGNATURE)
+                    .map_err(|_| AuthError::AuthorizationHeaderMalformed)?
+                    .ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                let seed = decode_hex_lower_32(&raw_signature).ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                Ok(Self::Query(Box::new(parsed), seed))
+            }
             SigLocation::FormField => {
                 if let Some(policy) = unrouted {
                     return Ok(Self::UnroutedForm(policy));
@@ -95,7 +106,9 @@ impl<'a> Presented<'a> {
                     .ok_or(AuthError::AuthorizationHeaderMalformed)?
                     .to_str()
                     .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-                Ok(Self::Header(Box::new(SigV4Authorization::parse_with(raw, rule)?)))
+                let parsed = SigV4Authorization::parse_with(raw, rule)?;
+                let seed = header_signature_seed(raw)?;
+                Ok(Self::Header(Box::new(parsed), seed))
             }
             _ => Err(AuthError::AuthorizationHeaderMalformed),
         }
@@ -103,8 +116,8 @@ impl<'a> Presented<'a> {
 
     pub(super) fn scope(&self) -> &CredentialScope {
         match self {
-            Self::Header(parsed) => parsed.scope(),
-            Self::Query(parsed) => parsed.scope(),
+            Self::Header(parsed, _) => parsed.scope(),
+            Self::Query(parsed, _) => parsed.scope(),
             Self::Form(policy) => policy.scope(),
             Self::UnroutedForm(policy) => policy.scope(),
         }
@@ -112,8 +125,17 @@ impl<'a> Presented<'a> {
 
     pub(super) fn canonical_parts(&self) -> Option<(&str, &Signature)> {
         match self {
-            Self::Header(parsed) => Some((parsed.signed_headers(), parsed.signature())),
-            Self::Query(parsed) => Some((parsed.signed_headers(), parsed.signature())),
+            Self::Header(parsed, _) => Some((parsed.signed_headers(), parsed.signature())),
+            Self::Query(parsed, _) => Some((parsed.signed_headers(), parsed.signature())),
+            Self::Form(_) | Self::UnroutedForm(_) => None,
+        }
+    }
+
+    /// The 32-byte request-head signature decoded alongside the strict grammar parse, to be
+    /// published into [`super::ChunkVerification`] only after constant-time verification succeeds.
+    pub(super) const fn chunk_seed(&self) -> Option<[u8; 32]> {
+        match self {
+            Self::Header(_, seed) | Self::Query(_, seed) => Some(*seed),
             Self::Form(_) | Self::UnroutedForm(_) => None,
         }
     }
@@ -158,10 +180,54 @@ impl<'a> Presented<'a> {
     /// receipt the skew check produced, which is the same value the floor validated.
     pub(super) fn signed_at(&self, sealed: &SealedAws<'_>) -> AmzDate {
         match self {
-            Self::Header(_) => sealed.clock().signed_at(),
-            Self::Query(parsed) => parsed.date(),
+            Self::Header(_, _) => sealed.clock().signed_at(),
+            Self::Query(parsed, _) => parsed.date(),
             Self::Form(policy) => policy.signed_at(),
             Self::UnroutedForm(policy) => policy.signed_at(),
         }
+    }
+}
+
+/// Extracts the 32-byte `Signature` component from an already-validated `Authorization` header.
+///
+/// Mirrors `SigV4Authorization::parse_with`'s comma-separated `Key=Value` grammar so an
+/// `AccessKeyId` containing `Signature=` in `Credential=...` is never confused with the real
+/// `Signature=` field.
+fn header_signature_seed(raw: &str) -> Result<[u8; 32], AuthError> {
+    let rest = raw
+        .strip_prefix("AWS4-HMAC-SHA256")
+        .ok_or(AuthError::AuthorizationHeaderMalformed)?;
+    for part in rest.trim_start().split(',') {
+        if let Some((key, value)) = part.trim().split_once('=')
+            && key.trim() == "Signature"
+        {
+            return decode_hex_lower_32(value.trim()).ok_or(AuthError::AuthorizationHeaderMalformed);
+        }
+    }
+    Err(AuthError::AuthorizationHeaderMalformed)
+}
+
+fn decode_hex_lower_32(hex: &str) -> Option<[u8; 32]> {
+    let bytes = hex.as_bytes();
+    if bytes.len() != 64 {
+        return None;
+    }
+    let mut out = [0_u8; 32];
+    for (slot, pair) in out.iter_mut().zip(bytes.chunks_exact(2)) {
+        let [high_byte, low_byte] = *pair else {
+            return None;
+        };
+        let high = hex_nibble_lower(high_byte)?;
+        let low = hex_nibble_lower(low_byte)?;
+        *slot = (high << 4) | low;
+    }
+    Some(out)
+}
+
+const fn hex_nibble_lower(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
+        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
+        _ => None,
     }
 }
