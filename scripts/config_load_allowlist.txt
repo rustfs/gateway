@@ -77,6 +77,9 @@ crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_an_ordinary_frame
 crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_a_completed_sts_refusal_survives_a_second_digest_request | assert_eq!(polls.load(Ordering::SeqCst), 1);
 crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_a_canceled_sts_read_is_refused_as_unfinished_on_retry | assert_eq!(polls.load(Ordering::SeqCst), 2, "one data frame and one pending poll were observed");
 crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_a_canceled_sts_read_is_refused_as_unfinished_on_retry | assert_eq!(polls.load(Ordering::SeqCst), 2);
+crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_digest_refuses_declared_oversized_body_before_polling_any_frame | vector_polls.load(Ordering::SeqCst),
+crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_digest_refuses_declared_oversized_body_before_polling_any_frame | assert_eq!(vector_polls.load(Ordering::SeqCst), 0);
+crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_digest_refuses_declared_oversized_body_before_polling_any_frame | sts_polls.load(Ordering::SeqCst),
 crates/gateway/src/logging.rs | impl Throttle / fn claim_at | let last = self.last.load(Ordering::Relaxed);
 crates/gateway/src/operation_mode.rs | mod tests / fn selected_entry_and_runtime_route_mismatch_is_fail_closed | assert_eq!(callbacks.load(Ordering::SeqCst), 0, "a callback ran before identity refusal");
 crates/gateway/src/probe.rs | impl BodyProgress / fn bytes_read | self.bytes_read.load(Ordering::SeqCst)
@@ -90,6 +93,10 @@ crates/gateway/src/service.rs | impl S3Service / fn call | let snapshot = self.i
 crates/gateway/src/service.rs | impl S3Service / fn call_monomorphic | let snapshot = self.inner.config.load_full();
 crates/gateway/src/service/update.rs | impl Drop for Inner / fn drop | self.config.rcu(|current| {
 crates/gateway/src/service/update.rs | impl S3Service / fn replace_registry | self.inner.config.rcu(|current| {
+crates/gateway/src/service_tests.rs | mod server_connection_security / fn server_tls_connection_info_accepts_sse_c_without_transport_security_extension | assert_eq!(handled.load(Ordering::SeqCst), 1);
+crates/gateway/src/service_tests.rs | mod server_connection_security / fn n_server_plaintext_connection_info_refuses_sse_c | assert_eq!(handled.load(Ordering::SeqCst), 0);
+crates/gateway/src/service_tests.rs | mod server_connection_security / fn n_absent_header_content_sha256_refuses_non_empty_unsigned_body | assert_eq!(handled.load(Ordering::SeqCst), 0);
+crates/gateway/src/service_tests.rs | mod server_connection_security / fn absent_header_content_sha256_allows_empty_body | assert_eq!(handled.load(Ordering::SeqCst), 1);
 crates/gateway/src/unread_body_tests.rs | fn until_dropped | while !dropped.load(Ordering::Acquire) {
 crates/gateway/src/unread_body_tests.rs | fn the_drain_reads_the_raw_body_below_the_services_transforms | assert_eq!(probe.read.load(Ordering::Relaxed), 7);
 crates/gateway/src/unread_body_tests.rs | fn the_drain_reads_the_raw_body_below_the_services_transforms | assert_eq!(polls.load(Ordering::Relaxed), 0, "the drain went through the service's transform");
@@ -103,3 +110,5 @@ crates/gateway/src/unread_body_tests.rs | fn n_a_body_read_to_its_end_is_left_al
 crates/gateway/src/unread_body_tests.rs | fn n_an_http2_body_is_released_not_drained | assert!(probe.dropped.load(Ordering::Acquire), "an HTTP/2 body was kept");
 crates/gateway/src/unread_body_tests.rs | fn n_an_http2_body_is_released_not_drained | assert_eq!(probe.read.load(Ordering::Relaxed), 0);
 crates/gateway/src/unread_body_tests.rs | fn n_an_idle_peer_is_let_go_after_the_idle_bound | assert!(!probe.dropped.load(Ordering::Acquire), "let go before the bound");
+crates/gateway/src/unread_body_tests.rs | fn n_a_self_held_transport_body_is_not_retained | assert!(probe.dropped.load(Ordering::Acquire), "self-held body must be released immediately");
+crates/gateway/src/unread_body_tests.rs | fn n_a_self_held_transport_body_is_not_retained | assert_eq!(probe.read.load(Ordering::Relaxed), 0);

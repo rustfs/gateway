@@ -27,7 +27,7 @@ use rustfs_gateway_core::ResourceRef;
 use rustfs_gateway_core::codec::{MetaView, OperationCodec, RequestBody};
 use rustfs_gateway_core::op::{Operation, ResourceShape};
 use rustfs_gateway_core::registry::RouterBuilder;
-use rustfs_gateway_core::route::{HostClass, RouteRequestParts, TargetKind};
+use rustfs_gateway_core::route::{HostClass, RouteRequestParts, Selection, TargetKind};
 use rustfs_gateway_dialect_minio::replication::NAME;
 use rustfs_gateway_dialect_minio::{PutObjectReplica, PutObjectReplicaInput, replication_dialect};
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -48,8 +48,15 @@ fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest
     WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable")
 }
 
-/// The operation `method target` reaches on an object, with or without the dialect installed.
-fn routed(installed: bool, method: &str, target: &str, headers: &[(&str, &str)]) -> Option<&'static str> {
+/// The operation `method target` reaches on an object under `selection`, with or without the
+/// dialect installed.
+fn routed_with(
+    installed: bool,
+    selection: Selection,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+) -> Option<&'static str> {
     let wire = accepted(method, target, headers);
     let mut builder = RouterBuilder::new();
     if installed {
@@ -57,7 +64,8 @@ fn routed(installed: bool, method: &str, target: &str, headers: &[(&str, &str)])
     }
     let router = builder
         .build()
-        .expect("the table builds with the replica row and its one declared overlap");
+        .expect("the table builds with the replica row and its one declared overlap")
+        .selecting(selection);
     let parts = RouteRequestParts {
         method: wire.method(),
         path: wire.raw_path().as_str(),
@@ -69,6 +77,11 @@ fn routed(installed: bool, method: &str, target: &str, headers: &[(&str, &str)])
         host_named_bucket: false,
     };
     router.resolve(&parts).map(|entry| entry.op_name)
+}
+
+/// The operation `method target` reaches on an object, with or without the dialect installed.
+fn routed(installed: bool, method: &str, target: &str, headers: &[(&str, &str)]) -> Option<&'static str> {
+    routed_with(installed, Selection::Table, method, target, headers)
 }
 
 fn versioned(target: &str) -> String {
@@ -226,4 +239,57 @@ fn n_a_replica_write_keeps_put_objects_refusals() {
 #[test]
 fn n_the_replica_body_is_handed_over_as_put_objects_is() {
     assert_eq!(PutObjectReplica::REQUEST_BODY, <PutObject as OperationCodec>::REQUEST_BODY);
+}
+
+/// Positive & negative — under `Selection::RustfsLegacy`, mounting `replication_dialect()` routes
+/// versioned `PUT` requests (including with `x-id=PutObject`) to `minio:PutObjectReplica`, while
+/// keeping unversioned/sub-resource `PUT`s and uninstalled routers on `PutObject`.
+#[test]
+fn a_legacy_rustfs_router_routes_versioned_put_object_to_replica_dialect_when_installed() {
+    assert_eq!(routed_with(true, Selection::RustfsLegacy, "PUT", &versioned(TARGET), &[]), Some(NAME));
+    assert_eq!(
+        routed_with(
+            true,
+            Selection::RustfsLegacy,
+            "PUT",
+            &format!("{TARGET}?x-id=PutObject&versionId={VERSION}"),
+            &[],
+        ),
+        Some(NAME)
+    );
+    assert_eq!(routed_with(true, Selection::RustfsLegacy, "PUT", TARGET, &[]), Some("PutObject"));
+    assert_eq!(
+        routed_with(
+            true,
+            Selection::RustfsLegacy,
+            "PUT",
+            &format!("{TARGET}?tagging&versionId={VERSION}"),
+            &[],
+        ),
+        Some("PutObjectTagging")
+    );
+    assert_eq!(
+        routed_with(
+            true,
+            Selection::RustfsLegacy,
+            "PUT",
+            &format!("{TARGET}?x-id=PutObject&acl&versionId={VERSION}"),
+            &[],
+        ),
+        Some("PutObject")
+    );
+    assert_eq!(
+        routed_with(false, Selection::RustfsLegacy, "PUT", &versioned(TARGET), &[]),
+        Some("PutObject")
+    );
+    assert_eq!(
+        routed_with(
+            false,
+            Selection::RustfsLegacy,
+            "PUT",
+            &format!("{TARGET}?x-id=PutObject&versionId={VERSION}"),
+            &[],
+        ),
+        Some("PutObject")
+    );
 }
