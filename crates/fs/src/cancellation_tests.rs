@@ -545,3 +545,50 @@ async fn n_cancelled_create_bucket_cleans_staging_dir_on_drop() {
     assert_eq!(delete_bucket(&backend, "staging-bkt").await, Ok(204));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Negative — crash-left `.tmp-upload-*`, `.complete-*`, and `.abort-*` directories in `uploads/`
+/// must not permanently brick `DeleteBucket` with `BucketNotEmpty`, while unknown entries still
+/// return `BucketNotEmpty` and symlinked or non-directory staging entries fail closed with
+/// `InvalidRequest` without touching external targets.
+#[tokio::test]
+async fn n_crash_left_upload_staging_dirs_recover_while_symlink_and_unknown_fail_closed() {
+    let root = scratch_root("crash-upload-staging");
+    let backend = FsBackend::open(&root).expect("open backend");
+
+    create_bucket(&backend, "crash-uploads").await;
+    let uploads = backend.uploads_path("crash-uploads");
+    for name in [".tmp-upload-999999-1", ".complete-999999-2", ".abort-999999-3"] {
+        let dir = uploads.join(name);
+        std::fs::create_dir(&dir).expect("create crash-left staging dir");
+        std::fs::write(dir.join("part"), b"partial").expect("write partial staging file");
+    }
+    assert_eq!(delete_bucket(&backend, "crash-uploads").await, Ok(204));
+
+    // Unknown entries in uploads/ still block DeleteBucket with BucketNotEmpty.
+    create_bucket(&backend, "unknown-uploads").await;
+    std::fs::create_dir(backend.uploads_path("unknown-uploads").join(".stray-dir")).expect("create stray dir");
+    assert_eq!(delete_bucket(&backend, "unknown-uploads").await, Err(ErrorCode::BUCKET_NOT_EMPTY));
+
+    // A regular file disguised under an upload staging prefix fails closed with InvalidRequest.
+    create_bucket(&backend, "file-staging-uploads").await;
+    std::fs::write(backend.uploads_path("file-staging-uploads").join(".tmp-upload-999999-8"), b"file")
+        .expect("create non-directory staging file");
+    assert_eq!(delete_bucket(&backend, "file-staging-uploads").await, Err(ErrorCode::INVALID_REQUEST));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let outside = scratch_root("crash-upload-outside");
+        let victim = outside.join("victim");
+        std::fs::create_dir_all(&victim).expect("victim dir");
+        std::fs::write(victim.join("keep"), b"safe").expect("victim file");
+
+        create_bucket(&backend, "symlink-uploads").await;
+        symlink(&victim, backend.uploads_path("symlink-uploads").join(".complete-999999-9")).expect("symlink");
+        assert_eq!(delete_bucket(&backend, "symlink-uploads").await, Err(ErrorCode::INVALID_REQUEST));
+        assert_eq!(std::fs::read(victim.join("keep")).expect("victim intact"), b"safe");
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}

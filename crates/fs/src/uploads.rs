@@ -174,6 +174,26 @@ fn pending_upload_directory(path: &Path) -> Result<(), HandlerError> {
     }
 }
 
+/// Whether `name` is an internal multipart upload staging or tombstone directory created by this
+/// backend (`.tmp-upload-*`, `.complete-*`, `.abort-*`).
+fn is_interrupted_upload_staging_name(name: &str) -> bool {
+    name.starts_with(".tmp-upload-") || name.starts_with(".complete-") || name.starts_with(".abort-")
+}
+
+/// Refuses an interrupted upload staging or tombstone entry that is not a real, non-symlink
+/// directory before bucket deletion removes it.
+fn interrupted_upload_staging_directory(path: &Path) -> Result<(), HandlerError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| storage_error())?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        Ok(())
+    } else {
+        Err(HandlerError::new(
+            ErrorCode::INVALID_REQUEST,
+            "the multipart upload path is not a safe directory",
+        ))
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct UploadChecksum {
     algorithm: ChecksumAlgorithm,
@@ -497,13 +517,17 @@ impl FsBackend {
                 upload if upload.starts_with("u-") => {
                     pending_upload_directory(&entry.path())?;
                 }
+                staging if is_interrupted_upload_staging_name(staging) => {
+                    interrupted_upload_staging_directory(&entry.path())?;
+                }
                 _ => return Ok(false),
             }
         }
         Ok(true)
     }
 
-    /// Removes every pending upload of a bucket that is being deleted, with its parts.
+    /// Removes every pending upload and interrupted staging/tombstone directory of a bucket that
+    /// is being deleted, with its parts.
     ///
     /// Called only after the content directories are gone, so a refused deletion discards nothing.
     pub(super) fn discard_pending_uploads_for_delete(&self, bucket: &str) -> Result<(), HandlerError> {
@@ -511,9 +535,16 @@ impl FsBackend {
         let entries = std::fs::read_dir(&uploads).map_err(|_| storage_error())?;
         for entry in entries {
             let entry = entry.map_err(|_| storage_error())?;
-            if entry.file_name().to_str().is_some_and(|name| name.starts_with("u-")) {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if name.starts_with("u-") {
                 let path = entry.path();
                 pending_upload_directory(&path)?;
+                std::fs::remove_dir_all(&path).map_err(|_| storage_error())?;
+            } else if is_interrupted_upload_staging_name(&name) {
+                let path = entry.path();
+                interrupted_upload_staging_directory(&path)?;
                 std::fs::remove_dir_all(&path).map_err(|_| storage_error())?;
             }
         }
