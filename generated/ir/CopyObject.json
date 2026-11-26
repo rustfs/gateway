@@ -8,6 +8,7 @@
             "predicates": [
                             { "kind": "Method", "method": "PUT" },
                             { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryAbsent", "key": "renameObject" },
                             { "kind": "HeaderPresent", "header": "x-amz-copy-source" }
                           ],
             "success_status": 200,

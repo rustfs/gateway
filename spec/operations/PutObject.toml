@@ -10,7 +10,7 @@ path_shape = "/{Bucket}/{Key+}"
 precedence = 800
 success_status = 200
 alt_success_statuses = []
-predicates = ["Method PUT", "Target Object"]
+predicates = ["Method PUT", "Target Object", "QueryAbsent ?renameObject"]
 quirks = ["q-checksum-0006", "q-tag-header-form-0093"]
 
 [auth]

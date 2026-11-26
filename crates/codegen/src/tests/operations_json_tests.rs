@@ -98,13 +98,13 @@ fn the_fields_are_the_ir_they_claim_to_be() {
     }
 }
 
-/// `host_classes` reports the one endpoint constraint in the pinned operation set and no others.
+/// `host_classes` reports the S3Express endpoint constraints in the pinned operation set and no others.
 #[test]
 fn host_classes_is_the_selector_constraint_for_the_pinned_model() {
     let document = document();
     let operations = get(&document, "operations");
     for name in keys(operations) {
-        let expected = if name == "ListDirectoryBuckets" {
+        let expected = if matches!(name.as_str(), "ListDirectoryBuckets" | "RenameObject") {
             vec!["S3Express"]
         } else {
             vec![]
@@ -113,7 +113,7 @@ fn host_classes_is_the_selector_constraint_for_the_pinned_model() {
     }
     let by_host_class = get(&document, "by_host_class");
     assert_eq!(keys(by_host_class), ["S3Express"]);
-    assert_eq!(strings(get(by_host_class, "S3Express")), ["ListDirectoryBuckets"]);
+    assert_eq!(strings(get(by_host_class, "S3Express")), ["ListDirectoryBuckets", "RenameObject"]);
 }
 
 /// `host_classes` reports exactly the [`Predicate::HostClass`] a selector carries, and an

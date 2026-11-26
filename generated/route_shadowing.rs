@@ -3747,24 +3747,6 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         ],
     },
     ShadowingDecl {
-        winner: "RenameObject",
-        shadowed: "CopyObject",
-        reason: "A PUT carrying both ?renameObject and x-amz-copy-source reaches both rows. RenameObject wins at 780 before CopyObject at 790, so an unsupported rename is refused instead of copying a source object over the destination.",
-        evidence: &[
-            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
-            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html — a copy is a PUT to the destination key whose source is named by a header, and which carries no request body.",
-        ],
-    },
-    ShadowingDecl {
-        winner: "RenameObject",
-        shadowed: "PutObject",
-        reason: "Every rename is also accepted by PutObject, whose selector pins only PUT and an object target. RenameObject wins at 780 before PutObject at 800; the reverse order writes an empty object to the destination instead of returning operation-specific NotImplemented.",
-        evidence: &[
-            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
-            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html — a plain object write is the same method and path with neither of those parameters.",
-        ],
-    },
-    ShadowingDecl {
         winner: "GetBucketAccelerateConfiguration",
         shadowed: "GetBucketIntelligentTieringConfiguration",
         reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",

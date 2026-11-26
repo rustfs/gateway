@@ -1,0 +1,17 @@
+error[E0277]: `RenameSource` doesn't implement `Debug`
+  --> tests/compile_fail/authz_rename_debug.rs:24:15
+   |
+24 |     println!("{source:?} {resources:?}");
+   |               ^^^^^^^^^^ `RenameSource` cannot be formatted using `{:?}` because it doesn't implement `Debug`
+   |
+   = help: the trait `Debug` is not implemented for `RenameSource`
+   = note: required for `&RenameSource` to implement `Debug`
+
+error[E0277]: `RenameObjectResources` doesn't implement `Debug`
+  --> tests/compile_fail/authz_rename_debug.rs:24:26
+   |
+24 |     println!("{source:?} {resources:?}");
+   |                          ^^^^^^^^^^^^^ `RenameObjectResources` cannot be formatted using `{:?}` because it doesn't implement `Debug`
+   |
+   = help: the trait `Debug` is not implemented for `RenameObjectResources`
+   = note: required for `&RenameObjectResources` to implement `Debug`

@@ -67,17 +67,17 @@ pub struct Input {
     /// Wire `x-amz-rename-source`, bound as Header. Required.
     pub rename_source: String,
     /// Wire `if-match`, bound as Header. Optional.
-    pub destination_if_match: Option<String>,
+    pub destination_if_match: Option<crate::ETag>,
     /// Wire `if-none-match`, bound as Header. Optional.
-    pub destination_if_none_match: Option<String>,
+    pub destination_if_none_match: Option<crate::ETag>,
     /// Wire `if-modified-since`, bound as Header. Optional.
     pub destination_if_modified_since: Option<crate::Timestamp>,
     /// Wire `if-unmodified-since`, bound as Header. Optional.
     pub destination_if_unmodified_since: Option<crate::Timestamp>,
     /// Wire `x-amz-rename-source-if-match`, bound as Header. Optional.
-    pub source_if_match: Option<String>,
+    pub source_if_match: Option<crate::ETag>,
     /// Wire `x-amz-rename-source-if-none-match`, bound as Header. Optional.
-    pub source_if_none_match: Option<String>,
+    pub source_if_none_match: Option<crate::ETag>,
     /// Wire `x-amz-rename-source-if-modified-since`, bound as Header. Optional.
     pub source_if_modified_since: Option<crate::Timestamp>,
     /// Wire `x-amz-rename-source-if-unmodified-since`, bound as Header. Optional.
@@ -184,14 +184,14 @@ impl InputBuilder {
 
     /// Sets `DestinationIfMatch`.
     #[must_use]
-    pub fn destination_if_match(mut self, value: String) -> Self {
+    pub fn destination_if_match(mut self, value: crate::ETag) -> Self {
         self.input.destination_if_match = Some(value);
         self
     }
 
     /// Sets `DestinationIfNoneMatch`.
     #[must_use]
-    pub fn destination_if_none_match(mut self, value: String) -> Self {
+    pub fn destination_if_none_match(mut self, value: crate::ETag) -> Self {
         self.input.destination_if_none_match = Some(value);
         self
     }
@@ -212,14 +212,14 @@ impl InputBuilder {
 
     /// Sets `SourceIfMatch`.
     #[must_use]
-    pub fn source_if_match(mut self, value: String) -> Self {
+    pub fn source_if_match(mut self, value: crate::ETag) -> Self {
         self.input.source_if_match = Some(value);
         self
     }
 
     /// Sets `SourceIfNoneMatch`.
     #[must_use]
-    pub fn source_if_none_match(mut self, value: String) -> Self {
+    pub fn source_if_none_match(mut self, value: crate::ETag) -> Self {
         self.input.source_if_none_match = Some(value);
         self
     }

@@ -50,21 +50,76 @@ include = ["CopyObject", "RenameObject", "UploadPartCopy"]
 # =============================================================================================
 # RenameObject
 #
-# A deferred rename is claimed by PutObject, which turns a metadata-only move request into an
-# empty object write. The literal model subresource is the discriminator; the required source
-# header remains a parameter so a malformed rename is refused as RenameObject, never reclassified.
+# RenameObject is an S3 Express One Zone directory-bucket operation (`HostClass::S3Express`,
+# signing service `s3express`). `PutObject` and `CopyObject` carry `query_absent = ["renameObject"]`
+# so a rename request that reaches `HostClass::Standard` is refused instead of falling through to
+# an empty object write or copy. The required source header remains a parameter so a malformed
+# rename is refused as RenameObject, never reclassified.
 # =============================================================================================
 [op.RenameObject]
 precedence = 780
+host_class = "S3Express"
 auth_action = "s3express:CreateSession"
-error_codes = ["AccessDenied", "InvalidRequest"]
+auth_service = "s3express"
+error_codes = [
+  "AccessDenied",
+  "InvalidRequest",
+  "InvalidArgument",
+  "KeyTooLongError",
+  "PreconditionFailed",
+]
 url_encoded_fields = []
 input_hot = ["Key", "RenameSource", "ClientToken"]
 output_hot = []
 
+[[op.RenameObject.field]]
+side = "input"
+name = "DestinationIfMatch"
+type = "ETag"
+quirks = ["q-etag-form-0074"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "DestinationIfNoneMatch"
+type = "ETag"
+quirks = ["q-etag-form-0074"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "DestinationIfModifiedSince"
+quirks = ["q-cond-0050"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "DestinationIfUnmodifiedSince"
+quirks = ["q-cond-0050"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "SourceIfMatch"
+type = "ETag"
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "SourceIfNoneMatch"
+type = "ETag"
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "SourceIfModifiedSince"
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
+
+[[op.RenameObject.field]]
+side = "input"
+name = "SourceIfUnmodifiedSince"
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
+
 [op.CopyObject]
 precedence = 790
 header_present = ["x-amz-copy-source"]
+query_absent = ["renameObject"]
 auth_action = "s3:PutObject"
 allows_error_after_200 = true
 error_codes = [

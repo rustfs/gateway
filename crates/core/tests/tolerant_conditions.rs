@@ -351,3 +351,132 @@ fn a_readable_copy_source_date_still_binds() {
     assert!(part.copy_source_if_modified_since.is_some());
     assert!(part.copy_source_if_unmodified_since.is_some());
 }
+
+// ---------------------------------------------------------------------------------------------
+// RenameObject: four RFC 9110 tolerant date conditions and four validated conditional ETags
+// ---------------------------------------------------------------------------------------------
+
+fn rename_request(headers: &[(&str, &str)]) -> WireRequest<()> {
+    let mut builder = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/conf-rename/dst/key?renameObject")
+        .header("host", "host.invalid")
+        .header("x-amz-rename-source", "src/plain.txt");
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    let request = builder.body(()).expect("the fixture request is well formed");
+    WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable")
+}
+
+fn rename_decode(headers: &[(&str, &str)]) -> Result<dto::RenameObjectInput, rustfs_gateway_core::CodecError> {
+    let request = rename_request(headers);
+    let view = MetaView::of(&request, TargetKind::Object).expect("the path has both labels");
+    dto::RenameObject::decode(&view, RequestBody::None)
+}
+
+/// Negative — none of the four RenameObject If-*Since date headers refuses an unreadable HTTP-date.
+#[test]
+fn n_no_unreadable_rename_date_condition_refuses_decode() {
+    for spelling in NOT_DATES {
+        let input = rename_decode(&[
+            ("if-modified-since", spelling),
+            ("if-unmodified-since", spelling),
+            ("x-amz-rename-source-if-modified-since", spelling),
+            ("x-amz-rename-source-if-unmodified-since", spelling),
+        ])
+        .expect("an unreadable date condition on RenameObject must be ignored");
+        assert!(input.destination_if_modified_since.is_none(), "{spelling:?}");
+        assert!(input.destination_if_unmodified_since.is_none(), "{spelling:?}");
+        assert!(input.source_if_modified_since.is_none(), "{spelling:?}");
+        assert!(input.source_if_unmodified_since.is_none(), "{spelling:?}");
+    }
+}
+
+/// Negative — each of the four RenameObject date headers is tolerant on its own.
+#[test]
+fn n_each_rename_date_condition_is_tolerant_individually() {
+    for header in [
+        "if-modified-since",
+        "if-unmodified-since",
+        "x-amz-rename-source-if-modified-since",
+        "x-amz-rename-source-if-unmodified-since",
+    ] {
+        let input = rename_decode(&[(header, "Invalid Date")]).expect("tolerant date condition");
+        assert!(input.destination_if_modified_since.is_none(), "{header}");
+        assert!(input.destination_if_unmodified_since.is_none(), "{header}");
+        assert!(input.source_if_modified_since.is_none(), "{header}");
+        assert!(input.source_if_unmodified_since.is_none(), "{header}");
+    }
+}
+
+/// Positive — readable HTTP-dates still bind on all four RenameObject date headers.
+#[test]
+fn a_readable_rename_date_still_binds_on_all_four_headers() {
+    let input = rename_decode(&[
+        ("if-modified-since", A_DATE),
+        ("if-unmodified-since", A_DATE),
+        ("x-amz-rename-source-if-modified-since", A_DATE),
+        ("x-amz-rename-source-if-unmodified-since", A_DATE),
+    ])
+    .expect("valid HTTP-dates bind");
+    assert!(input.destination_if_modified_since.is_some());
+    assert!(input.destination_if_unmodified_since.is_some());
+    assert!(input.source_if_modified_since.is_some());
+    assert!(input.source_if_unmodified_since.is_some());
+}
+
+/// Negative — malformed and comma-joined RFC 9110 list forms are refused on all four RenameObject
+/// conditional ETag headers at decode time.
+#[test]
+fn n_invalid_or_list_rename_conditional_etags_are_refused() {
+    for header in [
+        "if-match",
+        "if-none-match",
+        "x-amz-rename-source-if-match",
+        "x-amz-rename-source-if-none-match",
+    ] {
+        for bad in [
+            "",
+            "   ",
+            "\"unterminated",
+            "trailing\"",
+            "\"\"",
+            "W/\"\"",
+            "\"a\\\"b\"",
+            "\"a\", \"b\"",
+            "a, b",
+            "*, *",
+            "\"a\",*",
+        ] {
+            let Err(err) = rename_decode(&[(header, bad)]) else {
+                panic!("{header}={bad:?} must be refused");
+            };
+            assert_eq!(err.code(), &rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT, "{header}={bad:?}");
+        }
+    }
+}
+
+/// Positive — quoted, weak, bare, and wildcard conditional ETags bind to typed `ETag` fields on
+/// all four RenameObject conditional ETag headers.
+#[test]
+fn valid_rename_conditional_etags_bind_as_typed_etags() {
+    for (raw, expected) in [
+        ("\"abc123\"", rustfs_gateway_types::ETag::new("abc123").expect("strong etag")),
+        ("W/\"weak456\"", rustfs_gateway_types::ETag::new_weak("weak456").expect("weak etag")),
+        ("bare789", rustfs_gateway_types::ETag::new("bare789").expect("bare etag")),
+        ("*", rustfs_gateway_types::ETag::ANY),
+    ] {
+        let input = rename_decode(&[
+            ("if-match", raw),
+            ("if-none-match", raw),
+            ("x-amz-rename-source-if-match", raw),
+            ("x-amz-rename-source-if-none-match", raw),
+        ])
+        .unwrap_or_else(|err| panic!("valid conditional etag {raw:?} binds: {err:?}"));
+        assert_eq!(input.destination_if_match.as_ref(), Some(&expected), "{raw:?}");
+        assert_eq!(input.destination_if_none_match.as_ref(), Some(&expected), "{raw:?}");
+        assert_eq!(input.source_if_match.as_ref(), Some(&expected), "{raw:?}");
+        assert_eq!(input.source_if_none_match.as_ref(), Some(&expected), "{raw:?}");
+    }
+}

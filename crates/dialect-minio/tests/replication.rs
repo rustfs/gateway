@@ -48,11 +48,12 @@ fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest
     WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable")
 }
 
-/// The operation `method target` reaches on an object under `selection`, with or without the
-/// dialect installed.
-fn routed_with(
+/// The operation `method target` reaches on an object under `selection` and `host_class`, with or
+/// without the dialect installed.
+fn routed_on(
     installed: bool,
     selection: Selection,
+    host_class: HostClass,
     method: &str,
     target: &str,
     headers: &[(&str, &str)],
@@ -70,13 +71,25 @@ fn routed_with(
         method: wire.method(),
         path: wire.raw_path().as_str(),
         target: TargetKind::Object,
-        host_class: HostClass::Standard,
+        host_class,
         arn_form: None,
         query: wire.query(),
         headers: wire.headers(),
         host_named_bucket: false,
     };
     router.resolve(&parts).map(|entry| entry.op_name)
+}
+
+/// The operation `method target` reaches on an object under `selection`, with or without the
+/// dialect installed.
+fn routed_with(
+    installed: bool,
+    selection: Selection,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+) -> Option<&'static str> {
+    routed_on(installed, selection, HostClass::Standard, method, target, headers)
 }
 
 /// The operation `method target` reaches on an object, with or without the dialect installed.
@@ -123,13 +136,23 @@ fn n_a_sub_resource_put_naming_a_version_keeps_its_own_operation() {
         ("retention", "PutObjectRetention"),
         ("legal-hold", "PutObjectLegalHold"),
         ("partNumber=1&uploadId=u1", "UploadPart"),
-        ("renameObject", "RenameObject"),
         ("annotation", "PutObjectAnnotation"),
         ("encryption", "UpdateObjectEncryption"),
     ] {
         let target = format!("{TARGET}?{query}&versionId={VERSION}");
         assert_eq!(routed(true, "PUT", &target, &[]), Some(operation), "{target}");
     }
+    let rename = format!("{TARGET}?renameObject&versionId={VERSION}");
+    assert_eq!(
+        routed_on(true, Selection::Table, HostClass::S3Express, "PUT", &rename, &[]),
+        Some("RenameObject"),
+        "{rename} on S3Express"
+    );
+    assert_eq!(
+        routed_on(true, Selection::Table, HostClass::Standard, "PUT", &rename, &[]),
+        None,
+        "{rename} on Standard must never fall through to PutObjectReplica or PutObject"
+    );
 }
 
 /// Negative — a copy that names a version is a copy; the replica row never reads a copy source.

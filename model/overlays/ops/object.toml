@@ -276,6 +276,7 @@ quirks = ["q-cond-0050"]
 # =============================================================================================
 [op.PutObject]
 precedence = 800
+query_absent = ["renameObject"]
 auth_action = "s3:PutObject"
 error_codes = [
   "NoSuchBucket",

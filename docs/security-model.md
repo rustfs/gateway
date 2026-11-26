@@ -174,7 +174,8 @@ the load-bearing case: its generated decoder receives `MetaView::names()`, threa
 nested XML reader and calls `ObjectKey::materialize_decoded`. The body text is already the literal
 key, not an encoded path, so this entry neither percent-decodes it nor applies path-only
 `SlashPolicy` rewriting. A custom validator therefore covers the request path, `x-amz-copy-source`,
-and body-carried object keys under one authority without changing the body key's identity.
+`x-amz-rename-source`, and body-carried object keys under one authority without changing the body
+key's identity.
 
 ## Server-side encryption: your responsibilities
 

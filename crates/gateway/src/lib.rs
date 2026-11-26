@@ -298,6 +298,12 @@ pub use rustfs_gateway_core::ops::shared::copy_source::{
     CopyRange, CopySource, CopySourceForm, CopySourceRejection, CopySourceResources, ResolvedCopySource, SelfCopy,
     classify_self_copy, resolve_copy_range,
 };
+// The rename-source contract (`RenameObject`). Mirrors `CopySourceResources`: `x-amz-rename-source`
+// is validated once through the shared naming floor before input authorization, erased from the
+// input DTO, and revealed only against the request's `AuthorizedRead` proof.
+pub use rustfs_gateway_core::ops::rename_object::{
+    RENAME_SOURCE_ACTION, RenameObjectResources, RenameSource, RenameSourceRejection, ResolvedRenameSource,
+};
 // The CORS document contract. A backend stores what `PutBucketCors` hands it and the preflight
 // runtime later answers browsers out of that store, so the rules for what may be stored — the
 // closed method set, the wildcard budget, the hundred-rule cap — must be one implementation

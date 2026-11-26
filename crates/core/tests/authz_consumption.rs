@@ -20,9 +20,10 @@
 
 use bytes::Bytes;
 use http::Request;
-use rustfs_gateway_core::{Decision, ErasedCodec, MetaView, RequestBody, TargetKind};
+use rustfs_gateway_core::{Decision, ErasedCodec, MetaView, Operation, RequestBody, TargetKind};
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_types::dto::DeleteObjects;
+use rustfs_gateway_sig::SigService;
+use rustfs_gateway_types::dto::{DeleteObjects, RenameObject};
 
 #[test]
 fn allow_is_the_only_continuation() {
@@ -83,4 +84,77 @@ fn delete_objects_derives_every_key_and_version_action() {
             ("s3:DeleteObject", "three", None),
         ]
     );
+}
+
+fn decode_rename(
+    source: &str,
+    names: &rustfs_gateway_types::NamePolicy,
+) -> Result<Vec<rustfs_gateway_core::OwnedResource>, rustfs_gateway_core::CodecError> {
+    let request = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/bucket/dest/key?renameObject")
+        .header("host", "host.invalid")
+        .header("x-amz-rename-source", source)
+        .body(())
+        .expect("valid rename request");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+    let meta = MetaView::of_with(&wire, TargetKind::Object, names).expect("object target");
+    let codec = ErasedCodec::for_operation::<RenameObject>();
+    let decoded = codec.decode(&meta, RequestBody::None)?;
+    codec.derived_resources(&decoded)
+}
+
+#[test]
+fn rename_object_derives_normalized_source_object_resource() {
+    let resources = decode_rename("dir/old%20file.txt", &rustfs_gateway_types::NamePolicy::default())
+        .expect("valid rename source derives its resource");
+    let observed: Vec<(&str, Option<&str>, Option<&str>)> = resources
+        .iter()
+        .map(|resource| {
+            (
+                resource.action(),
+                resource.bucket().map(rustfs_gateway_types::BucketName::as_str),
+                resource.key().map(rustfs_gateway_types::ObjectKey::as_str),
+            )
+        })
+        .collect();
+    assert_eq!(observed, [("s3express:CreateSession", Some("bucket"), Some("dir/old file.txt"))]);
+}
+
+#[test]
+fn n_rename_object_rejects_unsafe_source_keys_before_authorization() {
+    let names = rustfs_gateway_types::NamePolicy::default();
+    let too_long = "a".repeat(1025);
+    for (raw, expected_code) in [
+        ("", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("..", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("../secret", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a/../../etc/passwd", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a\\..\\secret", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("%2e%2e/secret", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a%2F..%2Fb", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("%252e%252e/secret", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("%252e%252e%252fsecret", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a%252Fb", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a%255cb", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("%255c%255cshare", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a%00b", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a%01b", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("a%7Fb", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("%FF%FE", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("//server/share", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("\\server\\share", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        ("C:/Windows/win.ini", rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT),
+        (too_long.as_str(), rustfs_gateway_types::ErrorCode::KEY_TOO_LONG),
+    ] {
+        let Err(error) = decode_rename(raw, &names) else {
+            panic!("disallowed source {raw:?} must be refused");
+        };
+        assert_eq!(error.code(), &expected_code, "raw={raw:?}");
+    }
+}
+
+#[test]
+fn n_rename_object_uses_s3express_signing_floor() {
+    assert_eq!(RenameObject::floor().service(), SigService::S3Express);
 }

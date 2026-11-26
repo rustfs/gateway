@@ -1,0 +1,22 @@
+error[E0616]: field `bucket` of struct `RenameSource` is private
+  --> tests/compile_fail/authz_rename_fields.rs:24:22
+   |
+24 |     let _ = (&source.bucket, &source.key, &resources.source);
+   |                      ^^^^^^ private field
+
+error[E0616]: field `key` of struct `RenameSource` is private
+  --> tests/compile_fail/authz_rename_fields.rs:24:38
+   |
+24 |     let _ = (&source.bucket, &source.key, &resources.source);
+   |                                      ^^^ private field
+
+error[E0616]: field `source` of struct `RenameObjectResources` is private
+  --> tests/compile_fail/authz_rename_fields.rs:24:54
+   |
+24 |     let _ = (&source.bucket, &source.key, &resources.source);
+   |                                                      ^^^^^^ private field
+   |
+help: a method `source` also exists, call it with parentheses
+   |
+24 |     let _ = (&source.bucket, &source.key, &resources.source());
+   |                                                            ++

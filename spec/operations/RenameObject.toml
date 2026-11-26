@@ -10,14 +10,14 @@ path_shape = "/{Bucket}/{Key+}"
 precedence = 780
 success_status = 200
 alt_success_statuses = []
-predicates = ["Method PUT", "Target Object", "QueryPresent ?renameObject"]
+predicates = ["Method PUT", "Target Object", "QueryPresent ?renameObject", "HostClass S3Express"]
 quirks = []
 
 [auth]
 requirement = "Required"
 action = "s3express:CreateSession"
 presigned_allowed = true
-service = "s3"
+service = "s3express"
 
 [payload.request]
 kind = "None"
@@ -47,7 +47,7 @@ url_encoded_fields = []
 [errors]
 not_configured = ""
 allows_error_after_200 = false
-codes = ["AccessDenied", "InvalidRequest", "IdempotencyParameterMismatch"]
+codes = ["AccessDenied", "InvalidRequest", "InvalidArgument", "KeyTooLongError", "PreconditionFailed", "IdempotencyParameterMismatch"]
 
 [[input]]
 name = "Bucket"
@@ -80,19 +80,19 @@ quirks = []
 name = "DestinationIfMatch"
 wire_name = "if-match"
 binding = "Header"
-type = "String"
+type = "ETag(HeaderQuoted)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-etag-form-0074"]
 
 [[input]]
 name = "DestinationIfNoneMatch"
 wire_name = "if-none-match"
 binding = "Header"
-type = "String"
+type = "ETag(HeaderQuoted)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-etag-form-0074"]
 
 [[input]]
 name = "DestinationIfModifiedSince"
@@ -101,7 +101,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-cond-0050"]
 
 [[input]]
 name = "DestinationIfUnmodifiedSince"
@@ -110,25 +110,25 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-cond-0050"]
 
 [[input]]
 name = "SourceIfMatch"
 wire_name = "x-amz-rename-source-if-match"
 binding = "Header"
-type = "String"
+type = "ETag(HeaderQuoted)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
 
 [[input]]
 name = "SourceIfNoneMatch"
 wire_name = "x-amz-rename-source-if-none-match"
 binding = "Header"
-type = "String"
+type = "ETag(HeaderQuoted)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
 
 [[input]]
 name = "SourceIfModifiedSince"
@@ -137,7 +137,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[input]]
 name = "SourceIfUnmodifiedSince"
@@ -146,7 +146,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[input]]
 name = "ClientToken"
