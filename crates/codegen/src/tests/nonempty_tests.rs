@@ -183,6 +183,7 @@ fn only_readers_with_conditional_members_take_the_reading() {
         let expected = match op.operation.as_str() {
             "PutBucketLifecycleConfiguration" | "RestoreObject" => 5,
             "PutBucketReplication" => 13,
+            "PutBucketAnalyticsConfiguration" | "PutBucketIntelligentTieringConfiguration" | "PutBucketMetricsConfiguration" => 4,
             "PutBucketTagging" | "PutObjectTagging" => 2,
             _ => 0,
         };

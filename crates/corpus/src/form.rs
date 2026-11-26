@@ -41,6 +41,7 @@ pub const SENSITIVE_FORM_FIELDS: &[&str] = &[
     "signature",
     "x-amz-copy-source-server-side-encryption-customer-key",
     "x-amz-credential",
+    "x-amz-s3session-token",
     "x-amz-security-token",
     "x-amz-server-side-encryption-customer-key",
     "x-amz-signature",

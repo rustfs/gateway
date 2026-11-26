@@ -64,7 +64,10 @@ use crate::clock::MAX_PRESIGNED_EXPIRY_SECONDS;
 use crate::codec::encode_hex_lower;
 use crate::derive::calculate_signature;
 use crate::error::SigParseError;
-use crate::floor::{X_AMZ_DATE_HEADER, X_AMZ_EXPIRES, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER};
+use crate::floor::{
+    X_AMZ_DATE_HEADER, X_AMZ_EXPIRES, X_AMZ_S3SESSION_TOKEN, X_AMZ_S3SESSION_TOKEN_HEADER, X_AMZ_SECURITY_TOKEN,
+    X_AMZ_SECURITY_TOKEN_HEADER,
+};
 use crate::mode::{PayloadMode, TrailerSet};
 use crate::parse::{AmzDate, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS};
 use crate::query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_encode};
@@ -109,7 +112,7 @@ pub use tamper::{Tamper, TamperComponent};
 /// A caller's own query may not contain any of them: the duplicate rule
 /// ([`crate::enforce_no_duplicate_sig_params`]) would refuse the result, and silently overwriting
 /// the caller's value would hide that.
-const MINTED_QUERY_PARAMS: [&str; 7] = [
+const MINTED_QUERY_PARAMS: [&str; 8] = [
     X_AMZ_ALGORITHM,
     X_AMZ_CREDENTIAL,
     X_AMZ_DATE,
@@ -117,6 +120,7 @@ const MINTED_QUERY_PARAMS: [&str; 7] = [
     X_AMZ_SIGNED_HEADERS,
     X_AMZ_SIGNATURE,
     X_AMZ_SECURITY_TOKEN,
+    X_AMZ_S3SESSION_TOKEN,
 ];
 
 /// Why a request could not be signed.
@@ -505,7 +509,12 @@ impl SigV4Signer {
         push_param(&mut query, X_AMZ_SIGNED_HEADERS, signed.as_str());
         if let Some(token) = self.credentials.session_token() {
             let token = core::str::from_utf8(token.expose()).map_err(|_| SignerError::UnrepresentableHeader)?;
-            push_param(&mut query, X_AMZ_SECURITY_TOKEN, token);
+            let param = if self.credentials.is_s3_express_session_token() {
+                X_AMZ_S3SESSION_TOKEN
+            } else {
+                X_AMZ_SECURITY_TOKEN
+            };
+            push_param(&mut query, param, token);
         }
 
         // `QueryExclusion::PresignedSignature` is the exclusion the verifier applies. Applying it
@@ -616,7 +625,12 @@ impl SigV4Signer {
         }
         if let Some(token) = self.credentials.session_token() {
             let token = core::str::from_utf8(token.expose()).map_err(|_| SignerError::UnrepresentableHeader)?;
-            set_header(&mut headers, X_AMZ_SECURITY_TOKEN_HEADER, token)?;
+            let header = if self.credentials.is_s3_express_session_token() {
+                X_AMZ_S3SESSION_TOKEN_HEADER
+            } else {
+                X_AMZ_SECURITY_TOKEN_HEADER
+            };
+            set_header(&mut headers, header, token)?;
         }
         Ok(headers)
     }

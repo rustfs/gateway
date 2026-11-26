@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `IncludedObjectVersions` string enumeration. Bound by: GetBucketInventoryConfiguration, ListBucketInventoryConfigurations.
+/// The `IncludedObjectVersions` string enumeration. Bound by: GetBucketInventoryConfiguration, ListBucketInventoryConfigurations, PutBucketInventoryConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`IncludedObjectVersions::custom`]. Adding a constant is a minor version

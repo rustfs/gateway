@@ -429,6 +429,82 @@ summary = "a part upload is a PUT to the object key carrying the part number and
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
 summary = "a part copy is a part upload whose bytes come from a source object named by a header rather than from the body."
 
+[evidence.delete-objects]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "DeleteObjects is a bucket POST carrying the ?delete subresource and a Delete XML payload."
+
+[evidence.put-bucket-ownership-controls]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html"
+summary = "PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules."
+
+[evidence.delete-bucket-ownership-controls]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html"
+summary = "DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket."
+
+[evidence.put-bucket-abac]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html"
+summary = "PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status."
+
+[evidence.put-bucket-intelligent-tiering-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html"
+summary = "PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id."
+
+[evidence.delete-bucket-intelligent-tiering-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html"
+summary = "DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id."
+
+[evidence.put-bucket-analytics-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html"
+summary = "PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id."
+
+[evidence.delete-bucket-analytics-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html"
+summary = "DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id."
+
+[evidence.put-bucket-inventory-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html"
+summary = "PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id."
+
+[evidence.delete-bucket-inventory-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html"
+summary = "DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id."
+
+[evidence.put-bucket-metrics-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html"
+summary = "PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id."
+
+[evidence.delete-bucket-metrics-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html"
+summary = "DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id."
+
+[evidence.create-bucket-metadata-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataConfiguration.html"
+summary = "CreateBucketMetadataConfiguration is a bucket POST carrying ?metadataConfiguration to create a V2 S3 Metadata configuration."
+
+[evidence.create-bucket-metadata-table-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataTableConfiguration.html"
+summary = "CreateBucketMetadataTableConfiguration is a bucket POST carrying ?metadataTable to create a V1 metadata table configuration."
+
+[evidence.delete-bucket-metadata-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html"
+summary = "DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration."
+
+[evidence.delete-bucket-metadata-table-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html"
+summary = "DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration."
+
+[evidence.update-bucket-metadata-annotation-table-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html"
+summary = "UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable."
+
+[evidence.update-bucket-metadata-inventory-table-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html"
+summary = "UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable."
+
+[evidence.update-bucket-metadata-journal-table-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html"
+summary = "UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable."
+
 # -------------------------------------------------------------- shadowing pairs
 [[shadowing]]
 winner   = "GetBucketLocation"
@@ -4815,7 +4891,7 @@ evidence = ["get-bucket-ownership-controls", "list-objects"]
 [[shadowing]]
 winner = "CreateSession"
 shadowed = "ListObjects"
-reason = "ListObjects pins no query key, so a session request satisfies it too. The route-only session refusal wins at 279 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+reason = "ListObjects pins no query key, so a session request satisfies it too. CreateSession wins at 279 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
 evidence = ["create-session", "list-objects"]
 
 [[shadowing]]
@@ -5099,3 +5175,1521 @@ winner = "DeleteObjects"
 shadowed = "PostObject"
 reason = "PostObject is the bucket POST fallback for multipart form bodies, while DeleteObjects additionally names the delete subresource. DeleteObjects wins at 650 before the form fallback at 700 so a multipart-encoded multi-delete request cannot become an object upload."
 evidence = ["post-object"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAccelerateConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-accelerate-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketLogging"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-logging", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketNotificationConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-notification-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketPolicy"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-policy", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutPublicAccessBlock"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-public-access-block", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketRequestPayment"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-request-payment", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketVersioning"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-versioning", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketWebsite"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-website", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "PutBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "put-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAcl"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-acl", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-abac"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "UpdateBucketMetadataAnnotationTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "update-bucket-metadata-annotation-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "UpdateBucketMetadataInventoryTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "update-bucket-metadata-inventory-table-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "UpdateBucketMetadataJournalTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "update-bucket-metadata-journal-table-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "PutBucketOwnershipControls"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-ownership-controls", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "PutBucketAbac"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-abac", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "PutBucketIntelligentTieringConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-intelligent-tiering-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "PutBucketAnalyticsConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-analytics-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "PutBucketInventoryConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-inventory-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "PutBucketMetricsConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["put-bucket-metrics-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataAnnotationTableConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-annotation-table-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataInventoryTableConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-inventory-table-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataJournalTableConfiguration"
+shadowed = "PutBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-journal-table-configuration", "put-bucket-cors"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataJournalTableConfiguration"
+shadowed = "PutBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-journal-table-configuration", "put-bucket-tagging"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataJournalTableConfiguration"
+shadowed = "PutBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-journal-table-configuration", "put-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataJournalTableConfiguration"
+shadowed = "PutBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-journal-table-configuration", "put-bucket-encryption"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataJournalTableConfiguration"
+shadowed = "PutBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-journal-table-configuration", "put-bucket-replication"]
+
+[[shadowing]]
+winner = "UpdateBucketMetadataJournalTableConfiguration"
+shadowed = "PutObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["update-bucket-metadata-journal-table-configuration", "put-object-lock-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketPolicy"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-policy", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeletePublicAccessBlock"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-public-access-block", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketWebsite"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-website", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataConfiguration"
+shadowed = "DeleteBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-configuration", "delete-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketOwnershipControls"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-ownership-controls", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketIntelligentTieringConfiguration"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-intelligent-tiering-configuration", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketAnalyticsConfiguration"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-analytics-configuration", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketInventoryConfiguration"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-inventory-configuration", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketMetricsConfiguration"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metrics-configuration", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataConfiguration"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-configuration", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataConfiguration"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-configuration", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataConfiguration"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-configuration", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataConfiguration"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-configuration", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataConfiguration"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-configuration", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataTableConfiguration"
+shadowed = "DeleteBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-table-configuration", "delete-bucket-cors"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataTableConfiguration"
+shadowed = "DeleteBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-table-configuration", "delete-bucket-tagging"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataTableConfiguration"
+shadowed = "DeleteBucketLifecycle"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-table-configuration", "delete-bucket-lifecycle"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataTableConfiguration"
+shadowed = "DeleteBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-table-configuration", "delete-bucket-encryption"]
+
+[[shadowing]]
+winner = "DeleteBucketMetadataTableConfiguration"
+shadowed = "DeleteBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["delete-bucket-metadata-table-configuration", "delete-bucket-replication"]
+
+[[shadowing]]
+winner = "CreateBucketMetadataConfiguration"
+shadowed = "CreateBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["create-bucket-metadata-configuration", "create-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "CreateBucketMetadataConfiguration"
+shadowed = "DeleteObjects"
+reason_ref = "two-subresource-keys"
+evidence = ["create-bucket-metadata-configuration", "delete-objects"]
+
+[[shadowing]]
+winner = "CreateBucketMetadataTableConfiguration"
+shadowed = "DeleteObjects"
+reason_ref = "two-subresource-keys"
+evidence = ["create-bucket-metadata-table-configuration", "delete-objects"]
+
+[[shadowing]]
+winner = "CreateBucketMetadataConfiguration"
+shadowed = "PostObject"
+reason = "PostObject is the bucket POST fallback for multipart form bodies, while CreateBucketMetadataConfiguration additionally names ?metadataConfiguration. The metadata subresource wins at 285 before the form fallback at 700 so a metadata creation request cannot become an object upload."
+evidence = ["create-bucket-metadata-configuration", "post-object"]
+
+[[shadowing]]
+winner = "CreateBucketMetadataTableConfiguration"
+shadowed = "PostObject"
+reason = "PostObject is the bucket POST fallback for multipart form bodies, while CreateBucketMetadataTableConfiguration additionally names ?metadataTable. The metadata subresource wins at 286 before the form fallback at 700 so a metadata table creation request cannot become an object upload."
+evidence = ["create-bucket-metadata-table-configuration", "post-object"]

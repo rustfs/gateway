@@ -27,10 +27,11 @@ SENSITIVE_HEADERS = {
     "proxy-authorization",
     "set-cookie",
     "x-amz-copy-source-server-side-encryption-customer-key",
+    "x-amz-s3session-token",
     "x-amz-security-token",
     "x-amz-server-side-encryption-customer-key",
 }
-SENSITIVE_QUERY_PARAMS = {"x-amz-credential", "x-amz-security-token", "x-amz-signature"}
+SENSITIVE_QUERY_PARAMS = {"x-amz-credential", "x-amz-s3session-token", "x-amz-security-token", "x-amz-signature"}
 
 PEM = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 JWT = re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}")
@@ -40,7 +41,7 @@ TRAILER_SIGNATURE = re.compile(r"(?i)x-amz-trailer-signature:[ \t]*[0-9a-f]{64}"
 # A browser-upload form carries its signature, credential scope or token as a multipart field:
 # `name="x-amz-signature"`, the rest of the part head, a blank line, then the value.
 FORM_CREDENTIAL = re.compile(
-    r'(?i)name="(awsaccesskeyid|signature|x-amz-credential|x-amz-security-token|x-amz-signature)"'
+    r'(?i)name="(awsaccesskeyid|signature|x-amz-credential|x-amz-s3session-token|x-amz-security-token|x-amz-signature)"'
     r"[^\r\n]*\r\n(?:[^\r\n]+\r\n)*\r\n([^\r\n]*)"
 )
 BASE64_RUN = re.compile(r"(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])")

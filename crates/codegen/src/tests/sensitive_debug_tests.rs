@@ -53,11 +53,16 @@ const SENSITIVE_WIRE_NAMES: &[&str] = &[
     "ReplicaKmsKeyID",
     "KeyId",
     "KMSKeyId",
+    "KmsKeyArn",
     "KMSContext",
     // The replication destination's account id. `q-repl-0010` classifies it beside the replica KMS
     // key id as a configuration secret the stored document echoes on the read and nothing else may
     // print; a derived `Debug` is one `{:?}` away from the log line that rule forbids.
     "Account",
+    // S3 Express CreateSession returns minted temporary session credentials; neither the secret
+    // key nor the session token may ever reach a log line through Debug.
+    "SecretAccessKey",
+    "SessionToken",
 ];
 
 fn operations() -> &'static [OperationIr] {

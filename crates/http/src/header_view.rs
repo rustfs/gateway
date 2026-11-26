@@ -91,6 +91,7 @@ pub const SINGLE_VALUED_HEADERS: &[&str] = &[
     "x-amz-content-sha256",
     "x-amz-date",
     "x-amz-decoded-content-length",
+    "x-amz-s3session-token",
     "x-amz-security-token",
     "x-amz-trailer",
     "expect",

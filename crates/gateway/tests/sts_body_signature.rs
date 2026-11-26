@@ -265,7 +265,7 @@ async fn the_sts_body_is_hashed_and_replayed_once_at_and_below_the_bound() {
         let policy = Bytes::from(policy);
         let (status, body, record) =
             exchange(signed("/bucket?policy", "sts", "AKIDEXAMPLE", "secret", &policy, policy.clone()), chunked).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
         assert_eq!(record.lock().expect("the record is never poisoned").stored, vec![policy.to_vec()]);
     }
 }

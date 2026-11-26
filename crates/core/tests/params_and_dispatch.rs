@@ -34,13 +34,12 @@ use http::{Method, StatusCode};
 use rustfs_gateway_core::dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, Router};
 use rustfs_gateway_core::error::PreAuthError;
 use rustfs_gateway_core::op::{AuthRequirement, ResourceShape};
-use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
+use rustfs_gateway_core::registry::{OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteTable, ShadowingDecls, ShadowingPolicy, TargetKind};
 use rustfs_gateway_types::ErrorCode;
 use support::{Req, entry};
 
 static PUT_ANALYTICS: OperationSpec = OperationSpec::builder("PutBucketAnalyticsConfiguration", 200, None)
-    .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[RequiredParam {
         kind: ParamKind::Query,
         name: "id",
@@ -809,32 +808,34 @@ fn n_an_unhandled_bucket_lifecycle_request_is_refused_by_name() {
     }
 }
 
-/// Negative — a deferred bucket subresource write has no route, so it is the first `501`, never a
-/// lifecycle operation's answer. This is the dispatch-level half of the `query_absent` guarantee:
-/// `DELETE /b?policy` must not delete a bucket and `PUT /b?versioning` must not create one,
-/// whether or not the lifecycle family is registered. The served subresources (`cors`, `tagging`,
-/// `acl`, and the nine configuration-band keys) are the same rule with a different observable —
-/// a `501` naming their own operation — and are asserted below and in `route_table.rs`.
+/// Negative — every bucket subresource write/delete is claimed by its own route (so an unhandled
+/// one is a `501` naming its own operation, never a lifecycle operation's answer), while an
+/// undefined method on a bucket subresource is the first `501` (route miss). This is the
+/// dispatch-level half of the `query_absent` guarantee: `DELETE /b?policy` or `DELETE /b?analytics`
+/// must never delete a bucket and `PUT /b?versioning` or `PUT /b?abac` must never create one.
 #[test]
 fn n_a_bucket_subresource_write_is_a_route_miss_not_a_lifecycle_operation() {
     let mut registry = Registry::new();
     registry.register(&GET_OBJECT).expect("a registrable spec");
     let router = Router::from_generated(registry).expect("the generated table builds");
     for line in [
-        "PUT /bucket?abac",
-        "DELETE /bucket?ownershipControls",
-        "PUT /bucket?inventory",
-        "DELETE /bucket?analytics",
+        "POST /bucket?abac",
+        "POST /bucket?ownershipControls",
+        "POST /bucket?inventory",
+        "POST /bucket?analytics",
     ] {
         let error = router.dispatch(&Req::new(line).parts()).expect_err("no route");
         assert_eq!(error.message(), NO_ROUTE_MESSAGE, "{line}");
         assert_eq!(error.operation(), None, "{line} names no operation because none claimed it");
     }
-    // The other direction, for the four keys that moved out of the list above when the
-    // bucket-configuration band landed: a served subresource write is a 501 that *names its own
-    // operation*, never a lifecycle answer and never a route miss. Without this half, deleting the
-    // rows would turn these back into the first branch and the test would still pass.
+    // Every served bucket subresource write/delete is a 501 that *names its own operation*, never
+    // a lifecycle answer and never a route miss. Without this half, deleting the rows would turn
+    // these back into the first branch or a lifecycle fallback.
     for (line, expected) in [
+        ("PUT /bucket?abac", "PutBucketAbac"),
+        ("DELETE /bucket?ownershipControls", "DeleteBucketOwnershipControls"),
+        ("PUT /bucket?inventory", "PutBucketInventoryConfiguration"),
+        ("DELETE /bucket?analytics", "DeleteBucketAnalyticsConfiguration"),
         ("PUT /bucket?versioning", "PutBucketVersioning"),
         ("DELETE /bucket?policy", "DeleteBucketPolicy"),
         ("DELETE /bucket?website", "DeleteBucketWebsite"),
@@ -1099,11 +1100,8 @@ fn the_configuration_band_declares_three_distinct_not_configured_codes_and_six_a
     }
 }
 
-/// The band's success statuses are declared, and the three deletes are the only 204s in it.
-///
-/// Worth its own assertion because the family mixes them: eight writes answer 200 while the three
-/// deletes answer 204, and a delete that answered 200 with no body is a response some clients
-/// treat as a truncated document.
+/// The band's success statuses are declared: deletes and `PutBucketPolicy` answer 204, and the
+/// other writes and reads answer 200.
 #[test]
 fn the_configuration_band_answers_204_for_its_three_deletes_and_200_for_everything_else() {
     use rustfs_gateway_core::op::Operation;
@@ -1113,13 +1111,13 @@ fn the_configuration_band_answers_204_for_its_three_deletes_and_200_for_everythi
         ("DeleteBucketWebsite", dto::DeleteBucketWebsite::spec().success_status),
         ("DeleteBucketPolicy", dto::DeleteBucketPolicy::spec().success_status),
         ("DeletePublicAccessBlock", dto::DeletePublicAccessBlock::spec().success_status),
+        ("PutBucketPolicy", dto::PutBucketPolicy::spec().success_status),
     ] {
         assert_eq!(status, 204, "{name}");
     }
     for (name, status) in [
         ("PutBucketVersioning", dto::PutBucketVersioning::spec().success_status),
         ("PutBucketWebsite", dto::PutBucketWebsite::spec().success_status),
-        ("PutBucketPolicy", dto::PutBucketPolicy::spec().success_status),
         ("PutPublicAccessBlock", dto::PutPublicAccessBlock::spec().success_status),
         ("GetBucketPolicy", dto::GetBucketPolicy::spec().success_status),
         ("GetBucketVersioning", dto::GetBucketVersioning::spec().success_status),

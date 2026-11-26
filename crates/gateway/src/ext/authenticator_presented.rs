@@ -136,19 +136,36 @@ impl<'a> Presented<'a> {
         if matches!(self, Self::UnroutedForm(_)) {
             return None;
         }
+        use crate::ext::credentials::SessionSurface;
+
         let view = sealed.view();
         let now = sealed.clock().now();
         match location {
-            SigLocation::FormField => credentials.admit_pending(self.session_token().map(SessionToken::expose), now),
-            SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN) => {
-                credentials.admit_query_pending(view.query(), now)
+            SigLocation::FormField => {
+                credentials.admit_surface_pending(self.session_token().map(SessionToken::expose), SessionSurface::Sts, now)
             }
-            _ => credentials.admit_pending(
-                view.headers()
-                    .get(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
-                    .map(http::HeaderValue::as_bytes),
-                now,
-            ),
+            SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN) => credentials
+                .admit_query_param_pending(view.query(), rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN, SessionSurface::Sts, now),
+            SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_S3SESSION_TOKEN) => credentials
+                .admit_query_param_pending(
+                    view.query(),
+                    rustfs_gateway_sig::X_AMZ_S3SESSION_TOKEN,
+                    SessionSurface::S3Express,
+                    now,
+                ),
+            _ => {
+                if let Some(value) = view.headers().get(rustfs_gateway_sig::X_AMZ_S3SESSION_TOKEN_HEADER) {
+                    credentials.admit_surface_pending(Some(value.as_bytes()), SessionSurface::S3Express, now)
+                } else {
+                    credentials.admit_surface_pending(
+                        view.headers()
+                            .get(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
+                            .map(http::HeaderValue::as_bytes),
+                        SessionSurface::Sts,
+                        now,
+                    )
+                }
+            }
         }
     }
 

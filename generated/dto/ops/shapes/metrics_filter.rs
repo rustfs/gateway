@@ -21,7 +21,7 @@
 //! NOT responsible for: how it is written to the wire.
 //! Upstream: `cargo xtask codegen`. Downstream: `crate::ops::shapes`.
 
-/// The `MetricsFilter` structural union. Reached from: GetBucketMetricsConfiguration, ListBucketMetricsConfigurations.
+/// The `MetricsFilter` structural union. Reached from: GetBucketMetricsConfiguration, ListBucketMetricsConfigurations, PutBucketMetricsConfiguration.
 ///
 /// `#[non_exhaustive]` on purpose, and a union is the only shape that carries it: a
 /// consumer matches on one but never constructs one, so a new variant is a minor bump here

@@ -24456,12 +24456,16 @@ mut_handler_deadline_mixed_custom_class_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("crates/core/tests/params_and_dispatch.rs")
+path = Path("crates/gateway/tests/support/mod.rs")
 text = path.read_text()
-subject = "    .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+subject = '''pub static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
+'''
+replacement = '''pub static PING_SPEC: OperationSpec = OperationSpec::builder("example:Ping", 200, None)
+'''
 if text.count(subject) != 1:
     raise SystemExit("missing unique mixed custom deadline removal subject")
-path.write_text(text.replace(subject, "", 1))
+path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \

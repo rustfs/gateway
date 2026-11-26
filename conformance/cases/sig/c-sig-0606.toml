@@ -1,0 +1,47 @@
+# c-sig-0606 — standalone x-amz-s3session-token without signature is never anonymous.
+
+[case]
+id = "c-sig-0606"
+schema_version = 1
+title = "A standalone x-amz-s3session-token header without a signature is refused"
+rationale = """
+An S3 Express session token is credential material even when no Authorization header accompanies \
+it. Treating the request as anonymous would let an intermediary strip the signature off a \
+session-credentialed request and reach public resources under an anonymous audit principal."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-express-security-iam.html"
+summary = "S3 Express requests authenticate with SigV4 using the x-amz-s3session-token header."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "s3express-lone-token"
+body = { utf8 = "protected" }
+
+[request]
+method = "GET"
+target = "/conf-sig/s3express-lone-token"
+headers = { "x-amz-s3session-token" = "FQoGZXIvYXdzEXAMPLE" }
+sign = { mode = "none" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true

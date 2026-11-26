@@ -1,0 +1,92 @@
+# c-bucketconfig-0063 — promoted bucket subresource and CreateSession routes never fall through.
+
+[case]
+id = "c-bucketconfig-0063"
+schema_version = 3
+title = "Unhandled promoted bucket subresources and CreateSession refuse by name without mutating or listing the bucket"
+rationale = """
+When a backend has not registered handlers for promoted bucket subresources or CreateSession, \
+routing must still claim each selector and answer 501 NotImplemented instead of falling through \
+to CreateBucket, DeleteBucket, or ListObjects. The final HEAD confirms the bucket survived."""
+polarity = "negative"
+operation = "DeleteBucketAnalyticsConfiguration"
+tags = ["bucketconfig", "routing"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html"
+summary = "Deleting a bucket analytics configuration is a distinct bucket subresource operation, never DeleteBucket."
+kind = "aws-doc"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bkt-promoted"
+
+[[exchanges]]
+name = "put-analytics-not-create-bucket"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bkt-promoted?analytics&id=report"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = "<AnalyticsConfiguration><Id>report</Id><StorageClassAnalysis/></AnalyticsConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[[exchanges]]
+name = "delete-analytics-not-delete-bucket"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bkt-promoted?analytics&id=report"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[[exchanges]]
+name = "create-session-not-list-objects"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bkt-promoted?session"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 501
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[[exchanges]]
+name = "bucket-survived"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-bkt-promoted"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"

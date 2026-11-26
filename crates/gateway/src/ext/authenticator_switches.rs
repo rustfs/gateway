@@ -131,7 +131,7 @@ impl ScopePolicy {
         } else {
             expected
         };
-        if self.legacy_services && !matches!(expected.service(), SigService::S3Vectors) {
+        if self.legacy_services && !matches!(expected.service(), SigService::S3Vectors | SigService::S3Express) {
             expected.accepting_services(&LEGACY_RUSTFS_SIGNING_SERVICES)
         } else {
             expected
@@ -142,7 +142,10 @@ impl ScopePolicy {
     /// services: `501 NotImplemented`, naming the service and the ones it verifies.
     pub(super) fn service_refusal(self, scope: &CredentialScope, expected: SigService) -> Option<LegacyRefusal> {
         let service = scope.service_name();
-        if !self.legacy_services || expected == SigService::S3Vectors || LEGACY_RUSTFS_SIGNING_SERVICES.contains(&service) {
+        if !self.legacy_services
+            || matches!(expected, SigService::S3Vectors | SigService::S3Express)
+            || LEGACY_RUSTFS_SIGNING_SERVICES.contains(&service)
+        {
             return None;
         }
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS echoes the service the request named

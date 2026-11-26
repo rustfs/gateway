@@ -48,6 +48,7 @@ include = [
   "GetBucketPolicy",
   "GetBucketPolicyStatus",
   "GetPublicAccessBlock",
+  "PutBucketAbac",
   "PutBucketPolicy",
   "PutPublicAccessBlock",
 ]
@@ -89,6 +90,8 @@ quirks = ["q-pol-0001"]
 # =============================================================================================
 [op.PutBucketPolicy]
 precedence = 216
+# AWS S3 and RustFS both answer a successful bucket policy write with 204 No Content.
+success_status = 204
 auth_action = "s3:PutBucketPolicy"
 # The pinned model carries a `content-md5` member and `aws.protocols#httpChecksum` with
 # `requestChecksumRequired`, which is a different trait from the `smithy.api#httpChecksumRequired`
@@ -225,6 +228,11 @@ element_order = ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "Re
 [shape.PolicyStatus]
 element_order = ["IsPublic"]
 
-[[deferred]]
-reason = "The ?abac write changes the access-control mode and remains deferred for its own validation and migration review; routing the read does not define or weaken that write contract."
-operations = ["PutBucketAbac"]
+[op.PutBucketAbac]
+precedence = 263
+auth_action = "s3:PutBucketAbac"
+request_max_bytes = 4096
+error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"]
+url_encoded_fields = []
+input_hot = ["AbacStatus"]
+output_hot = []

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `AccessTier` string enumeration. Bound by: GetBucketIntelligentTieringConfiguration, ListBucketIntelligentTieringConfigurations.
+/// The `AccessTier` string enumeration. Bound by: GetBucketIntelligentTieringConfiguration, ListBucketIntelligentTieringConfigurations, PutBucketIntelligentTieringConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`AccessTier::custom`]. Adding a constant is a minor version

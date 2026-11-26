@@ -319,9 +319,15 @@ pub(crate) fn bucket_headers(
     else {
         return Some(Vec::new());
     };
-    let credentialed = ["authorization", "cookie", "x-amz-security-token", "x-amz-content-sha256"]
-        .iter()
-        .any(|name| headers.contains_key(*name));
+    let credentialed = [
+        "authorization",
+        "cookie",
+        "x-amz-s3session-token",
+        "x-amz-security-token",
+        "x-amz-content-sha256",
+    ]
+    .iter()
+    .any(|name| headers.contains_key(*name));
     let mut pairs: Vec<(HeaderName, HeaderValue)> = Vec::new();
     let wildcard = rule.allowed_origins.iter().any(|allowed| allowed == "*");
     let echoed = !wildcard || credentialed;
