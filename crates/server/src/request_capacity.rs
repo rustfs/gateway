@@ -139,11 +139,27 @@ impl RequestCapacity {
 
     pub(super) async fn acquire(self: Arc<Self>) -> Result<RequestPermit, AcquireError> {
         let permit = Arc::clone(&self.semaphore).acquire_owned().await?;
-        let _ = self.available.send(self.semaphore.available_permits());
+        self.publish_availability();
         Ok(RequestPermit {
             capacity: self,
             permit: Some(permit),
         })
+    }
+
+    /// Publishes only `0 <-> >0` availability transitions so the accept loop never wakes while
+    /// capacity stays strictly above zero. Reading `available_permits()` inside
+    /// `send_if_modified` serializes concurrent acquire/drop updates under the watch write lock
+    /// so a stale `0` cannot overwrite a later release.
+    fn publish_availability(&self) {
+        self.available.send_if_modified(|published| {
+            let next = self.semaphore.available_permits();
+            if (*published == 0) == (next == 0) {
+                false
+            } else {
+                *published = next;
+                true
+            }
+        });
     }
 }
 
@@ -155,6 +171,83 @@ pub(crate) struct RequestPermit {
 impl Drop for RequestPermit {
     fn drop(&mut self) {
         self.permit.take();
-        let _ = self.capacity.available.send(self.capacity.semaphore.available_permits());
+        self.capacity.publish_availability();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Test assertions deliberately panic on unexpected channel or semaphore errors.
+mod tests {
+    use super::*;
+
+    /// Negative — acquiring and releasing permits strictly above zero must not wake the accept
+    /// loop's capacity watcher.
+    #[tokio::test]
+    async fn n_non_boundary_acquire_and_drop_do_not_notify_watcher() {
+        let (capacity, receiver) = RequestCapacity::new(10);
+        assert!(!receiver.has_changed().expect("watcher is open"));
+
+        let first = Arc::clone(&capacity).acquire().await.expect("first permit");
+        assert!(
+            !receiver.has_changed().expect("watcher is open"),
+            "10 -> 9 transition must not wake the accept loop"
+        );
+        let second = Arc::clone(&capacity).acquire().await.expect("second permit");
+        assert!(
+            !receiver.has_changed().expect("watcher is open"),
+            "9 -> 8 transition must not wake the accept loop"
+        );
+
+        drop(second);
+        assert!(
+            !receiver.has_changed().expect("watcher is open"),
+            "8 -> 9 transition must not wake the accept loop"
+        );
+        drop(first);
+        assert!(
+            !receiver.has_changed().expect("watcher is open"),
+            "9 -> 10 transition must not wake the accept loop"
+        );
+    }
+
+    /// Positive and negative — watcher fires only when capacity crosses the `0 <-> >0` boundary.
+    #[tokio::test]
+    async fn boundary_transitions_notify_watcher_in_both_directions() {
+        let (capacity, mut receiver) = RequestCapacity::new(2);
+        let first = Arc::clone(&capacity).acquire().await.expect("first permit");
+        assert!(!receiver.has_changed().expect("watcher is open"), "2 -> 1 stays non-zero");
+
+        let second = Arc::clone(&capacity).acquire().await.expect("second permit");
+        assert!(receiver.has_changed().expect("watcher is open"), "1 -> 0 must notify");
+        assert_eq!(*receiver.borrow_and_update(), 0, "saturated capacity reports zero");
+
+        drop(second);
+        assert!(receiver.has_changed().expect("watcher is open"), "0 -> 1 must notify");
+        assert!(*receiver.borrow_and_update() > 0, "recovered capacity reports non-zero");
+
+        drop(first);
+        assert!(!receiver.has_changed().expect("watcher is open"), "1 -> 2 stays non-zero");
+    }
+
+    /// Negative — concurrent saturation and release must never leave the watcher stuck empty.
+    #[tokio::test]
+    async fn n_concurrent_saturation_and_release_never_leaves_watcher_stuck_empty() {
+        let (capacity, mut receiver) = RequestCapacity::new(1);
+        let mut tasks = tokio::task::JoinSet::new();
+        for _ in 0..32 {
+            let cap = Arc::clone(&capacity);
+            tasks.spawn(async move {
+                for _ in 0..25 {
+                    let permit = Arc::clone(&cap).acquire().await.expect("permit");
+                    tokio::task::yield_now().await;
+                    drop(permit);
+                }
+            });
+        }
+        while tasks.join_next().await.is_some() {}
+        assert!(
+            *receiver.borrow_and_update() > 0,
+            "watcher must report available capacity after all permits are dropped"
+        );
     }
 }

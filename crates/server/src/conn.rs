@@ -39,7 +39,7 @@ use crate::client_admission::{IpCounts, IpLease};
 use crate::config::{ConfigError, ServerConfig, WriteStrategy};
 use crate::connection_service::{ConnectionError, ConnectionService, RequestStats};
 use crate::driver::{AcceptedConnection, ConnectionDriver, ConnectionInfo, HyperConnectionDriver, TransportKind};
-use crate::io::{BoxTransport, ProgressIo, bounded, deadline_after, deadline_remaining};
+use crate::io::{BoxTransport, ProgressIo, bounded, deadline_after};
 use crate::listener::Listener;
 use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownCommand, ShutdownReport, ShutdownTrigger};
 use crate::tls::TlsHandle;
@@ -591,7 +591,7 @@ where
     builder.http1().timer(TokioTimer::new());
     builder
         .http1()
-        .header_read_timeout(deadline_remaining(header_deadline))
+        .header_read_timeout(bounded(config.header_read_timeout))
         .max_buf_size(config.h1_max_buf_size)
         .keep_alive(config.h1_keep_alive)
         .pipeline_flush(config.h1_pipeline_flush);

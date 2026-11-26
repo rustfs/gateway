@@ -504,6 +504,159 @@ async fn a_half_tls_handshake_releases_its_admission_permit_at_the_header_deadli
     assert!(task.await.expect("server task joins").is_ok());
 }
 
+/// Positive — a slow TLS handshake must not shrink `header_read_timeout` for every subsequent
+/// keep-alive request on the same HTTP/1.1 connection.
+#[tokio::test]
+async fn keep_alive_request_after_slow_tls_handshake_gets_full_header_read_timeout() {
+    let mut server_config = config();
+    server_config.header_read_timeout = Duration::from_millis(400);
+    server_config.keep_alive_idle = Duration::from_secs(10);
+    let (material, certificate) = generated_material();
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(server_config, service())
+        .with_tls(TlsHandle::new(material).expect("material is valid"))
+        .serve()
+        .expect("server starts");
+
+    // Spend ~260ms of the 400ms initial accept-to-header budget before completing TLS, leaving
+    // ~140ms of `deadline_remaining(header_deadline)`.
+    let tcp = TcpStream::connect(local_addr).await.expect("TCP connects");
+    tokio::time::sleep(Duration::from_millis(260)).await;
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(certificate).expect("certificate is a valid trust anchor");
+    let client_config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let server_name = ServerName::try_from("localhost").expect("valid DNS name").to_owned();
+    let mut tls = TlsConnector::from(Arc::new(client_config))
+        .connect(server_name, tcp)
+        .await
+        .expect("TLS handshake completes inside the initial header deadline");
+
+    let first = request_keep_alive(&mut tls).await;
+    assert!(first.starts_with(b"HTTP/1.1 200"), "first request succeeds");
+
+    // Second keep-alive request pauses 220ms mid-header: longer than the ~140ms remaining after
+    // the slow TLS handshake, but well inside the full 400ms `header_read_timeout`.
+    tls.write_all(b"GET / HTTP/1.1\r\n")
+        .await
+        .expect("first fragment of second request writes");
+    tls.flush().await.expect("first fragment flushes");
+    tokio::time::sleep(Duration::from_millis(220)).await;
+    tls.write_all(b"Host: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("second fragment of second request writes");
+    tls.flush().await.expect("second fragment flushes");
+    let mut second = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), tls.read_to_end(&mut second))
+        .await
+        .expect("second request completes")
+        .expect("second response reads");
+    assert!(
+        second.starts_with(b"HTTP/1.1 200"),
+        "keep-alive request should receive the full header_read_timeout, got: {:?}",
+        String::from_utf8_lossy(&second)
+    );
+
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+/// Negative — a subsequent keep-alive request whose headers stall past `header_read_timeout` is
+/// still closed well before `keep_alive_idle`.
+#[tokio::test]
+async fn n_keep_alive_request_exceeding_header_read_timeout_still_closes() {
+    let mut server_config = config();
+    server_config.header_read_timeout = Duration::from_millis(200);
+    server_config.keep_alive_idle = Duration::from_secs(10);
+    let (material, certificate) = generated_material();
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = Server::new(server_config, service())
+        .with_tls(TlsHandle::new(material).expect("material is valid"))
+        .serve()
+        .expect("server starts");
+
+    let mut tls = tls_connect(local_addr, certificate).await;
+    assert!(request_keep_alive(&mut tls).await.starts_with(b"HTTP/1.1 200"));
+    tls.write_all(b"GET / HTTP/1.1\r\n")
+        .await
+        .expect("partial second head writes");
+    tls.flush().await.expect("partial second head flushes");
+    let mut byte = [0_u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(2), tls.read(&mut byte))
+        .await
+        .expect("stalled second request closes well before keep_alive_idle");
+    assert!(
+        matches!(closed, Ok(0) | Err(_)),
+        "expected socket close on header timeout, got: {closed:?}"
+    );
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("connection releases admission permit");
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+/// Negative — the initial accept-to-first-header deadline still bounds a slow TLS handshake plus
+/// a stalled first HTTP/1.1 request head.
+#[tokio::test]
+async fn n_slow_tls_handshake_plus_slow_first_header_still_closes_at_accept_deadline() {
+    let mut server_config = config();
+    server_config.header_read_timeout = Duration::from_millis(250);
+    server_config.keep_alive_idle = Duration::from_secs(10);
+    let (material, certificate) = generated_material();
+    let RunningServer {
+        local_addr,
+        metrics,
+        task,
+        shutdown,
+    } = Server::new(server_config, service())
+        .with_tls(TlsHandle::new(material).expect("material is valid"))
+        .serve()
+        .expect("server starts");
+
+    let tcp = TcpStream::connect(local_addr).await.expect("TCP connects");
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(certificate).expect("certificate is a valid trust anchor");
+    let client_config = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let server_name = ServerName::try_from("localhost").expect("valid DNS name").to_owned();
+    let mut tls = TlsConnector::from(Arc::new(client_config))
+        .connect(server_name, tcp)
+        .await
+        .expect("TLS handshake completes");
+    tls.write_all(b"GET / HTTP/1.1\r\n").await.expect("partial first head writes");
+    tls.flush().await.expect("partial first head flushes");
+    let mut byte = [0_u8; 1];
+    let closed = tokio::time::timeout(Duration::from_secs(2), tls.read(&mut byte))
+        .await
+        .expect("stalled first request closes at accept-to-header deadline");
+    assert!(matches!(closed, Ok(0) | Err(_)), "expected close, got: {closed:?}");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("connection releases admission permit");
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
 #[path = "tls_h2/alpn.rs"]
 mod alpn;
 #[path = "tls_h2/idle.rs"]

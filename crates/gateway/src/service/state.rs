@@ -136,8 +136,10 @@ impl<B: http_body::Body> AcceptedBody<B> {
 
 /// What the transport said about this connection, or [`TransportSecurity::Plaintext`].
 ///
-/// The **only** source. A transport that terminates TLS, or that is handed a connection by one
-/// that did, inserts a `TransportSecurity` into the request's extensions:
+/// Two transport-owned extension types carry encryption facts: a host's explicit
+/// [`TransportSecurity::Encrypted`] (for example when TLS was terminated upstream) and, when the
+/// `server` feature is enabled, `rustfs_gateway_server::ConnectionInfo` reporting a completed TLS
+/// handshake. Either marks the connection encrypted, matching [`crate::ClientFacts::observed`].
 ///
 /// ```
 /// # use rustfs_gateway::TransportSecurity;
@@ -156,8 +158,15 @@ impl<B: http_body::Body> AcceptedBody<B> {
 /// mode where a development deployment that was never given a transport quietly serves customer
 /// keys over HTTP.
 pub(crate) fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
-    extensions
-        .get::<TransportSecurity>()
-        .copied()
-        .unwrap_or(TransportSecurity::Plaintext)
+    if extensions.get::<TransportSecurity>().copied() == Some(TransportSecurity::Encrypted) {
+        return TransportSecurity::Encrypted;
+    }
+    #[cfg(feature = "server")]
+    if extensions
+        .get::<rustfs_gateway_server::ConnectionInfo>()
+        .is_some_and(|connection| connection.transport() == rustfs_gateway_server::TransportKind::Tls)
+    {
+        return TransportSecurity::Encrypted;
+    }
+    TransportSecurity::Plaintext
 }

@@ -100,12 +100,6 @@ pub(crate) fn transport_now() -> Instant {
     Instant::now()
 }
 
-pub(crate) fn deadline_remaining(deadline: Instant) -> Duration {
-    deadline
-        .saturating_duration_since(Instant::now())
-        .max(Duration::from_nanos(1))
-}
-
 pub(crate) fn deadline_reached(deadline: Instant) -> bool {
     Instant::now() >= deadline
 }
