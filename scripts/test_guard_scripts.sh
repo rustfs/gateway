@@ -11666,10 +11666,10 @@ mut_sig_p2_04_replacement_dispatch_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/service.rs")
 text = path.read_text()
-old = "                    .map(|verifier| verifier.verify_sealed(&sealed));"
+old = "                    .map(|verifier| crate::panic_boundary::contain_decision(|| verifier.verify_sealed(&sealed)))"
 if text.count(old) != 1:
     raise SystemExit("missing replacement dispatch mutation subject")
-path.write_text(text.replace(old, "                    .and_then(|_| None);", 1))
+path.write_text(text.replace(old, "                    .and_then(|_| None)", 1))
 PYEOF
 }
 expect_fail check_sig_case_coverage.sh \

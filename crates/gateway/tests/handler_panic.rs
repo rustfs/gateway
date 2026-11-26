@@ -21,6 +21,8 @@
 
 #![allow(clippy::panic)]
 
+#[path = "handler_panic/host.rs"]
+mod panicking_host;
 use crate::support;
 
 use std::sync::Arc;
@@ -234,41 +236,10 @@ async fn n_stage_filter_wire_routed_and_response_panics_are_500_and_next_request
 /// 500 without unwinding, and subsequent requests recover.
 #[tokio::test]
 async fn n_host_resolver_panics_are_500_and_next_request_runs() {
-    use rustfs_gateway::{HostQuery, HostRefusal, HostResolver, PathStyleOnly, ResolvedHost};
-
-    struct PanickingResolver {
-        calls: AtomicUsize,
-    }
-
-    impl HostResolver for PanickingResolver {
-        fn resolve(&self, query: &HostQuery<'_>) -> ResolvedHost {
-            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-                panic!("host_resolver resolve panic fixture");
-            }
-            PathStyleOnly.resolve(query)
-        }
-
-        fn signing_bucket(&self, _query: &HostQuery<'_>, _resolved: &ResolvedHost) -> Option<String> {
-            if self.calls.load(Ordering::SeqCst) == 2 {
-                panic!("host_resolver signing_bucket panic fixture");
-            }
-            None
-        }
-
-        fn refusal(&self, _query: &HostQuery<'_>) -> Option<HostRefusal> {
-            if self.calls.load(Ordering::SeqCst) == 3 {
-                panic!("host_resolver refusal panic fixture");
-            }
-            None
-        }
-    }
-
     let service = wired()
         .register::<Ping, _>(Arc::new(support::Backend))
         .dialect(&crate::support::ping_dialect())
-        .host_resolver(PanickingResolver {
-            calls: AtomicUsize::new(0),
-        })
+        .host_resolver(panicking_host::PanickingResolver::new())
         .build()
         .expect("complete assembly");
 

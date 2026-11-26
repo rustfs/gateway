@@ -91,9 +91,11 @@ pub struct ServerConfig {
     pub max_connections_per_ip: Option<usize>,
     /// How per-IP admission handles reverse proxies and load balancers.
     ///
-    /// Defaults to [`ProxyPolicy::Direct`], keying strictly on the raw socket peer address. Use
-    /// [`ProxyPolicy::ProxyProtocol`] to parse HAProxy PROXY v1/v2 headers from trusted proxies,
-    /// or [`ProxyPolicy::ExemptTrustedProxies`] to exempt trusted proxies from the per-IP ceiling.
+    /// Enabling a proxy mode attributes per-IP limits to forwarded clients or exempts trusted
+    /// proxies; disabling it (`ProxyPolicy::Direct`) keys strictly on the raw socket peer address.
+    /// Defaults to [`ProxyPolicy::Direct`]. Use [`ProxyPolicy::ProxyProtocol`] to parse HAProxy
+    /// PROXY v1/v2 headers from trusted proxies, or [`ProxyPolicy::ExemptTrustedProxies`] to
+    /// exempt trusted proxies from the per-IP ceiling.
     pub proxy_policy: ProxyPolicy,
     /// Time from accept to complete headers. Increasing admits slower headers; decreasing rejects slowloris peers sooner.
     pub header_read_timeout: Duration,
@@ -146,9 +148,13 @@ pub struct ServerConfig {
     /// HTTP/2 header-list byte ceiling. Increasing admits larger metadata; decreasing caps decoder memory. Zero is invalid.
     pub h2_max_header_list_size: u32,
     /// HTTP/2 maximum pending peer-reset streams allowed before sending `GOAWAY` (Rapid Reset DoS bound).
+    /// Increasing tolerates bursts of legitimate rapid cancellations at higher memory cost;
+    /// decreasing closes abusive HTTP/2 connections sooner.
     /// Zero is invalid; `None` defers to Hyper/`h2`'s built-in default.
     pub h2_max_pending_accept_reset_streams: Option<usize>,
     /// HTTP/2 maximum local-error reset streams allowed before sending `GOAWAY` (`ENHANCE_YOUR_CALM`).
+    /// Increasing tolerates more local stream errors before dropping the connection;
+    /// decreasing disconnects misbehaving HTTP/2 peers sooner.
     /// Zero is invalid; `None` disables the cap (not recommended for untrusted peers).
     pub h2_max_local_error_reset_streams: Option<usize>,
     /// HTTP/2 per-stream write buffer ceiling in bytes. Increasing raises burst buffering and memory;

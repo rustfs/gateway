@@ -101,7 +101,7 @@ async fn a_known_unfinished_body_that_arrives_after_shutdown_starts_is_drained()
 /// Negative — an ordinary close with no unfinished-body proof still retires immediately.
 #[tokio::test(start_paused = true)]
 async fn an_initially_pending_transport_without_body_proof_does_not_linger() {
-    let started = Instant::now();
+    let started = transport_now();
     let mut io = delayed_lingering_io(Duration::from_secs(60), b"not owed", false, Arc::new(AtomicU64::new(0)));
     io.shutdown().await.expect("a bodyless close retires immediately");
     assert_eq!(started.elapsed(), Duration::ZERO, "the bodyless close spent a linger interval");
@@ -111,7 +111,7 @@ async fn an_initially_pending_transport_without_body_proof_does_not_linger() {
 /// the whole outer linger budget.
 #[tokio::test(start_paused = true)]
 async fn a_known_unfinished_body_that_stays_silent_is_bounded_by_the_quiet_grace() {
-    let started = Instant::now();
+    let started = transport_now();
     let mut io = delayed_lingering_io(Duration::from_secs(60), b"never arrives", true, Arc::new(AtomicU64::new(0)));
     let shutdown = tokio::spawn(async move { io.shutdown().await });
     tokio::task::yield_now().await;
@@ -182,7 +182,7 @@ impl AsyncWrite for PacedWriter {
         let written = bytes.len().min(self.max_write);
         self.written.fetch_add(written, Ordering::Relaxed);
         let delay = self.delay;
-        self.sleep.as_mut().reset(Instant::now() + delay);
+        self.sleep.as_mut().reset(deadline_after(delay));
         Poll::Ready(Ok(written))
     }
 
@@ -233,7 +233,7 @@ async fn a_srv_0012_one_hundred_mib_of_continuous_progress_outlives_the_interval
         Duration::from_millis(10),
         Duration::from_secs(2),
     );
-    let started = Instant::now();
+    let started = transport_now();
     io.write_all(&vec![b'x'; BODY_LEN])
         .await
         .expect("every sub-interval write makes progress");

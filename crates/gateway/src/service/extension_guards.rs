@@ -171,16 +171,9 @@ pub(crate) fn verify_custom_signature_safely(
 }
 
 #[cfg(feature = "dangerous-replace-signature-verifier")]
-pub(crate) fn verify_replaced_signature_safely(
-    verifier: &dyn rustfs_gateway_sig::AwsSignatureVerifier,
-    sealed: &rustfs_gateway_sig::SealedAws<'_>,
-    trace: &RequestTrace,
-    operation: &'static str,
-) -> Result<Verdict, HandlerError> {
-    contain_decision(|| verifier.verify_sealed(sealed)).map_err(|()| {
-        extension_panicked(Extension::Handler, trace.request_id(), operation);
-        HandlerError::internal_error("the signature verifier failed")
-    })
+pub(crate) fn replaced_verifier_panicked(trace: &RequestTrace, operation: &'static str) -> HandlerError {
+    extension_panicked(Extension::Handler, trace.request_id(), operation);
+    HandlerError::internal_error("the signature verifier failed")
 }
 
 pub(crate) struct PolicyLoadContext<'a> {
@@ -199,61 +192,53 @@ pub(crate) struct PolicyLoadContext<'a> {
     pub(crate) response_kind: rustfs_gateway_core::ResponseKind,
 }
 
-pub(crate) async fn load_policy_snapshot(
-    ctx: PolicyLoadContext<'_>,
-) -> Result<crate::ext::PolicySnapshot, crate::render::S3Error> {
+pub(crate) async fn handle_policy_snapshot_failure(panicked: bool, ctx: PolicyLoadContext<'_>) -> crate::render::S3Error {
     use crate::close::ConnectionIntent;
     use crate::ext::{AuthzAuditEvent, AuthzStage, emit_safely};
     use crate::render::{from_denial, from_handler};
-    use crate::request_deadline::{PolicySnapshotOutcome, elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
+    use crate::request_deadline::{elapsed_since, hold_failure_floor};
     use rustfs_gateway_core::Decision;
 
-    match policy_snapshot_with_timeout(ctx.runtime.policy_source.as_ref(), ctx.identity, ctx.runtime.policy_timeout.get()).await {
-        PolicySnapshotOutcome::Ready(Ok(policy)) => Ok(policy),
-        outcome @ (PolicySnapshotOutcome::Ready(Err(_)) | PolicySnapshotOutcome::TimedOut | PolicySnapshotOutcome::Panicked) => {
-            let panicked = matches!(outcome, PolicySnapshotOutcome::Panicked);
-            if panicked {
-                extension_panicked(Extension::Handler, ctx.request_id, ctx.operation);
-            }
-            emit_safely(
-                ctx.runtime.authz_audit.as_ref(),
-                &AuthzAuditEvent {
-                    request_id: ctx.request_id,
-                    stage: AuthzStage::Route,
-                    operation: ctx.operation,
-                    action: ctx.requirement.action,
-                    resource: ctx.requirement.resource,
-                    bucket: ctx.bucket,
-                    key: ctx.key,
-                    resources: ctx.asked,
-                    auth_scheme: ctx.auth_scheme,
-                    identity: ctx.identity,
-                    target_origin: ctx.target_origin,
-                    policy_snapshot: None,
-                    decision: Decision::Indeterminate,
-                    elapsed: elapsed_since(ctx.service.inner.authz_clock.as_ref(), ctx.authz_started),
-                },
-            );
-            hold_failure_floor(
-                ctx.service.inner.floor.failure_floor(),
-                ctx.service.inner.authz_clock.as_ref(),
-                ctx.authz_started,
-            )
-            .await;
-            Err(if panicked {
-                from_handler(
-                    HandlerError::internal_error("the policy source failed"),
-                    ctx.response_kind,
-                    ConnectionIntent::MayKeepAlive,
-                )
-            } else {
-                from_denial(
-                    rustfs_gateway_core::Denied::indeterminate(),
-                    ctx.response_kind,
-                    ctx.service.inner.view_policy.denial_sentences(),
-                )
-            })
-        }
+    if panicked {
+        extension_panicked(Extension::Handler, ctx.request_id, ctx.operation);
+    }
+    emit_safely(
+        ctx.runtime.authz_audit.as_ref(),
+        &AuthzAuditEvent {
+            request_id: ctx.request_id,
+            stage: AuthzStage::Route,
+            operation: ctx.operation,
+            action: ctx.requirement.action,
+            resource: ctx.requirement.resource,
+            bucket: ctx.bucket,
+            key: ctx.key,
+            resources: ctx.asked,
+            auth_scheme: ctx.auth_scheme,
+            identity: ctx.identity,
+            target_origin: ctx.target_origin,
+            policy_snapshot: None,
+            decision: Decision::Indeterminate,
+            elapsed: elapsed_since(ctx.service.inner.authz_clock.as_ref(), ctx.authz_started),
+        },
+    );
+    hold_failure_floor(
+        ctx.service.inner.floor.failure_floor(),
+        ctx.service.inner.authz_clock.as_ref(),
+        ctx.authz_started,
+    )
+    .await;
+    if panicked {
+        from_handler(
+            HandlerError::internal_error("the policy source failed"),
+            ctx.response_kind,
+            ConnectionIntent::MayKeepAlive,
+        )
+    } else {
+        from_denial(
+            rustfs_gateway_core::Denied::indeterminate(),
+            ctx.response_kind,
+            ctx.service.inner.view_policy.denial_sentences(),
+        )
     }
 }
 
@@ -302,8 +287,11 @@ pub(crate) async fn evaluate_route_extras<'a>(
     for extra_request in route_extras {
         match catch_boxed_future(|| authorizer.authorize_route_result(authz_context, extra_request)).await {
             Ok(Err(error)) => return Ok((rustfs_gateway_core::Decision::Indeterminate, Some(error))),
-            Ok(Ok(decision)) if decision != rustfs_gateway_core::Decision::Allow => return Ok((decision, None)),
-            Ok(Ok(_)) => {}
+            Ok(Ok(decision)) => {
+                if decision != rustfs_gateway_core::Decision::Allow {
+                    return Ok((decision, None));
+                }
+            }
             Err(()) => {
                 extension_panicked(Extension::Authorizer, request_id, operation);
                 return Err(crate::render::from_handler(

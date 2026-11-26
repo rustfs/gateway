@@ -143,11 +143,33 @@ impl OperationCodec for BucketPing {
     }
 }
 
-struct PingBackend;
+struct PingBackend {
+    vary: Option<&'static str>,
+}
+
+impl PingBackend {
+    const fn plain() -> Self {
+        Self { vary: None }
+    }
+
+    const fn with_vary(vary: &'static str) -> Self {
+        Self { vary: Some(vary) }
+    }
+
+    fn bucket_ping_response(&self) -> HandlerResult<BucketPing> {
+        let mut response = Resp::new(BucketPingOutput);
+        if let Some(vary) = self.vary {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::VARY, http::HeaderValue::from_static(vary));
+            response = response.with_extra_headers(headers);
+        }
+        Ok(response)
+    }
+}
 
 impl Handler<BucketPing> for PingBackend {
     async fn call(&self, _request: Req<BucketPing>) -> HandlerResult<BucketPing> {
-        Ok(Resp::new(BucketPingOutput))
+        self.bucket_ping_response()
     }
 
     async fn call_with_context(
@@ -155,7 +177,7 @@ impl Handler<BucketPing> for PingBackend {
         _request: Req<BucketPing>,
         _context: rustfs_gateway::HandlerContext,
     ) -> HandlerResult<BucketPing> {
-        Ok(Resp::new(BucketPingOutput))
+        self.bucket_ping_response()
     }
 }
 
@@ -291,8 +313,8 @@ fn build_with_source(
 ) -> Built {
     let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id");
     let mut builder = ServiceBuilder::new()
-        .register::<BucketPing, _>(Arc::new(PingBackend))
-        .register::<rustfs_gateway::dto::GetObject, _>(Arc::new(PingBackend))
+        .register::<BucketPing, _>(Arc::new(PingBackend::plain()))
+        .register::<rustfs_gateway::dto::GetObject, _>(Arc::new(PingBackend::plain()))
         .dialect(&bucket_ping_dialect())
         .authenticator(SigV4Authenticator::new(
             Arc::new(StaticCredentials::new().with(credentials)),
@@ -672,29 +694,11 @@ async fn a_preflight_reaches_no_handler() {
 /// not duplicate `Origin` when already present.
 #[tokio::test]
 async fn n_ordinary_cors_decoration_preserves_existing_vary_header() {
-    struct VaryingPingBackend(&'static str);
-
-    impl Handler<BucketPing> for VaryingPingBackend {
-        async fn call(&self, _request: Req<BucketPing>) -> HandlerResult<BucketPing> {
-            let mut headers = http::HeaderMap::new();
-            headers.insert(http::header::VARY, http::HeaderValue::from_static(self.0));
-            Ok(Resp::new(BucketPingOutput).with_extra_headers(headers))
-        }
-
-        async fn call_with_context(
-            &self,
-            request: Req<BucketPing>,
-            _context: rustfs_gateway::HandlerContext,
-        ) -> HandlerResult<BucketPing> {
-            self.call(request).await
-        }
-    }
-
     let build_varying = |vary_value: &'static str| {
         let reads = Arc::new(AtomicUsize::new(0));
         let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id");
         ServiceBuilder::new()
-            .register::<BucketPing, _>(Arc::new(VaryingPingBackend(vary_value)))
+            .register::<BucketPing, _>(Arc::new(PingBackend::with_vary(vary_value)))
             .dialect(&bucket_ping_dialect())
             .authenticator(SigV4Authenticator::new(
                 Arc::new(StaticCredentials::new().with(credentials)),

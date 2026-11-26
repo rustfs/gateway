@@ -218,6 +218,7 @@ static CONTROL_OVERLAY: DialectOverlay = DialectOverlay {
     }],
 };
 
+#[cfg(test)]
 impl Operation for SigV2ControlOp {
     const NAME: &'static str = "test:SigV2Control";
     type Input = ();

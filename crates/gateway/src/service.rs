@@ -143,7 +143,7 @@ use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth};
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
-use crate::request_deadline::{elapsed_since, hold_failure_floor};
+use crate::request_deadline::{PolicySnapshotOutcome, elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
 use crate::trace::TraceSource;
 use crate::{response::into_response, routing::RuntimeAssembly};
@@ -819,16 +819,16 @@ impl S3Service {
                 let payload = self.inner.view_policy.signed_payload_mode(payload);
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
-                let replacement_verdict = match &self.inner.dangerously_replaced_signature_verifier {
-                    Some(verifier) => match extension_guards::verify_replaced_signature_safely(
-                        verifier.as_ref(),
-                        &sealed,
-                        outcome.trace,
-                        operation,
-                    ) {
-                        Ok(verdict) => Some(verdict),
-                        Err(error) => return outcome.refuse_handler(error),
-                    },
+                let replacement_verdict = match self
+                    .inner
+                    .dangerously_replaced_signature_verifier
+                    .as_ref()
+                    .map(|verifier| crate::panic_boundary::contain_decision(|| verifier.verify_sealed(&sealed)))
+                {
+                    Some(Ok(verdict)) => Some(verdict),
+                    Some(Err(())) => {
+                        return outcome.refuse_handler(extension_guards::replaced_verifier_panicked(outcome.trace, operation));
+                    }
                     None => None,
                 };
                 #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
@@ -851,14 +851,8 @@ impl S3Service {
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                     .with_chunk_sink(&chunk_sink)
                     .with_sts_body_reader(routed_body.sts_body_reader(), operation, config.config());
-                    let result = match extension_guards::authenticate_safely(
-                        self.inner.authenticator.as_ref(),
-                        &question,
-                        outcome.trace,
-                        operation,
-                    )
-                    .await
-                    {
+                    let auth = self.inner.authenticator.as_ref();
+                    let result = match extension_guards::authenticate_safely(auth, &question, outcome.trace, operation).await {
                         Ok(result) => result,
                         Err(error) => return outcome.refuse_handler(error),
                     };
@@ -881,14 +875,8 @@ impl S3Service {
                 let question =
                     SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket.as_deref())
                         .with_post_policy_limits(post_policy_limits);
-                match extension_guards::authenticate_sigv2_safely(
-                    self.inner.authenticator.as_ref(),
-                    &question,
-                    outcome.trace,
-                    operation,
-                )
-                .await
-                {
+                let auth = self.inner.authenticator.as_ref();
+                match extension_guards::authenticate_sigv2_safely(auth, &question, outcome.trace, operation).await {
                     Ok(Ok(authentication)) => (authentication, None),
                     Ok(Err(_)) => return outcome.refuse_unavailable(UNAUTHENTICATED, wire.framing().has_body()),
                     Err(error) => return outcome.refuse_handler(error),
@@ -1130,22 +1118,36 @@ impl S3Service {
                 questions.as_slice()
             };
             let mut deciding = 0_usize;
-            let policy = extension_guards::load_policy_snapshot(extension_guards::PolicyLoadContext {
-                service: route_service,
-                runtime: route_runtime.as_ref(),
-                request_id,
-                operation,
-                requirement,
-                bucket: route_meta.bucket(),
-                key: route_effective_key,
-                asked,
-                auth_scheme,
-                identity: route_verdict.identity(),
-                target_origin,
-                authz_started,
-                response_kind,
-            })
-            .await?;
+            let policy = match policy_snapshot_with_timeout(
+                route_runtime.policy_source.as_ref(),
+                route_verdict.identity(),
+                route_runtime.policy_timeout.get(),
+            )
+            .await
+            {
+                PolicySnapshotOutcome::Ready(Ok(policy)) => policy,
+                outcome => {
+                    return Err(extension_guards::handle_policy_snapshot_failure(
+                        matches!(outcome, PolicySnapshotOutcome::Panicked),
+                        extension_guards::PolicyLoadContext {
+                            service: route_service,
+                            runtime: route_runtime.as_ref(),
+                            request_id,
+                            operation,
+                            requirement,
+                            bucket: route_meta.bucket(),
+                            key: route_effective_key,
+                            asked,
+                            auth_scheme,
+                            identity: route_verdict.identity(),
+                            target_origin,
+                            authz_started,
+                            response_kind,
+                        },
+                    )
+                    .await);
+                }
+            };
             let policy = Arc::new(policy);
             let authz_context = RequestContext::from_request(
                 now,
