@@ -432,15 +432,10 @@ impl fmt::Display for CredentialsWerePresented {
 
 impl core::error::Error for CredentialsWerePresented {}
 
-/// Which authentication surfaces the request touched.
+/// Which authentication surfaces the request touched (no credential material).
 ///
-/// Four booleans and nothing else — this type carries no credential material, only the fact that
-/// each surface was or was not populated. The wire layer fills it in; the authentication stage
-/// turns it into evidence.
-///
-/// The security token counts as a surface even though it is not itself a signature: a request that
-/// carries `X-Amz-Security-Token` and nothing else is malformed, and treating it as anonymous
-/// would let a client strip the signature off a session-credentialed request.
+/// The wire layer fills these booleans in and the authentication stage turns them into evidence.
+/// Session-token headers count as surfaces so stripping a signature never downgrades to anonymous.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CredentialPresence {
     authorization_header: bool,
@@ -528,12 +523,7 @@ impl CredentialPresence {
     }
 
     /// Whether more than one signature surface, conflicting session-token headers, or both SigV4
-    /// and SigV2 markers on the same surface were populated.
-    ///
-    /// A request carrying both an `Authorization` header and `X-Amz-Signature`, simultaneous
-    /// SigV4 and SigV2 parameters on the same query or form surface, or both
-    /// `x-amz-security-token` and `x-amz-s3session-token` is ambiguous. P2-04 rejects the
-    /// combination; this predicate is what it asks.
+    /// and SigV2 markers on the same surface were populated (rejected by P2-04).
     #[must_use]
     pub const fn is_ambiguous(&self) -> bool {
         let surfaces = self.authorization_header as u8 + self.query_signature as u8 + self.post_policy_signature as u8;
@@ -544,8 +534,7 @@ impl CredentialPresence {
     ///
     /// # Errors
     ///
-    /// [`CredentialsWerePresented`] if any surface was populated. This is the whole point: the
-    /// evidence cannot be manufactured on a request that failed verification.
+    /// [`CredentialsWerePresented`] if any surface was populated.
     pub const fn into_evidence(self) -> Result<AnonymousAck, CredentialsWerePresented> {
         if self.any() {
             Err(CredentialsWerePresented)

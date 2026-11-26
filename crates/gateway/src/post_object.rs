@@ -604,6 +604,8 @@ where
                     None => match self.frames.poll_next(context) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Err(refusal)) => {
+                            self.pending.clear();
+                            self.ended = true;
                             return Poll::Ready(Some(Err(PostBodyError(
                                 "the POST body transport failed",
                                 Some(Box::new(refusal)),

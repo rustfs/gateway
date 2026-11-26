@@ -1390,8 +1390,8 @@ impl S3Service {
                     Some(expected_owner) if !resources.is_empty() => {
                         let mut verdict = Decision::Allow;
                         for resource in &resources {
-                            verdict = match resource.bucket() {
-                                Some(source_bucket) => {
+                            verdict = match (resource.identity(), resource.bucket()) {
+                                (None | Some(rustfs_gateway_core::ResourceIdentity::Path), Some(source_bucket)) => {
                                     match catch_boxed_future(|| input_service.inner.bucket_owner_source.owner(source_bucket))
                                         .await
                                     {
@@ -1402,7 +1402,7 @@ impl S3Service {
                                         Ok(Err(_)) | Err(()) => Decision::Indeterminate,
                                     }
                                 }
-                                None => Decision::Indeterminate,
+                                _ => Decision::Indeterminate,
                             };
                             if verdict != Decision::Allow {
                                 break;

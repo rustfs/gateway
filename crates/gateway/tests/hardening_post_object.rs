@@ -281,7 +281,7 @@ impl Body for StallingPostBody {
 }
 
 /// Negative — a `HostBodyReadTimeout` while streaming a `PostObject` file must return
-/// `408 RequestTimeout` rather than being flattened into `400 IncompleteBody`.
+/// `400 RequestTimeout` rather than being flattened into `400 IncompleteBody`.
 #[tokio::test]
 async fn n_post_object_preserves_request_timeout_instead_of_incomplete_body() {
     let backend = Arc::new(RecordingPost::default());

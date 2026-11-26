@@ -439,6 +439,43 @@ async fn n_copy_and_upload_part_copy_validate_source_expected_bucket_owner() {
     assert_eq!(exchange_wire(&owner_svc, wrong_part).await.status(), StatusCode::FORBIDDEN);
     assert_eq!(backend.part_copy_calls.load(Ordering::SeqCst), 0);
 
+    // Negative — AccessPoint and Outposts `/bucket/` ARNs whose name matches a local bucket in
+    // `MapOwnerSource` must fail closed (`403`) rather than aliasing onto local S3 bucket ownership.
+    for arn_source in [
+        "arn:aws:s3:us-east-1:999988887777:accesspoint/src-bucket/object/src",
+        "arn:aws:s3-outposts:us-east-1:999988887777:outpost/op-1/bucket/src-bucket/object/src",
+    ] {
+        let arn_copy = support::signed_with(
+            Method::PUT,
+            "/dest-bucket/dst",
+            &[
+                ("x-amz-copy-source", arn_source),
+                ("x-amz-source-expected-bucket-owner", "111111111111"),
+            ],
+        );
+        assert_eq!(
+            exchange_wire(&owner_svc, arn_copy).await.status(),
+            StatusCode::FORBIDDEN,
+            "CopyObject ARN source {arn_source} must fail closed"
+        );
+        assert_eq!(backend.copy_calls.load(Ordering::SeqCst), 0);
+
+        let arn_part = support::signed_with(
+            Method::PUT,
+            "/dest-bucket/dst?partNumber=1&uploadId=u1",
+            &[
+                ("x-amz-copy-source", arn_source),
+                ("x-amz-source-expected-bucket-owner", "111111111111"),
+            ],
+        );
+        assert_eq!(
+            exchange_wire(&owner_svc, arn_part).await.status(),
+            StatusCode::FORBIDDEN,
+            "UploadPartCopy ARN source {arn_source} must fail closed"
+        );
+        assert_eq!(backend.part_copy_calls.load(Ordering::SeqCst), 0);
+    }
+
     // Positive controls: matching source owner succeeds.
     let ok_copy = support::signed_with(
         Method::PUT,
