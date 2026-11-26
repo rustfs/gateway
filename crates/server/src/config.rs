@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::Semaphore;
 
+use crate::proxy_protocol::ProxyPolicy;
+
 /// Hyper's measured macro-load budget per open connection.
 const ESTIMATED_BYTES_PER_CONNECTION: usize = 408 * 1024;
 /// Hyper's minimum accepted HTTP/1 parser buffer ceiling.
@@ -87,6 +89,12 @@ pub struct ServerConfig {
     /// A client is one IPv4 address or one IPv6 `/64` (an IPv4-mapped peer counts as its IPv4 address).
     /// The bounded default is 256; setting `None` explicitly disables this protection.
     pub max_connections_per_ip: Option<usize>,
+    /// How per-IP admission handles reverse proxies and load balancers.
+    ///
+    /// Defaults to [`ProxyPolicy::Direct`], keying strictly on the raw socket peer address. Use
+    /// [`ProxyPolicy::ProxyProtocol`] to parse HAProxy PROXY v1/v2 headers from trusted proxies,
+    /// or [`ProxyPolicy::ExemptTrustedProxies`] to exempt trusted proxies from the per-IP ceiling.
+    pub proxy_policy: ProxyPolicy,
     /// Time from accept to complete headers. Increasing admits slower headers; decreasing rejects slowloris peers sooner.
     pub header_read_timeout: Duration,
     /// Maximum gap between successful response writes. Increasing tolerates stalls; decreasing releases stuck writers sooner.
@@ -103,7 +111,10 @@ pub struct ServerConfig {
     /// this is a duration rather than a byte budget. A driver that drains a refused request's
     /// remaining body to keep its connection open spends at most this long on that drain too.
     pub lingering_close_time: Duration,
-    /// Optional total connection lifetime. Increasing permits longer sessions; decreasing bounds leaked connections sooner. Zero is invalid.
+    /// Optional total connection lifetime. When expired, the listener initiates graceful shutdown
+    /// (`Connection: close` on HTTP/1.1, `GOAWAY` on HTTP/2) so in-flight requests can finish before
+    /// a hard fallback bound (`write_progress_timeout + lingering_close_time`) reclaims hung peers.
+    /// Increasing permits longer sessions; decreasing bounds leaked connections sooner. Zero is invalid.
     pub connection_lifetime: Option<Duration>,
     /// HTTP/1 parser buffer ceiling. Increasing admits larger heads; decreasing caps connection memory more tightly. The minimum is 8192.
     pub h1_max_buf_size: usize,
@@ -132,8 +143,17 @@ pub struct ServerConfig {
     pub h2_keep_alive_interval: Option<Duration>,
     /// HTTP/2 ping acknowledgement timeout. Increasing tolerates jitter; decreasing releases dead peers sooner.
     pub h2_keep_alive_timeout: Duration,
-    /// HTTP/2 header-list byte ceiling. Increasing admits larger metadata; decreasing caps decoder memory.
+    /// HTTP/2 header-list byte ceiling. Increasing admits larger metadata; decreasing caps decoder memory. Zero is invalid.
     pub h2_max_header_list_size: u32,
+    /// HTTP/2 maximum pending peer-reset streams allowed before sending `GOAWAY` (Rapid Reset DoS bound).
+    /// Zero is invalid; `None` defers to Hyper/`h2`'s built-in default.
+    pub h2_max_pending_accept_reset_streams: Option<usize>,
+    /// HTTP/2 maximum local-error reset streams allowed before sending `GOAWAY` (`ENHANCE_YOUR_CALM`).
+    /// Zero is invalid; `None` disables the cap (not recommended for untrusted peers).
+    pub h2_max_local_error_reset_streams: Option<usize>,
+    /// HTTP/2 per-stream write buffer ceiling in bytes. Increasing raises burst buffering and memory;
+    /// decreasing bounds per-stream send memory. Zero is invalid.
+    pub h2_max_send_buf_size: u32,
 }
 
 /// # Security
@@ -155,6 +175,7 @@ impl Default for ServerConfig {
             max_connections: 10_000,
             max_global_inflight_requests: 10_000,
             max_connections_per_ip: Some(256),
+            proxy_policy: ProxyPolicy::Direct,
             header_read_timeout: Duration::from_secs(10),
             write_progress_timeout: Duration::from_secs(30),
             keep_alive_idle: Duration::from_secs(65),
@@ -172,6 +193,9 @@ impl Default for ServerConfig {
             h2_keep_alive_interval: Some(Duration::from_secs(30)),
             h2_keep_alive_timeout: Duration::from_secs(20),
             h2_max_header_list_size: 64 * 1024,
+            h2_max_pending_accept_reset_streams: Some(20),
+            h2_max_local_error_reset_streams: Some(1024),
+            h2_max_send_buf_size: 400 * 1024,
         }
     }
 }
@@ -209,8 +233,29 @@ impl ServerConfig {
         if self.max_connections_per_ip == Some(0) {
             return Err(ConfigError::Zero("max_connections_per_ip"));
         }
+        match &self.proxy_policy {
+            ProxyPolicy::Direct => {}
+            ProxyPolicy::ProxyProtocol { trusted_proxies } | ProxyPolicy::ExemptTrustedProxies { trusted_proxies }
+                if trusted_proxies.is_empty() =>
+            {
+                return Err(ConfigError::EmptyTrustedProxies);
+            }
+            ProxyPolicy::ProxyProtocol { .. } | ProxyPolicy::ExemptTrustedProxies { .. } => {}
+        }
         if self.h2_max_concurrent_streams == 0 {
             return Err(ConfigError::Zero("h2_max_concurrent_streams"));
+        }
+        if self.h2_max_header_list_size == 0 {
+            return Err(ConfigError::Zero("h2_max_header_list_size"));
+        }
+        if self.h2_max_pending_accept_reset_streams == Some(0) {
+            return Err(ConfigError::Zero("h2_max_pending_accept_reset_streams"));
+        }
+        if self.h2_max_local_error_reset_streams == Some(0) {
+            return Err(ConfigError::Zero("h2_max_local_error_reset_streams"));
+        }
+        if self.h2_max_send_buf_size == 0 {
+            return Err(ConfigError::Zero("h2_max_send_buf_size"));
         }
         for (name, duration) in [
             ("header_read_timeout", self.header_read_timeout),
@@ -302,6 +347,17 @@ pub enum ConfigError {
     /// HTTP/2 permits frame sizes only in its defined range.
     #[error("HTTP/2 max frame size {0} is outside 16384..=16777215")]
     Http2FrameSize(u32),
+    /// A proxy policy was enabled without naming any trusted proxy CIDR.
+    #[error("proxy policy requires at least one trusted proxy CIDR")]
+    EmptyTrustedProxies,
+    /// A CIDR prefix length exceeded its address family width.
+    #[error("CIDR prefix /{prefix} exceeds maximum /{max}")]
+    InvalidCidrPrefix {
+        /// Supplied prefix length.
+        prefix: u8,
+        /// Maximum prefix length for the address family (32 for IPv4, 128 for IPv6).
+        max: u8,
+    },
 }
 
 #[cfg(test)]

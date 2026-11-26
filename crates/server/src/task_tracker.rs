@@ -49,7 +49,7 @@ struct TrackerState {
     next_id: u64,
     active: usize,
     aborted: bool,
-    handles: HashMap<u64, AbortHandle>,
+    handles: HashMap<u64, Option<AbortHandle>>,
 }
 
 impl std::fmt::Debug for TaskTracker {
@@ -81,21 +81,41 @@ impl TaskTracker {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let mut state = lock_recover(&self.inner.state);
-        if state.aborted {
-            drop(state);
-            drop(future);
-            return;
-        }
-        let id = state.next_id;
-        state.next_id = state.next_id.wrapping_add(1);
-        state.active = state.active.saturating_add(1);
+        let id = {
+            let mut state = lock_recover(&self.inner.state);
+            if state.aborted {
+                drop(state);
+                drop(future);
+                return;
+            }
+            let id = state.next_id;
+            state.next_id = state.next_id.wrapping_add(1);
+            state.active = state.active.saturating_add(1);
+            state.handles.insert(id, None);
+            id
+        };
         let guard = TaskGuard {
             inner: Arc::clone(&self.inner),
             id,
         };
+        // Spawn without holding `self.inner.state`: when `runtime` is shutting down, Tokio drops
+        // the future synchronously inside `spawn`, running `TaskGuard::drop` on this thread.
         let handle = runtime.spawn(TrackedFuture { future, _guard: guard });
-        state.handles.insert(id, handle.abort_handle());
+        let abort_now = {
+            let mut state = lock_recover(&self.inner.state);
+            if state.aborted {
+                state.handles.remove(&id);
+                true
+            } else {
+                if let Some(slot) = state.handles.get_mut(&id) {
+                    *slot = Some(handle.abort_handle());
+                }
+                false
+            }
+        };
+        if abort_now {
+            handle.abort();
+        }
     }
 
     /// Waits until every tracked task has finished and dropped its future.
@@ -116,7 +136,7 @@ impl TaskTracker {
         let handles: Vec<AbortHandle> = {
             let mut state = lock_recover(&self.inner.state);
             state.aborted = true;
-            state.handles.drain().map(|(_, handle)| handle).collect()
+            state.handles.drain().filter_map(|(_, handle)| handle).collect()
         };
         for handle in handles {
             handle.abort();
@@ -321,6 +341,31 @@ mod tests {
         });
         tokio::task::yield_now().await;
         assert!(!late_ran.load(Ordering::SeqCst), "late spawn after abort_all must not run");
+        assert_eq!(tracker.active_and_retained(), (0, 0));
+    }
+
+    /// Negative — spawning onto a shutting-down or closed Tokio runtime synchronously drops the
+    /// tracked future inside `Handle::spawn`; `spawn_on` must not deadlock on its own mutex or
+    /// leak active/handle state.
+    #[test]
+    fn n_spawn_on_closed_runtime_does_not_deadlock_or_leak() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime builds");
+        let handle = runtime.handle().clone();
+        drop(runtime);
+
+        let tracker = TaskTracker::default();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_tracker = tracker.clone();
+        std::thread::spawn(move || {
+            worker_tracker.spawn_on(&handle, async {});
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("spawn_on on closed runtime must return immediately without deadlocking");
         assert_eq!(tracker.active_and_retained(), (0, 0));
     }
 }

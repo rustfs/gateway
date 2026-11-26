@@ -2041,6 +2041,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]

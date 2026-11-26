@@ -125,9 +125,12 @@ pub(crate) struct ProgressIo<I> {
     request_seen: Arc<AtomicBool>,
     idle_timeout: Duration,
     write_timeout: Duration,
+    header_timeout: Duration,
     idle_sleep: Pin<Box<Sleep>>,
     write_sleep: Pin<Box<Sleep>>,
+    h2_header_sleep: Pin<Box<Sleep>>,
     write_waiting: bool,
+    h2_header_waiting: bool,
     #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     send_file_retry_ready: bool,
     first_request_observed: bool,
@@ -181,9 +184,12 @@ impl<I> ProgressIo<I> {
             request_seen,
             idle_timeout,
             write_timeout,
+            header_timeout: FARTHEST_DEADLINE,
             idle_sleep: Box::pin(tokio::time::sleep_until(header_deadline)),
             write_sleep: Box::pin(sleep(write_timeout)),
+            h2_header_sleep: Box::pin(tokio::time::sleep_until(header_deadline)),
             write_waiting: false,
+            h2_header_waiting: false,
             #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
             send_file_retry_ready: false,
             first_request_observed: false,
@@ -218,6 +224,13 @@ impl<I> ProgressIo<I> {
     /// Reports this transport's completed flushes and half-close as write receipts.
     pub(crate) fn confirm_writes_into(mut self, receipts: Arc<crate::write_receipt::WriteReceipts>) -> Self {
         self.receipts = Some(receipts);
+        self
+    }
+
+    /// Bounds how long an HTTP/2 connection may remain inside an incomplete `HEADERS`/`CONTINUATION`
+    /// block after the first request has already retired the initial accept-to-header deadline.
+    pub(crate) fn h2_header_read_timeout(mut self, timeout: Duration) -> Self {
+        self.header_timeout = timeout;
         self
     }
 
@@ -291,6 +304,29 @@ impl<I> ProgressIo<I> {
         }
         if self.idle_sleep.as_mut().poll(context).is_ready() {
             Err(io::Error::new(io::ErrorKind::TimedOut, "connection idle timeout"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn update_h2_header_timer(&mut self) {
+        if !self.first_request_observed {
+            return;
+        }
+        if self.preface.reading_h2_headers() {
+            if !self.h2_header_waiting {
+                self.h2_header_sleep.as_mut().reset(deadline_after(self.header_timeout));
+                self.h2_header_waiting = true;
+            }
+        } else {
+            self.h2_header_waiting = false;
+        }
+    }
+
+    fn check_h2_header_timeout(&mut self, context: &mut Context<'_>) -> io::Result<()> {
+        self.update_h2_header_timer();
+        if self.h2_header_waiting && self.h2_header_sleep.as_mut().poll(context).is_ready() {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "HTTP/2 stream header read timeout"))
         } else {
             Ok(())
         }
@@ -449,12 +485,16 @@ impl<I: AsyncRead + Unpin> AsyncRead for ProgressIo<I> {
         if let Err(error) = this.check_idle(context) {
             return Poll::Ready(Err(error));
         }
+        if let Err(error) = this.check_h2_header_timeout(context) {
+            return Poll::Ready(Err(error));
+        }
         let before = buffer.filled().len();
         let result = ready!(Pin::new(&mut this.inner).poll_read(context, buffer));
         if result.is_ok() && buffer.filled().len() > before {
             this.transport_read
                 .fetch_add((buffer.filled().len() - before) as u64, Ordering::Relaxed);
             this.preface.observe(buffer.filled().get(before..).unwrap_or_default());
+            this.update_h2_header_timer();
             if this.first_request_observed {
                 this.traffic_seen();
             }
@@ -556,227 +596,8 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    use tokio::io::AsyncWriteExt;
-
-    struct DelayedReader {
-        ready: Pin<Box<Sleep>>,
-        body: Option<&'static [u8]>,
-    }
-
-    impl DelayedReader {
-        fn new(delay: Duration, body: &'static [u8]) -> Self {
-            Self {
-                ready: Box::pin(sleep(delay)),
-                body: Some(body),
-            }
-        }
-    }
-
-    impl AsyncRead for DelayedReader {
-        fn poll_read(mut self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-            if self.ready.as_mut().poll(context).is_pending() {
-                return Poll::Pending;
-            }
-            if let Some(body) = self.body.take() {
-                buffer.put_slice(body);
-            }
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl AsyncWrite for DelayedReader {
-        fn poll_write(self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
-            Poll::Ready(Ok(bytes.len()))
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    fn delayed_lingering_io(
-        delay: Duration,
-        body: &'static [u8],
-        body_unfinished: bool,
-        drained: Arc<AtomicU64>,
-    ) -> ProgressIo<DelayedReader> {
-        ProgressIo::new(
-            DelayedReader::new(delay, body),
-            Arc::new(AtomicUsize::new(0)),
-            Arc::new(AtomicBool::new(true)),
-            deadline_after(Duration::from_secs(60)),
-            Duration::from_secs(60),
-            Duration::from_secs(60),
-            Duration::from_secs(2),
-        )
-        .request_body_unfinished(Arc::new(AtomicBool::new(body_unfinished)))
-        .count_octets_into(Arc::new(AtomicU64::new(0)), drained)
-    }
-
-    /// Positive — an early refusal waits for a body already known to be unfinished even when the
-    /// first transport read loses the arrival race.
-    #[tokio::test(start_paused = true)]
-    async fn a_known_unfinished_body_that_arrives_after_shutdown_starts_is_drained() {
-        let drained = Arc::new(AtomicU64::new(0));
-        let mut io = delayed_lingering_io(LINGER_QUIET / 2, b"late body", true, Arc::clone(&drained));
-        let shutdown = tokio::spawn(async move { io.shutdown().await });
-        tokio::task::yield_now().await;
-        assert!(!shutdown.is_finished(), "the initial Pending abandoned a body known to be unfinished");
-        tokio::time::advance(LINGER_QUIET / 2).await;
-        shutdown.await.expect("shutdown task joins").expect("shutdown succeeds");
-        assert_eq!(drained.load(Ordering::Relaxed), 9);
-    }
-
-    /// Negative — an ordinary close with no unfinished-body proof still retires immediately.
-    #[tokio::test(start_paused = true)]
-    async fn an_initially_pending_transport_without_body_proof_does_not_linger() {
-        let started = Instant::now();
-        let mut io = delayed_lingering_io(Duration::from_secs(60), b"not owed", false, Arc::new(AtomicU64::new(0)));
-        io.shutdown().await.expect("a bodyless close retires immediately");
-        assert_eq!(started.elapsed(), Duration::ZERO, "the bodyless close spent a linger interval");
-    }
-
-    /// Negative — an unfinished peer that sends nothing gets only the existing quiet grace, not
-    /// the whole outer linger budget.
-    #[tokio::test(start_paused = true)]
-    async fn a_known_unfinished_body_that_stays_silent_is_bounded_by_the_quiet_grace() {
-        let started = Instant::now();
-        let mut io = delayed_lingering_io(Duration::from_secs(60), b"never arrives", true, Arc::new(AtomicU64::new(0)));
-        let shutdown = tokio::spawn(async move { io.shutdown().await });
-        tokio::task::yield_now().await;
-        assert!(!shutdown.is_finished(), "the unfinished body was abandoned without its quiet grace");
-        tokio::time::advance(LINGER_QUIET + Duration::from_millis(1)).await;
-        shutdown.await.expect("shutdown task joins").expect("shutdown succeeds");
-        assert_eq!(
-            started.elapsed(),
-            LINGER_QUIET + Duration::from_millis(1),
-            "the silent body was charged more than the existing quiet grace"
-        );
-    }
-
-    struct StalledWriter;
-
-    /// Neither writer below has a peer, so "the peer sent nothing and never will" is the honest
-    /// read side for both: end of stream. It also keeps the drain out of the way of the cases
-    /// below, which are about the write-progress deadline.
-    impl AsyncRead for StalledWriter {
-        fn poll_read(self: Pin<&mut Self>, _context: &mut Context<'_>, _buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl AsyncRead for PacedWriter {
-        fn poll_read(self: Pin<&mut Self>, _context: &mut Context<'_>, _buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl AsyncWrite for StalledWriter {
-        fn poll_write(self: Pin<&mut Self>, _context: &mut Context<'_>, _bytes: &[u8]) -> Poll<io::Result<usize>> {
-            Poll::Pending
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Pending
-        }
-
-        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    struct PacedWriter {
-        delay: Duration,
-        max_write: usize,
-        written: Arc<AtomicUsize>,
-        sleep: Pin<Box<Sleep>>,
-    }
-
-    impl PacedWriter {
-        fn new(delay: Duration, max_write: usize, written: Arc<AtomicUsize>) -> Self {
-            Self {
-                delay,
-                max_write,
-                written,
-                sleep: Box::pin(sleep(delay)),
-            }
-        }
-    }
-
-    impl AsyncWrite for PacedWriter {
-        fn poll_write(mut self: Pin<&mut Self>, context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
-            if self.sleep.as_mut().poll(context).is_pending() {
-                return Poll::Pending;
-            }
-            let written = bytes.len().min(self.max_write);
-            self.written.fetch_add(written, Ordering::Relaxed);
-            let delay = self.delay;
-            self.sleep.as_mut().reset(Instant::now() + delay);
-            Poll::Ready(Ok(written))
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_stalled_transport_fails_after_one_write_progress_gap() {
-        let in_flight = Arc::new(AtomicUsize::new(1));
-        let mut io = ProgressIo::new(
-            StalledWriter,
-            in_flight,
-            Arc::new(AtomicBool::new(true)),
-            deadline_after(Duration::from_secs(60)),
-            Duration::from_secs(60),
-            Duration::from_millis(10),
-            Duration::from_secs(2),
-        );
-        let write = tokio::spawn(async move { io.write_all(b"x").await });
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_millis(11)).await;
-        tokio::task::yield_now().await;
-        assert!(write.is_finished(), "the progress deadline must wake the pending writer");
-        let error = write
-            .await
-            .expect("write task joins")
-            .expect_err("a stalled write must time out");
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_srv_0012_one_hundred_mib_of_continuous_progress_outlives_the_interval() {
-        const BODY_LEN: usize = 100 * 1024 * 1024;
-        let in_flight = Arc::new(AtomicUsize::new(1));
-        let written = Arc::new(AtomicUsize::new(0));
-        let mut io = ProgressIo::new(
-            PacedWriter::new(Duration::from_millis(9), 1024 * 1024, Arc::clone(&written)),
-            in_flight,
-            Arc::new(AtomicBool::new(true)),
-            deadline_after(Duration::from_secs(60)),
-            Duration::from_secs(60),
-            Duration::from_millis(10),
-            Duration::from_secs(2),
-        );
-        let started = Instant::now();
-        io.write_all(&vec![b'x'; BODY_LEN])
-            .await
-            .expect("every sub-interval write makes progress");
-        assert_eq!(written.load(Ordering::Relaxed), BODY_LEN);
-        assert!(started.elapsed() >= Duration::from_millis(900));
-    }
-}
+#[path = "io_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only in-memory transport setup must terminate on fixture failure.

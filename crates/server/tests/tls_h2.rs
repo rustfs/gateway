@@ -665,3 +665,7 @@ pub(crate) mod idle;
 mod prior_knowledge;
 #[path = "tls_h2/send_deadline.rs"]
 mod send_deadline;
+#[path = "tls_h2/stream_header_timeout.rs"]
+mod stream_header_timeout;
+#[path = "tls_h2/tls_policy.rs"]
+mod tls_policy;

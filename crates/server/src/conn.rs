@@ -335,52 +335,118 @@ where
             drop(permit);
             continue;
         };
-        let Some(ip_lease) = ip_counts.try_acquire(peer.ip()) else {
-            metrics.inner.per_ip_rejected.fetch_add(1, Ordering::Relaxed);
-            drop(stream);
-            drop(permit);
-            continue;
+        let (ip_lease, proxy_protocol_pending) = if config.proxy_policy.is_exempt_from_per_ip(peer.ip()) {
+            (None, false)
+        } else if config.proxy_policy.is_trusted_proxy_protocol_peer(peer.ip()) {
+            (None, true)
+        } else {
+            let Some(lease) = ip_counts.try_acquire(peer.ip()) else {
+                metrics.inner.per_ip_rejected.fetch_add(1, Ordering::Relaxed);
+                drop(stream);
+                drop(permit);
+                continue;
+            };
+            (Some(lease), false)
         };
         metrics.inner.active.fetch_add(1, Ordering::Relaxed);
         let active = ConnectionLifecycle::new(ActiveConnection {
             metrics: Arc::clone(&metrics.inner),
             _permit: permit,
-            _ip: ip_lease,
+            ip: std::sync::Mutex::new(ip_lease),
         });
         let connection_config = config.clone();
         let connection_in_flight = Arc::new(AtomicUsize::new(0));
         let request_seen = Arc::new(AtomicBool::new(false));
         let request_body_unfinished = Arc::new(AtomicBool::new(false));
-        let connection = driver.clone().drive(AcceptedConnection::new(
-            ConnectionState {
-                stream,
-                peer_addr: peer,
-                tcp_nodelay,
-                config: connection_config.clone(),
-                tls: tls.clone(),
-                shutdown: shutdown_sender.subscribe(),
-                request_stats: Arc::clone(&request_stats),
-                request_capacity: Arc::clone(&request_capacity),
-                connection_in_flight,
-                request_seen,
-                request_body_unfinished,
-                header_deadline,
-                metrics: Arc::clone(&metrics.inner),
-                lifecycle: active.clone(),
-                file_transfer_executor: file_transfer_executor.clone(),
-                background_tasks: background_tasks.clone(),
-                #[cfg(test)]
-                deadline_observer: deadline_observer
-                    .as_ref()
-                    .filter(|observer| observer.target_accepted() == accepted_ordinal)
-                    .cloned(),
-            },
-            service.clone(),
-        ));
+        let connection_driver = driver.clone();
+        let connection_service = service.clone();
+        let connection_tls = tls.clone();
+        let mut global_shutdown = shutdown_sender.subscribe();
+        let connection_request_stats = Arc::clone(&request_stats);
+        let connection_request_capacity = Arc::clone(&request_capacity);
+        let connection_metrics = Arc::clone(&metrics.inner);
+        let connection_ip_counts = Arc::clone(&ip_counts);
+        let connection_file_executor = file_transfer_executor.clone();
+        let connection_background_tasks = background_tasks.clone();
+        #[cfg(test)]
+        let connection_deadline_observer = deadline_observer
+            .as_ref()
+            .filter(|observer| observer.target_accepted() == accepted_ordinal)
+            .cloned();
         connections.spawn(async move {
-            let _active = active;
-            if let Some(lifetime) = connection_config.connection_lifetime {
-                let _ = tokio::time::timeout(lifetime, connection).await;
+            let _active = active.clone();
+            let mut stream = stream;
+            let mut peer_addr = peer;
+            if proxy_protocol_pending {
+                if *global_shutdown.borrow() {
+                    return;
+                }
+                let proxy_deadline = connection_config
+                    .connection_lifetime
+                    .map_or(header_deadline, |lifetime| header_deadline.min(deadline_after(lifetime)));
+                let attested = tokio::select! {
+                    result = tokio::time::timeout_at(
+                        proxy_deadline,
+                        crate::proxy_protocol::read_proxy_header(&mut stream, peer_addr),
+                    ) => match result {
+                        Ok(Ok(attested)) => attested,
+                        Ok(Err(error)) => {
+                            tracing::debug!(error = %error, "PROXY protocol header rejected");
+                            return;
+                        }
+                        Err(_) => {
+                            tracing::debug!("PROXY protocol header exceeded the accept-to-header deadline");
+                            return;
+                        }
+                    },
+                    changed = global_shutdown.changed() => {
+                        let _ = changed;
+                        return;
+                    }
+                };
+                let Some(lease) = connection_ip_counts.try_acquire(attested.ip()) else {
+                    connection_metrics.per_ip_rejected.fetch_add(1, Ordering::Relaxed);
+                    return;
+                };
+                active.attach_ip(lease);
+                peer_addr = attested;
+            }
+            let (lifetime_shutdown_tx, conn_shutdown_rx) = if connection_config.connection_lifetime.is_some() {
+                let (tx, rx) = watch::channel(*global_shutdown.borrow());
+                (Some(tx), rx)
+            } else {
+                (None, global_shutdown.clone())
+            };
+            let connection = connection_driver.drive(AcceptedConnection::new(
+                ConnectionState {
+                    stream,
+                    peer_addr,
+                    tcp_nodelay,
+                    config: connection_config.clone(),
+                    tls: connection_tls,
+                    shutdown: conn_shutdown_rx,
+                    request_stats: connection_request_stats,
+                    request_capacity: connection_request_capacity,
+                    connection_in_flight,
+                    request_seen,
+                    request_body_unfinished,
+                    header_deadline,
+                    metrics: connection_metrics,
+                    lifecycle: active,
+                    file_transfer_executor: connection_file_executor,
+                    background_tasks: connection_background_tasks,
+                    #[cfg(test)]
+                    deadline_observer: connection_deadline_observer,
+                },
+                connection_service,
+            ));
+            if let (Some(lifetime), Some(lifetime_shutdown_tx)) = (connection_config.connection_lifetime, lifetime_shutdown_tx) {
+                let hard_drain_bound = bounded(
+                    connection_config
+                        .write_progress_timeout
+                        .saturating_add(connection_config.lingering_close_time),
+                );
+                drive_with_lifetime(connection, lifetime, hard_drain_bound, lifetime_shutdown_tx, global_shutdown).await;
             } else {
                 connection.await;
             }
@@ -471,6 +537,30 @@ async fn finish_shutdown(
 async fn abort_connections(connections: &mut JoinSet<()>) {
     connections.abort_all();
     drain_connections(connections).await;
+}
+
+async fn drive_with_lifetime(
+    connection: crate::driver::ConnectionFuture,
+    lifetime: std::time::Duration,
+    hard_drain_bound: std::time::Duration,
+    conn_shutdown_tx: watch::Sender<bool>,
+    mut global_shutdown: watch::Receiver<bool>,
+) {
+    tokio::pin!(connection);
+    let lifetime_sleep = tokio::time::sleep_until(deadline_after(lifetime));
+    tokio::pin!(lifetime_sleep);
+    tokio::select! {
+        () = &mut connection => {}
+        changed = global_shutdown.changed() => {
+            let _ = changed;
+            let _ = conn_shutdown_tx.send(true);
+            connection.await;
+        }
+        () = &mut lifetime_sleep => {
+            let _ = conn_shutdown_tx.send(true);
+            let _ = tokio::time::timeout(hard_drain_bound, connection).await;
+        }
+    }
 }
 
 async fn drain_connections(connections: &mut JoinSet<()>) {
@@ -568,6 +658,7 @@ where
         config.write_progress_timeout,
         config.lingering_close_time,
     )
+    .h2_header_read_timeout(config.header_read_timeout)
     .request_body_unfinished(Arc::clone(&request_body_unfinished))
     .count_octets_into(Arc::clone(&metrics.transport_read), Arc::clone(&metrics.lingering_drained));
     let receipts = crate::write_receipt::WriteReceipts::new(Arc::clone(&request_stats));
@@ -631,7 +722,10 @@ where
         .max_frame_size(config.h2_max_frame_size)
         .keep_alive_interval(config.h2_keep_alive_interval.map(bounded))
         .keep_alive_timeout(bounded(config.h2_keep_alive_timeout))
-        .max_header_list_size(config.h2_max_header_list_size);
+        .max_header_list_size(config.h2_max_header_list_size)
+        .max_pending_accept_reset_streams(config.h2_max_pending_accept_reset_streams)
+        .max_local_error_reset_streams(config.h2_max_local_error_reset_streams)
+        .max_send_buf_size(usize::try_from(config.h2_max_send_buf_size).unwrap_or(usize::MAX));
 
     let connection = builder.serve_connection(io, service);
     tokio::pin!(connection);
@@ -655,19 +749,24 @@ fn log_connection_result(result: Result<(), BoxError>, receipts: &crate::write_r
 struct ActiveConnection {
     metrics: Arc<MetricsInner>,
     _permit: OwnedSemaphorePermit,
-    _ip: IpLease,
+    ip: std::sync::Mutex<Option<IpLease>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ConnectionLifecycle {
-    _active: Arc<ActiveConnection>,
+    active: Arc<ActiveConnection>,
 }
 
 impl ConnectionLifecycle {
     fn new(active: ActiveConnection) -> Self {
         Self {
-            _active: Arc::new(active),
+            active: Arc::new(active),
         }
+    }
+
+    fn attach_ip(&self, lease: IpLease) {
+        let mut slot = self.active.ip.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(lease);
     }
 }
 

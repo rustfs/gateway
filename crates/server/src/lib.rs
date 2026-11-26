@@ -37,6 +37,7 @@ mod io;
 pub mod layers;
 mod listener;
 mod preface;
+mod proxy_protocol;
 mod request_capacity;
 mod send_deadline;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
@@ -60,6 +61,7 @@ pub use driver::{
     PlaintextConnection, PlaintextTakeoverError, TransportKind,
 };
 pub use listener::{Listener, ListenerOptions};
+pub use proxy_protocol::{IpCidr, ProxyPolicy};
 pub use request_capacity::RequestCancellation;
 pub use shutdown::{RunningServer, ServerMetrics, ShutdownReport, ShutdownTrigger};
-pub use tls::{DEFAULT_ALPN_PROTOCOLS, TlsHandle, TlsMaterial, TlsReloadError};
+pub use tls::{DEFAULT_ALPN_PROTOCOLS, TlsHandle, TlsMaterial, TlsMinVersion, TlsReloadError};

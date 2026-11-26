@@ -8,8 +8,10 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/config.rs` | Serializable tuning, defaults and validation | A knob is missing or accepts an unsafe value |
 | `src/listener.rs` | socket2 bind, tuning and read-back | Bind family or socket option is wrong |
 | `src/tls.rs` | Atomic TLS config, advertised ALPN protocols, fail-closed reload, and the protocol a connection may speak (ALPN or prior knowledge) | New handshakes see the wrong certificate or protocol, or h2c is served when it should not be |
-| `src/io.rs` | Write-progress and connection-idle timers (request activity only, on HTTP/2), and the lingering read on close | A slow reader is killed or never released, an idle connection never closes, or a peer sees `ECONNRESET` where a close was due |
-| `src/preface.rs` | Tells an HTTP/2 connection from an HTTP/1.1 one by its first octets | Idle HTTP/2 traffic is treated as request activity, or the reverse |
+| `src/io.rs` | Write-progress, connection-idle and HTTP/2 per-stream header timers, and the lingering read on close | A slow reader is killed or never released, an idle connection never closes, or a peer sees `ECONNRESET` where a close was due |
+| `src/io_tests.rs` | Deterministic unit controls for lingering-close, write-progress and HTTP/2 header deadlines | ProgressIo timer behavior regresses |
+| `src/preface.rs` | Tells an HTTP/2 connection from an HTTP/1.1 one by its first octets and tracks HTTP/2 header block boundaries | Idle HTTP/2 traffic is treated as request activity, or an incomplete HTTP/2 header block misses its timeout |
+| `src/proxy_protocol.rs` | Trusted proxy CIDR allowlists (`IpCidr`, `ProxyPolicy`) and zero-over-read HAProxy PROXY v1/v2 parsing | Reverse-proxy admission or PROXY protocol parsing rejects valid proxies or trusts spoofed headers |
 | `src/io_deadline_tests.rs` | Every configured `ProgressIo` timer rearmed at `Duration::MAX` | A configured timeout panics a connection instead of meaning never |
 | `src/io_sendfile_tests.rs` | Real-socket controls for sendfile writable-readiness handoff | Sendfile retries spin, stall, or lose a writable transition |
 | `src/conn.rs` | Admission, connection lifecycle and joining finished connection tasks | Accept limits or shutdown sequencing fails, or the listener retains finished connections |
@@ -22,7 +24,8 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/send_deadline.rs` | Runs each HTTP/2 stream under the send-progress deadline that releases a permit its peer starves of capacity | A zero-window HTTP/2 peer holds request permits, or a slow producer is reset |
 | `src/request_capacity.rs` | Global request permits, accept-loop capacity notification and request cancellation | H1/H2 exceed the shared request ceiling, listener acceptance fails to pause or peer loss does not reach service cleanup |
 | `src/sendfile.rs` | Safe Linux/Apple file-to-socket syscall signature normalization | A self-held driver reports wrong sendfile progress or platform errors |
-| `src/sendfile_task.rs` | Bounded blocking handoff for file-transfer syscalls | A cold file stalls Tokio workers or blocking file work grows without a ceiling |
+| `src/sendfile_task.rs` | Bounded reusable worker pool for blocking file-transfer syscalls | A cold file stalls Tokio workers, OS threads grow unboundedly, or blocking file work exceeds its ceiling |
+| `src/sendfile_task_tests.rs` | Unit controls for blocking file-transfer pool reuse, panic survival and concurrency bounds | Worker pool thread reuse or concurrency ceilings regress |
 | `src/shutdown.rs` | Trigger, report and metrics | Drain or abort counts are wrong |
 | `src/task_tracker.rs` | Listener-scoped tracker for detached peer-loss cleanup and HTTP/2 stream tasks | Detached cleanup or HTTP/2 streams escape shutdown drain or leak handles |
 | `src/write_receipt.rs` | Counts a response drained only after the transport confirms its bytes were written (flush, half-close or clean connection end) | Shutdown reports drained for a response the peer never received |
@@ -39,6 +42,8 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/server_runtime/shutdown_tracking.rs` | Shutdown drain and grace-abort controls for detached peer-loss cleanup and HTTP/2 stream tasks | Detached cleanup or HTTP/2 streams escape shutdown |
 | `tests/server_runtime/client_ceiling.rs` | IPv4 and IPv6 loopback clients on one dual-stack listener at a ceiling of one | Dual-stack peers are keyed into the wrong client |
 | `tests/server_runtime/connection_driver.rs` | Live custom-driver ownership, managed-service and shutdown controls | `serve_with` releases admission or bypasses request lifecycle |
+| `tests/server_runtime/connection_lifetime.rs` | Graceful close and hard fallback on `connection_lifetime` expiry for HTTP/1.1 and HTTP/2 | Connection lifetime hard-drops in-flight requests or fails to reclaim hung connections |
+| `tests/server_runtime/proxy_admission.rs` | Live PROXY protocol v1/v2 and `ExemptTrustedProxies` per-IP admission controls | Untrusted peers spoof PROXY headers or proxies are capped by per-IP limits |
 | `tests/server_runtime/frozen_clock.rs` | Frozen fixture-clock polling with an independent watchdog | Slow-header setup races deadlines under host load |
 | `tests/server_runtime/global_admission.rs` | a-srv-0014 global-limit refusal and permit reuse, with a scheduling-stall control on a frozen fixture clock | The global connection limit accepts early, or a host stall expires the permit holder |
 | `tests/server_runtime/task_reaping.rs` | Connect/close loops read through `retained_connection_tasks` | The listener keeps finished connection tasks |
@@ -49,4 +54,6 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/tls_h2/alpn.rs` | ALPN negotiation and the protocol it selects | A TLS client cannot negotiate h2, or a negotiated protocol is not enforced |
 | `tests/tls_h2/prior_knowledge.rs` | A listener that refuses HTTP/2 by prior knowledge | h2c or no-ALPN HTTP/2 is served, or negotiated h2 is not |
 | `tests/tls_h2/send_deadline.rs` | Zero-window and partway-starved HTTP/2 peers against the permit ceiling, with producer-time controls | A starved stream keeps its permit, or producing time is charged |
+| `tests/tls_h2/stream_header_timeout.rs` | HTTP/2 per-stream header read timeout and Rapid Reset (`h2_max_local_error_reset_streams`) controls | Incomplete subsequent HTTP/2 HEADERS/CONTINUATION or rapid local resets evade bounds |
+| `tests/tls_h2/tls_policy.rs` | TLS 1.3-only policy, mTLS client verification, SNI resolver, OCSP stapling and custom `ServerConfig` reload | TLS policy knobs fail to reject disallowed protocol versions or unverified clients |
 | `tests/lingering_close.rs` | How a refused connection ends, on a real socket: closed, open or reset | A client reads `ECONNRESET` instead of the refusal, or a close costs a connection slot |
