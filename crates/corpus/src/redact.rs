@@ -54,12 +54,22 @@ pub const SENSITIVE_HEADERS: &[&str] = &[
     "x-storage-token",
 ];
 
-/// Query parameter names a presigned URL uses to carry credential material, and `token`, the
-/// bearer a RustFS zip-download URL carries in place of a signature (ADR-0042).
+/// Query parameter names a presigned URL uses to carry credential material (SigV4, SigV2, and
+/// SSE-C plaintext customer keys), and `token`, the bearer a RustFS zip-download URL carries in
+/// place of a signature (ADR-0042).
 ///
 /// Matched case-insensitively: SDKs disagree on the capitalisation, and a lowercase
 /// `x-amz-signature` is exactly as much of a signature as the canonical spelling.
-pub const SENSITIVE_QUERY_PARAMS: &[&str] = &["token", "x-amz-credential", "x-amz-security-token", "x-amz-signature"];
+pub const SENSITIVE_QUERY_PARAMS: &[&str] = &[
+    "awsaccesskeyid",
+    "signature",
+    "token",
+    "x-amz-copy-source-server-side-encryption-customer-key",
+    "x-amz-credential",
+    "x-amz-security-token",
+    "x-amz-server-side-encryption-customer-key",
+    "x-amz-signature",
+];
 
 /// Where in an entry a finding was located.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,21 +259,25 @@ const CREDENTIAL_KEYS: &[&str] = &[
 /// Deliberately tolerant about the separator: JSON (`"key": "v"`), TOML/env (`key=v`),
 /// XML (`<Key>v</Key>`) and query strings all reduce to "key token, punctuation, value".
 fn has_credential_assignment(text: &str) -> bool {
+    // `to_ascii_lowercase` maps ASCII `A..=Z` to `a..=z` 1:1 without changing byte offsets or
+    // UTF-8 boundaries, so we match keys case-insensitively while comparing the original-case
+    // value against `PLACEHOLDER`.
     let lowered = text.to_ascii_lowercase();
     for key in CREDENTIAL_KEYS {
         let mut from = 0;
         while let Some(offset) = lowered[from..].find(key) {
             let after = from + offset + key.len();
             from = after;
-            let tail = lowered[after..].trim_start_matches(['"', '\'', ' ', '\t', '>', '<', '/']);
+            let Some(tail) = text.get(after..) else {
+                continue;
+            };
+            let tail = tail.trim_start_matches(['"', '\'', ' ', '\t', '>', '<', '/']);
             let Some(value) = tail.strip_prefix([':', '=']) else {
                 continue;
             };
             let value = value.trim_start_matches(['"', '\'', ' ', '\t']);
-            let value: String = value
-                .chars()
-                .take_while(|c| !matches!(c, '"' | '\'' | '&' | '\n' | '<'))
-                .collect();
+            let value_end = value.find(['"', '\'', '&', '\n', '<']).unwrap_or(value.len());
+            let value = &value[..value_end];
             if !value.is_empty() && value != PLACEHOLDER {
                 return true;
             }
@@ -527,3 +541,7 @@ pub fn sanitize(entry: &mut Entry) -> Vec<String> {
     entry.redacted.dedup();
     touched
 }
+
+#[cfg(test)]
+#[path = "redact_tests.rs"]
+mod tests;

@@ -39,8 +39,10 @@ use crate::schema::{Chunk, Entry};
 pub const SENSITIVE_FORM_FIELDS: &[&str] = &[
     "awsaccesskeyid",
     "signature",
+    "x-amz-copy-source-server-side-encryption-customer-key",
     "x-amz-credential",
     "x-amz-security-token",
+    "x-amz-server-side-encryption-customer-key",
     "x-amz-signature",
 ];
 
@@ -659,6 +661,14 @@ mod tests {
             ("signature", "0RavWzkygo6QX9caELEqKi9kDbU="),
             ("x-amz-credential", "compatmatrixkey/20260928/us-east-1/s3/aws4_request"),
             ("X-Amz-Security-Token", "FwoGZXIvYXdzEJr//////////wEaDOfaketoken"),
+            (
+                "x-amz-server-side-encryption-customer-key",
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+            ),
+            (
+                "X-Amz-Copy-Source-Server-Side-Encryption-Customer-Key",
+                "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU=",
+            ),
             ("x-amz-signature", SIG),
         ] {
             let body = form_spelled("Content-Disposition: form-data; name={name}", &[(field, value)]);
@@ -725,6 +735,60 @@ mod tests {
             ])
         );
         redact::admit(&posted).expect("a sanitized form is admitted");
+    }
+
+    /// Negative — SSE-C plaintext customer keys in multipart form fields must be refused under
+    /// quoted and mixed-case spellings, and a claim over a live key must be refused.
+    #[test]
+    fn n_live_sse_c_form_fields_are_refused() {
+        let key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+        for (field, canonical) in [
+            (
+                "X-Amz-Server-Side-Encryption-Customer-Key",
+                "form:x-amz-server-side-encryption-customer-key",
+            ),
+            (
+                "x-amz-copy-source-server-side-encryption-customer-key",
+                "form:x-amz-copy-source-server-side-encryption-customer-key",
+            ),
+        ] {
+            let body = form(&[("key", "uploads/a.txt"), (field, key)]);
+            assert!(has_live_form_credential(&body), "{field}");
+            let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+            assert!(redact::admit(&posted).is_err(), "{field}");
+            posted.redacted = vec![canonical.to_owned()];
+            assert!(!claim_holds(&posted, canonical), "{field}");
+            assert!(redact::admit(&posted).is_err(), "{field}");
+        }
+    }
+
+    /// Positive — sanitizing rewrites SSE-C form keys while preserving non-secret SSE-C metadata
+    /// fields, and the resulting entry passes `admit`.
+    #[test]
+    fn sanitize_rewrites_sse_c_form_fields_and_admits() {
+        let body = form(&[
+            ("key", "uploads/a.txt"),
+            ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
+            (
+                "X-Amz-Server-Side-Encryption-Customer-Key",
+                "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+            ),
+            (
+                "X-Amz-Copy-Source-Server-Side-Encryption-Customer-Key",
+                "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU=",
+            ),
+        ]);
+        let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+        let touched = redact::sanitize(&mut posted);
+        assert_eq!(
+            touched,
+            [
+                "form:x-amz-copy-source-server-side-encryption-customer-key",
+                "form:x-amz-server-side-encryption-customer-key",
+            ]
+        );
+        assert!(body_text(&posted).contains("AES256"));
+        redact::admit(&posted).expect("sanitized SSE-C form fields must pass admit");
     }
 }
 
