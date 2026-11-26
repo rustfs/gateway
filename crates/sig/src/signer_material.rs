@@ -103,9 +103,9 @@ impl SigningCredentials {
         &self.access_key_id
     }
 
-    /// The secret access key. `pub(super)` and nothing wider: the derivation is the only consumer,
-    /// and a public accessor would let a caller hold the secret without ever signing anything.
-    pub(super) fn secret(&self) -> &SecretBytes {
+    /// The secret access key. `pub(crate)` and nothing wider: derivation inside this crate is the
+    /// only consumer, and a public accessor would let a caller hold the secret without signing.
+    pub(crate) fn secret(&self) -> &SecretBytes {
         &self.secret
     }
 

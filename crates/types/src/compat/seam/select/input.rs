@@ -21,7 +21,7 @@
 
 use super::{dto, legacy};
 use crate::compat::ConversionError;
-use crate::{BucketName, NamePolicy, ObjectKey, SseCustomerKey};
+use crate::{BucketName, NamePolicy, ObjectKey, SlashPolicy, SseCustomerKey};
 
 /// Every owned Select input member carried by this conversion.
 pub const GATEWAY_INPUT_MEMBERS: &[&str] = &[
@@ -97,7 +97,8 @@ pub fn input_from_s3s(
         field: "bucket",
         reason: "the bucket does not fit the requested name policy",
     })?;
-    let key = ObjectKey::materialize_decoded(&key, policy).map_err(|_| ConversionError {
+    let preserve = policy.clone().with_slash_policy(SlashPolicy::AwsPreserve);
+    let key = ObjectKey::materialize_decoded(&key, &preserve).map_err(|_| ConversionError {
         field: "key",
         reason: "the decoded key does not fit the requested name policy",
     })?;

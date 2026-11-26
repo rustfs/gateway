@@ -38,7 +38,6 @@ use smallvec::SmallVec;
 
 use crate::limits::{LimitKind, Limits};
 use crate::reject::WireReject;
-use crate::text::contains_forbidden_control;
 
 mod generated {
     include!("../../../generated/subresource_bits.rs");
@@ -131,7 +130,8 @@ impl QueryIndex {
         if raw.len() > limits.query_bytes() {
             return Err(WireReject::LimitExceeded(LimitKind::QueryBytes));
         }
-        if contains_forbidden_control(raw.as_bytes()) {
+        // RFC 3986 forbids all C0 controls (including HTAB) and DEL in raw query strings.
+        if raw.bytes().any(|byte| byte <= 0x1F || byte == 0x7F) {
             return Err(WireReject::MalformedQuery);
         }
 

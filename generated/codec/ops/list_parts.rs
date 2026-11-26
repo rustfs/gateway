@@ -44,19 +44,19 @@ impl OperationCodec for dto::ListParts {
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // MaxParts — query `max-parts`, percent-decoded once.
-        if let Some(raw) = request.query("max-parts") {
+        if let Some(raw) = value::query(request, "max-parts", "MaxParts")? {
             let raw = raw.as_ref();
-            input.max_parts = Some(value::integer(raw, "MaxParts")?);
+            input.max_parts = Some(value::integer_in_range(raw, "MaxParts", 0, 2147483647)?);
         } else {
             input.max_parts = Some(1000i32);
         }
         // PartNumberMarker — query `part-number-marker`, percent-decoded once.
-        if let Some(raw) = request.query("part-number-marker") {
+        if let Some(raw) = value::query(request, "part-number-marker", "PartNumberMarker")? {
             let raw = raw.as_ref();
             input.part_number_marker = Some(raw.to_owned());
         }
         // UploadId — query `uploadId`, percent-decoded once.
-        if let Some(raw) = request.query("uploadId") {
+        if let Some(raw) = value::query(request, "uploadId", "UploadId")? {
             let raw = raw.as_ref();
             input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);
         } else {
@@ -130,10 +130,10 @@ impl OperationCodec for dto::ListParts {
             writer.element("UploadId", v.as_str());
         }
         if let Some(v) = output.part_number_marker.as_ref() {
-            writer.element("PartNumberMarker", v.as_str());
+            writer.element("PartNumberMarker", value::xml_cursor_text(v.as_str(), "PartNumberMarker")?);
         }
         if let Some(v) = output.next_part_number_marker.as_ref() {
-            writer.element("NextPartNumberMarker", v.as_str());
+            writer.element("NextPartNumberMarker", value::xml_cursor_text(v.as_str(), "NextPartNumberMarker")?);
         }
         {
             let v = &output.max_parts;

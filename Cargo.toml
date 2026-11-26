@@ -59,6 +59,8 @@ jsonschema = { version = "0.48.2", default-features = false }
 md-5 = "0.11"                                       # entity tags, single-part and multipart alike
 memchr = "2.8"
 nix = { version = "0.31", default-features = false, features = ["poll", "zerocopy"] }
+# Pure Rust NIST P-256 / ECDSA-SHA256 for AWS SigV4a (ADR-0055); Apache-2.0 OR MIT, forbid(unsafe_code).
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "precomputed-tables", "std"] }
 percent-encoding = "2.3"
 phf = { version = "0.14", features = ["macros"] }
 pin-project-lite = "0.2"

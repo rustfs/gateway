@@ -112,6 +112,10 @@ impl PayloadFramingSource for FramingOf<'_> {
     fn declares_trailers(&self) -> bool {
         self.0.trailer().is_some_and(rustfs_gateway_sig::TrailerSet::is_declared)
     }
+
+    fn has_ecdsa_chunk_signatures(&self) -> bool {
+        self.0.is_ecdsa_streaming()
+    }
 }
 
 /// One request's `aws-chunked` decode, prepared from the head and run over the wire bytes.
@@ -224,7 +228,7 @@ impl ChunkIngest {
             })?;
 
         let signer = if framing.has_chunk_signatures() {
-            Some(build_signer(sink)?)
+            Some(build_signer(&framing, sink)?)
         } else {
             None
         };
@@ -354,18 +358,30 @@ fn decoded_length_header(headers: &HeaderMap) -> Option<&str> {
 
 /// Builds the chunk signer from the verified material the authenticator published.
 ///
-/// The derived `k_signing`, credential scope, timestamp, and 32-byte verified request-head seed
-/// all arrive together through [`ChunkSink`], published only after constant-time signature
-/// verification succeeded. Nothing here re-parses the raw `Authorization` header or query string.
-fn build_signer(sink: &ChunkSink) -> Result<ChunkSigner, S3Error> {
+/// The derived signing/verifying key, credential scope, timestamp, and verified request-head seed
+/// all arrive together through [`ChunkSink`], published only after signature verification
+/// succeeded. Nothing here re-parses the raw `Authorization` header or query string.
+fn build_signer(framing: &ChunkFraming, sink: &ChunkSink) -> Result<ChunkSigner, S3Error> {
     let Some(material) = sink.get() else {
         return Err(chunk_signatures_unavailable());
     };
+    let scope = ChunkScope::new(material.scope_line(), material.amz_date()).map_err(from_chunk_reject)?;
+    if framing.has_ecdsa_chunk_signatures() {
+        let Some(key) = material.chunk_verifying_key() else {
+            return Err(chunk_signatures_unavailable());
+        };
+        let Some(seed) = material.chunk_ecdsa_seed() else {
+            return Err(chunk_signatures_unavailable());
+        };
+        return Ok(ChunkSigner::new_ecdsa(key, scope, seed));
+    }
     let Some(key) = material.chunk_signing_key() else {
         return Err(chunk_signatures_unavailable());
     };
-    let scope = ChunkScope::new(material.scope_line(), material.amz_date()).map_err(from_chunk_reject)?;
-    Ok(ChunkSigner::new(key, scope, material.chunk_seed()))
+    let Some(seed) = material.chunk_seed() else {
+        return Err(chunk_signatures_unavailable());
+    };
+    Ok(ChunkSigner::new(key, scope, seed))
 }
 
 /// The refusal for a signed framed body with no verification material.
@@ -411,6 +427,10 @@ mod seed_tests;
 #[path = "chunked_length_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod length_tests;
+#[cfg(test)]
+#[path = "chunked_sigv4a_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod sigv4a_tests;
 #[cfg(test)]
 #[path = "chunked_trailer_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]

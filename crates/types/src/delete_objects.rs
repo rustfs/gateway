@@ -19,7 +19,7 @@
 //! Upstream: generated DTOs and codecs. Downstream: authorization and operation handlers.
 
 use crate::scalar::MAX_KEY_BYTES;
-use crate::{ETag, NamePolicy, NameRejection, ObjectKey, ParseError, WirePlaceholder, is_xml_representable};
+use crate::{ETag, NamePolicy, NameRejection, ObjectKey, ParseError, SlashPolicy, WirePlaceholder, is_xml_representable};
 
 /// Why a decoded RustFS DeleteObjects entry has no executable key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +52,14 @@ impl DeleteObjectKey {
     /// Returns the naming policy's rejection for other invalid keys.
     pub fn materialize_rustfs_decoded(value: &str, names: &NamePolicy) -> Result<Self, NameRejection> {
         use DeleteObjectKeyRejection::{Empty, TooLong};
-        let rejection = match ObjectKey::materialize_decoded(value, names) {
+        // `SlashPolicy::RustfsLegacy` models legacy RustFS's HTTP path parser and never rewrites
+        // `<Delete><Object><Key>` XML entries; `SlashPolicy::Collapse` still applies.
+        let effective = if names.slash_policy() == SlashPolicy::RustfsLegacy {
+            std::borrow::Cow::Owned(names.clone().with_slash_policy(SlashPolicy::AwsPreserve))
+        } else {
+            std::borrow::Cow::Borrowed(names)
+        };
+        let rejection = match ObjectKey::materialize_decoded(value, &effective) {
             Ok(key) => return Ok(key.into()),
             Err(NameRejection::Empty) if value.is_empty() => Empty,
             Err(NameRejection::TooLong)

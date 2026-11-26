@@ -502,8 +502,81 @@ fn run_unsigned_token_negative(dir: &Path) {
     );
 }
 
-fn run_v4a_refusal(dir: &Path, name: &str) {
+fn suite_v4a_canonical(dir: &Path, name: &str) -> (SuiteRequest, crate::CanonicalRequest, String, String) {
     let case = dir.join(name);
+    let request = parse_suite_request(&read(&case.join("request.txt")));
+    let context = read(&case.join("context.json"));
+    let region = context_field(&context, "region").expect("a region");
+    let service = context_field(&context, "service").expect("a service");
+    let session = context_field(&context, "token");
+
+    let mut host_value: Option<String> = None;
+    let mut headers = HeaderMap::new();
+    for (field, value) in &request.headers {
+        if field == "host" {
+            host_value = Some(value.clone());
+            continue;
+        }
+        let header = HeaderName::from_bytes(field.as_bytes()).expect("a header name");
+        headers.append(header, HeaderValue::from_str(value).expect("a header value"));
+    }
+    headers.append(HeaderName::from_static("x-amz-date"), HeaderValue::from_static(EXAMPLE_TIMESTAMP));
+    headers.append(
+        HeaderName::from_static("x-amz-region-set"),
+        HeaderValue::from_str(&region).expect("a region set"),
+    );
+    if let Some(session) = &session {
+        headers.append(
+            HeaderName::from_static("x-amz-security-token"),
+            HeaderValue::from_str(session).expect("a token value"),
+        );
+    }
+
+    let paths = UriPathCandidates::new(&request.path).expect("a valid path");
+    let query = RawQuery::new(&request.query);
+    let host = RawHost::from_host_header(host_value.expect("a Host header").as_bytes()).expect("a valid host");
+    let method = Method::from_bytes(request.method.as_bytes()).expect("a method");
+    let wire_content_length = request
+        .headers
+        .iter()
+        .find(|(field, _)| field == "content-length")
+        .map(|(_, value)| value.parse::<u64>().expect("a content length"));
+    let payload = if request.body.is_empty() {
+        PayloadMode::Empty
+    } else {
+        let digest: [u8; 32] = Sha256::digest(request.body.as_bytes()).into();
+        headers.append(
+            HeaderName::from_static("x-amz-content-sha256"),
+            HeaderValue::from_str(&encode_hex_lower(&digest)).expect("a payload digest"),
+        );
+        PayloadMode::ExactSha256(digest)
+    };
+    let mut names: BTreeSet<String> = headers.keys().map(|field| field.as_str().to_owned()).collect();
+    names.insert("host".to_owned());
+    let signed_list = names.into_iter().collect::<Vec<_>>().join(";");
+    let signed = SignedHeaderSet::parse_and_enforce(&signed_list, &headers, wire_content_length)
+        .unwrap_or_else(|_| panic!("{name}: the v4a suite's header set must satisfy completeness"));
+    let spec = CanonicalRequestSpec::new(&method, &paths, &query, &headers, &signed, &host, payload.canonical_payload_token());
+    let canonical = spec.candidates().expect("canonicalisable").next().expect("one candidate");
+    (request, canonical, region, service)
+}
+
+fn run_v4a_suite_case(dir: &Path, name: &str, s3_runnable: bool) {
+    let case = dir.join(name);
+    let context = read(&case.join("context.json"));
+    let region = context_field(&context, "region").expect("a region");
+    let service = context_field(&context, "service").expect("a service");
+
+    // 1. Derived P-256 public key must match public-key.json (X, Y) byte for byte.
+    let pubkey_json = read(&case.join("public-key.json"));
+    let expected_x = format!("{:0>64}", context_field(&pubkey_json, "X").expect("X coord"));
+    let expected_y = format!("{:0>64}", context_field(&pubkey_json, "Y").expect("Y coord"));
+    let verifying_key = crate::SigV4aVerifyingKey::derive("AKIDEXAMPLE", &SecretBytes::new(EXAMPLE_KEY)).expect("kdf");
+    let (actual_x, actual_y) = verifying_key.uncompressed_xy();
+    assert_eq!(encode_hex_lower(&actual_x), expected_x, "{name}: public key X");
+    assert_eq!(encode_hex_lower(&actual_y), expected_y, "{name}: public key Y");
+
+    // 2. SigV4-only parsers must still refuse SigV4a (never downgrade to SigV4).
     let header_request = read(&case.join("header-signed-request.txt"));
     let authorization = header_request
         .lines()
@@ -512,15 +585,75 @@ fn run_v4a_refusal(dir: &Path, name: &str) {
     assert_eq!(
         crate::SigV4Authorization::parse(authorization).err(),
         Some(AuthError::NotImplemented(crate::Unimplemented::SigV4a)),
-        "{name}: header SigV4a must be recognised and refused"
+        "{name}: SigV4 parser must never downgrade header SigV4a"
     );
     let query_request = read(&case.join("query-signed-request.txt"));
-    let request = parse_suite_request(&query_request);
+    let parsed_query_req = parse_suite_request(&query_request);
     assert_eq!(
-        crate::PresignedParams::parse(&RawQuery::new(&request.query)).err(),
+        crate::PresignedParams::parse(&RawQuery::new(&parsed_query_req.query)).err(),
         Some(AuthError::NotImplemented(crate::Unimplemented::SigV4a)),
-        "{name}: query SigV4a must be recognised and refused"
+        "{name}: SigV4 parser must never downgrade query SigV4a"
     );
+
+    // 3. Parse header & presigned query through SigV4a parsers and verify all 4 DER signatures.
+    let parsed_auth = crate::SigV4aAuthorization::parse_with(authorization, crate::ServiceReading::AnyName)
+        .unwrap_or_else(|e| panic!("{name}: SigV4aAuthorization::parse_with failed: {e:?}"));
+    let parsed_presigned =
+        crate::SigV4aPresignedParams::parse_with(&RawQuery::new(&parsed_query_req.query), crate::ServiceReading::AnyName)
+            .unwrap_or_else(|e| panic!("{name}: SigV4aPresignedParams::parse_with failed: {e:?}"));
+
+    let region_set = crate::PresentedRegionSet::parse(&region).expect("valid region set");
+    let verified_scope =
+        crate::VerifiedSigV4aScope::from_checked_parts(ScopeDate::parse("20150830").expect("valid"), region_set, &service);
+
+    let header_sts = StringToSign::from_text(read(&case.join("header-string-to-sign.txt")));
+    let header_sig_file = crate::EcdsaDerSignature::parse_hex(read(&case.join("header-signature.txt")).trim())
+        .unwrap_or_else(|e| panic!("{name}: header-signature.txt parse failed: {e:?}"));
+    assert!(
+        crate::verify_sigv4a_signature(&verifying_key, &verified_scope, &header_sts, &header_sig_file).is_ok(),
+        "{name}: header-signature.txt ECDSA verify"
+    );
+    assert!(
+        crate::verify_sigv4a_signature(&verifying_key, &verified_scope, &header_sts, parsed_auth.signature()).is_ok(),
+        "{name}: header-signed-request Authorization ECDSA verify"
+    );
+
+    let query_sts = StringToSign::from_text(read(&case.join("query-string-to-sign.txt")));
+    let query_sig_file = crate::EcdsaDerSignature::parse_hex(read(&case.join("query-signature.txt")).trim())
+        .unwrap_or_else(|e| panic!("{name}: query-signature.txt parse failed: {e:?}"));
+    assert!(
+        crate::verify_sigv4a_signature(&verifying_key, &verified_scope, &query_sts, &query_sig_file).is_ok(),
+        "{name}: query-signature.txt ECDSA verify"
+    );
+    assert!(
+        crate::verify_sigv4a_signature(&verifying_key, &verified_scope, &query_sts, parsed_presigned.signature()).is_ok(),
+        "{name}: query-signed-request X-Amz-Signature ECDSA verify"
+    );
+
+    // 4. S3 three-layer canonical + string-to-sign verification for all S3-compatible cases, and
+    //    negative control checks for the 6 normalized-path cases and post-sts-header-after.
+    if s3_runnable {
+        let (_req, canonical, _region, _svc) = suite_v4a_canonical(dir, name);
+        let expected_canonical = read(&case.join("header-canonical-request.txt"));
+        assert_eq!(canonical.text(), expected_canonical, "{name}: v4a canonical request");
+        let date = AmzDate::parse(EXAMPLE_TIMESTAMP).expect("valid");
+        let produced = canonical.string_to_sign_v4a(&date, parsed_auth.scope());
+        assert_eq!(produced.text(), header_sts.text(), "{name}: v4a string to sign");
+        assert!(
+            crate::verify_sigv4a_signature(&verifying_key, &verified_scope, &produced, parsed_auth.signature()).is_ok(),
+            "{name}: v4a produced string-to-sign ECDSA verify"
+        );
+    } else if name == "post-sts-header-after" {
+        // Unsigned session token must still be refused under SigV4a.
+        assert!(!parsed_auth.signed_headers().contains("x-amz-security-token"));
+    } else {
+        let (_req, canonical, _region, _svc) = suite_v4a_canonical(dir, name);
+        assert_ne!(
+            canonical.text(),
+            read(&case.join("header-canonical-request.txt")),
+            "{name}: S3 must preserve path spelling under SigV4a too"
+        );
+    }
 }
 
 /// Positive — c-sig-0212 / c-sig-0213 / c-sig-0214: the upstream suite matches at all three
@@ -540,9 +673,9 @@ fn c_sig_official_suite() {
     };
     let runnable = lock_array("v4_run_three_layer");
     let negatives = lock_array("v4_s3_negative");
-    let v4a_cases = lock_array("v4a_reject_not_implemented");
+    let v4a_cases = lock_array("v4a_cases");
     assert_eq!((runnable.len(), negatives.len(), v4a_cases.len()), (31, 9, 38));
-    for name in runnable {
+    for name in &runnable {
         run_suite_case(&dir, name);
     }
     for name in negatives
@@ -555,7 +688,8 @@ fn c_sig_official_suite() {
     run_double_encoding_negative(&dir);
     run_unsigned_token_negative(&dir);
     for name in v4a_cases {
-        run_v4a_refusal(&v4a, name);
+        let s3_runnable = runnable.contains(&name);
+        run_v4a_suite_case(&v4a, name, s3_runnable);
     }
 }
 

@@ -749,14 +749,12 @@ fn repeated_conditional_headers_reach_the_operation_parser_as_one_value() {
 }
 
 #[test]
-fn a_non_text_cursor_reaches_the_token_parser_after_query_decoding() {
+fn n_a_non_utf8_cursor_is_refused_during_query_decoding() {
     let request = accepted("GET", "/conf-list?list-type=2&continuation-token=%FF%FE%00%01", &[]);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
-    let input = dto::ListObjectsV2::decode(&view, RequestBody::None).expect("the token parser owns the token grammar");
-    assert_eq!(
-        input.continuation_token.as_ref().map(OpaqueString::as_str),
-        Some("\u{fffd}\u{fffd}\0\u{1}")
-    );
+    let err = dto::ListObjectsV2::decode(&view, RequestBody::None).expect_err("non-UTF-8 cursor must be refused");
+    assert_eq!(err.code().as_str(), "InvalidArgument");
+    assert_eq!(err.member(), Some("ContinuationToken"));
 }
 
 #[test]

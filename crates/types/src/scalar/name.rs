@@ -49,7 +49,7 @@
 //! reproduce it.
 
 use super::naming::{
-    MAX_KEY_BYTES, NamePolicy, NameRejection, aws_bucket_rules, check_bucket, check_decoded_key, floor_check_bucket,
+    MAX_KEY_BYTES, NamePolicy, NameRejection, aws_bucket_rules, check_bucket, floor_check_bucket, normalize_decoded_key,
     normalize_key, stored_key_rejects_control,
 };
 use super::parse_error::{ParseError, rules};
@@ -112,16 +112,16 @@ impl ObjectKey {
     /// parameter, whose decode belongs to the XML or query reader that produced it.
     ///
     /// No decode happens here. Decoding a value that was already decoded is the double-decode bug
-    /// `super::naming` exists to prevent, so this applies the floor and the validator to what it
-    /// was given.
+    /// `super::naming` exists to prevent, so this applies the policy's [`SlashPolicy`], the floor,
+    /// and the validator to what it was given.
     ///
     /// # Errors
     ///
     /// The [`NameRejection`] naming the rule that refused it.
     pub fn materialize_decoded(decoded: &str, policy: &NamePolicy) -> Result<Self, NameRejection> {
-        check_decoded_key(decoded, policy)?;
+        let key = normalize_decoded_key(decoded, policy)?;
         Ok(Self {
-            key: decoded.to_owned().into_boxed_str(),
+            key: key.into_boxed_str(),
             encoded: None,
         })
     }

@@ -347,8 +347,11 @@ async fn presigned_streaming_upload_with_valueless_query_param_before_signature(
         *slot = u8::from_str_radix(std::str::from_utf8(pair).expect("hex pair"), 16).expect("hex byte");
     }
     let scope = rustfs_gateway_http::ChunkScope::new(material.scope_line(), material.amz_date()).expect("valid scope");
-    let mut verifier =
-        rustfs_gateway_http::ChunkSigner::new(material.chunk_signing_key().expect("valid key"), scope, material.chunk_seed());
+    let mut verifier = rustfs_gateway_http::ChunkSigner::new(
+        material.chunk_signing_key().expect("valid key"),
+        scope,
+        material.chunk_seed().expect("verified HMAC seed"),
+    );
     verifier.update(PAYLOAD);
     verifier
         .verify_chunk(&presented_chunk_sig)

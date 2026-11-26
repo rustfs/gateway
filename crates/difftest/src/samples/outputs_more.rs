@@ -285,13 +285,13 @@ pub(crate) fn rows() -> Vec<OutputRow> {
     let mut rows = vec![
         row(
             "list-objects-v2-full",
-            RawRequest::get("/bkt?list-type=2"),
+            RawRequest::get("/bkt?list-type=2&fetch-owner=true"),
             || list_v2("p/a"),
             stamped!("kd-encode-0005", "kd-encode-0006", "kd-encode-0026", "kd-encode-0027", "kd-encode-0028"),
         ),
         row(
             "list-objects-v2-control-character",
-            RawRequest::get("/bkt?list-type=2"),
+            RawRequest::get("/bkt?list-type=2&fetch-owner=true"),
             || list_v2("p/a\nb"),
             stamped!(
                 "kd-encode-0005",
@@ -310,7 +310,7 @@ pub(crate) fn rows() -> Vec<OutputRow> {
         ),
         row(
             "list-objects-v2-url",
-            RawRequest::get("/bkt?list-type=2&encoding-type=url"),
+            RawRequest::get("/bkt?list-type=2&encoding-type=url&fetch-owner=true"),
             || {
                 // What RustFS returns: it URL-encodes listing values itself when asked to.
                 OracleOutput::ListObjectsV2(oracle::ListObjectsV2Output {

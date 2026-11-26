@@ -38,14 +38,14 @@ impl OperationCodec for dto::ListDirectoryBuckets {
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
         // ContinuationToken — query `continuation-token`, percent-decoded once.
-        if let Some(raw) = request.query("continuation-token") {
+        if let Some(raw) = value::query(request, "continuation-token", "ContinuationToken")? {
             let raw = raw.as_ref();
             input.continuation_token = Some(raw.to_owned());
         }
         // MaxDirectoryBuckets — query `max-directory-buckets`, percent-decoded once.
-        if let Some(raw) = request.query("max-directory-buckets") {
+        if let Some(raw) = value::query(request, "max-directory-buckets", "MaxDirectoryBuckets")? {
             let raw = raw.as_ref();
-            input.max_directory_buckets = Some(value::integer(raw, "MaxDirectoryBuckets")?);
+            input.max_directory_buckets = Some(value::integer_in_range(raw, "MaxDirectoryBuckets", 1, 1000)?);
         }
         let _ = body;
         value::exit(input.check_required())?;
@@ -68,7 +68,7 @@ impl OperationCodec for dto::ListDirectoryBuckets {
             writer.close();
         }
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element("ContinuationToken", v.as_str());
+            writer.element("ContinuationToken", value::xml_cursor_text(v.as_str(), "ContinuationToken")?);
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());

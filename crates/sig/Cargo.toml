@@ -74,6 +74,7 @@ rustfs-gateway-http = { workspace = true }
 # hand-rolls a strict codec instead, in the same spirit as `src/codec.rs`.
 hmac = { workspace = true }
 http = { workspace = true }
+p256 = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
 smallvec = { workspace = true }

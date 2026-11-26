@@ -72,9 +72,9 @@ fn the_declared_ranges_reach_the_two_members_that_carry_them() {
         ("q-max-keys-0073".to_owned(), range(0, 1_000)),
     ]);
     let part = bounds::of(&field("PartNumber", Type::Integer, &["q-part-number-0072"]), &values, "UploadPart").expect("resolves");
-    assert_eq!(part, Some(Bound { min: 1, max: 10_000 }));
+    assert_eq!(part, Some(Bound::int(1, 10_000)));
     let keys = bounds::of(&field("MaxKeys", Type::Integer, &["q-max-keys-0073"]), &values, "ListObjectsV2").expect("resolves");
-    assert_eq!(keys, Some(Bound { min: 0, max: 1_000 }));
+    assert_eq!(keys, Some(Bound::int(0, 1_000)));
 }
 
 #[test]
@@ -86,11 +86,7 @@ fn a_list_of_bounded_integers_is_bounded_element_by_element() {
         member_name: None,
     };
     let resolved = bounds::of(&field("PartNumbers", list, &["q-part-number-0072"]), &values, "Fixture").expect("resolves");
-    assert_eq!(
-        resolved,
-        Some(Bound { min: 1, max: 10_000 }),
-        "the range belongs to the value, not the container"
-    );
+    assert_eq!(resolved, Some(Bound::int(1, 10_000)), "the range belongs to the value, not the container");
 }
 
 #[test]
@@ -222,8 +218,123 @@ fn the_two_bounded_members_reach_the_generated_decoders() {
         crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
             .expect("decodes")
     };
+    let whole = |name: &str| {
+        let ir = artifacts
+            .operations
+            .iter()
+            .find(|ir| ir.operation == name)
+            .unwrap_or_else(|| panic!("{name} is generated"));
+        crate::emit::codec::operation_for_test(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("renders")
+    };
     assert!(decoder("UploadPart").contains("value::integer_in_range(raw, \"PartNumber\", 1, 10000)?"));
     assert!(decoder("ListObjectsV2").contains("value::integer_in_range(raw, \"MaxKeys\", 0, 1000)?"));
-    // An integer nobody bounded still takes the plain parser, so the change is not a blanket one.
-    assert!(decoder("ListParts").contains("value::integer(raw, \"MaxParts\")?"));
+    assert!(decoder("UploadPartCopy").contains("value::integer_in_range(raw, \"PartNumber\", 1, 10000)?"));
+    assert!(whole("CompleteMultipartUpload").contains("value::tree_integer_in_range(raw, \"PartNumber\", 1, 10000, reading)?"));
+    assert!(
+        decoder("GetObject")
+            .contains("value::integer_in_range_as(raw, \"PartNumber\", 1, 10000, ErrorCode::INVALID_PART_NUMBER)?")
+    );
+    assert!(
+        decoder("HeadObject")
+            .contains("value::integer_in_range_as(raw, \"PartNumber\", 1, 10000, ErrorCode::INVALID_PART_NUMBER)?")
+    );
+    assert!(decoder("ListObjects").contains("value::integer_in_range(raw, \"MaxKeys\", 0, 1000)?"));
+    assert!(decoder("ListObjectVersions").contains("value::integer_in_range(raw, \"MaxKeys\", 0, 1000)?"));
+    assert!(decoder("ListMultipartUploads").contains("value::integer_in_range(raw, \"MaxUploads\", 1, 1000)?"));
+    assert!(decoder("ListParts").contains("value::integer_in_range(raw, \"MaxParts\", 0, 2147483647)?"));
+    assert!(decoder("ListBuckets").contains("value::integer_in_range(raw, \"MaxBuckets\", 1, 10000)?"));
+    assert!(decoder("ListDirectoryBuckets").contains("value::integer_in_range(raw, \"MaxDirectoryBuckets\", 1, 1000)?"));
+    assert!(decoder("PutObject").contains("value::long_in_range(raw, \"WriteOffsetBytes\", 0, 9223372036854775807)?"));
+    assert!(decoder("CompleteMultipartUpload").contains("value::long_in_range(raw, \"MpuObjectSize\", 0, 9223372036854775807)?"));
+    assert!(decoder("DeleteObject").contains("value::long_in_range(raw, \"IfMatchSize\", 0, 9223372036854775807)?"));
+    // An unbounded integer (e.g. RestoreRequest.Days, enforced by contract rather than codec) keeps plain `value::integer`.
+    assert!(whole("RestoreObject").contains("value::integer(raw, \"Days\")?"));
+}
+
+#[test]
+fn n_xml_body_omit_when_wires_fetch_owner_only_on_list_objects_v2() {
+    let artifacts = super::codegen_tests::artifacts();
+    let render = |name: &str| {
+        let ir = artifacts
+            .operations
+            .iter()
+            .find(|ir| ir.operation == name)
+            .unwrap_or_else(|| panic!("{name} is generated"));
+        crate::emit::codec::operation_for_test(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("renders")
+    };
+    let v2 = render("ListObjectsV2");
+    assert!(
+        v2.contains("request_query_equals_bool(request, \"fetch-owner\", false, false)"),
+        "ListObjectsV2 Object writer must guard Owner with FetchOwner omit_when:\n{v2}"
+    );
+    let v1 = render("ListObjects");
+    assert!(
+        !v1.contains("fetch-owner"),
+        "ListObjects has no FetchOwner input and must never suppress Owner:\n{v1}"
+    );
+}
+
+#[test]
+fn n_root_namespace_guard_uses_structured_xml_check() {
+    let artifacts = super::codegen_tests::artifacts();
+    for op in ["RestoreObject", "SelectObjectContent"] {
+        let ir = artifacts
+            .operations
+            .iter()
+            .find(|ir| ir.operation == op)
+            .unwrap_or_else(|| panic!("{op} is generated"));
+        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes, &artifacts.carriers)
+            .expect("decodes");
+        assert!(
+            body.contains("crate::codec::reject_qualified_root_namespace(request, raw_body.as_ref())?;"),
+            "{op} must use structured root namespace inspection:\n{body}"
+        );
+        assert!(
+            !body.contains(".windows(6)"),
+            "{op} must not use naive raw-byte windows(6) xmlns scan:\n{body}"
+        );
+    }
+}
+
+#[test]
+fn n_status_code_binding_fails_closed_without_silent_fallback() {
+    let artifacts = super::codegen_tests::artifacts();
+    let mut ir = artifacts
+        .operations
+        .iter()
+        .find(|ir| ir.operation == "HeadBucket")
+        .expect("HeadBucket is generated")
+        .clone();
+    ir.output.push(Field {
+        name: "Code".to_owned(),
+        wire_name: None,
+        required: false,
+        binding: Binding::StatusCode,
+        ty: Type::Integer,
+        hot: false,
+        default: None,
+        omit_when: None,
+        missing_error: None,
+        quirk_refs: Vec::new(),
+    });
+    let encoded = crate::emit::codec::encode::body(&ir, &artifacts.codec_rules).expect("encodes");
+    assert!(
+        !encoded.contains(".unwrap_or(status)"),
+        "StatusCode must not silently fall back on out-of-range i32:\n{encoded}"
+    );
+    assert!(
+        encoded.contains("CodecError::internal("),
+        "StatusCode out-of-range must fail closed with CodecError::internal:\n{encoded}"
+    );
+}
+
+#[test]
+fn n_operations_json_note_does_not_claim_host_classes_always_empty() {
+    let artifacts = super::codegen_tests::artifacts();
+    let rendered = crate::emit::operations_json::render(&artifacts.operations);
+    assert!(
+        !rendered.contains("is empty for every operation today"),
+        "OPERATIONS.json note must not claim host_classes is empty for every operation"
+    );
+    assert!(rendered.contains("S3Express"), "OPERATIONS.json carries non-empty host_classes entries");
 }

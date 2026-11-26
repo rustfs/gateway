@@ -104,16 +104,24 @@ pub enum Signature {
     EcdsaP256(CtBytes<64>),
 }
 
-/// Proof that two signatures were compared in constant time and were equal.
+/// Proof that two signatures were compared in constant time and were equal, or that an ECDSA
+/// P-256 signature verified cryptographically against a derived verifying key.
 ///
-/// The type is a zero-sized token with a private field, so the only way to obtain one is
-/// [`Signature::ct_verify`]. Downstream, an authenticated verdict is expected to be shaped as
-/// `Verdict::Authenticated { identity, proof: SignatureMatch }` — which means a code path that
-/// never compared anything cannot construct the verdict, and "forgot to verify" becomes a
-/// compile error rather than a CVE (the shape of MinIO CVE-2025-31489).
+/// The type is a zero-sized token with a private field, so the only ways to obtain one are
+/// [`Signature::ct_verify`] and [`crate::verify_sigv4a_signature`]. Downstream, an authenticated
+/// verdict is expected to be shaped as `Verdict::Authenticated { identity, proof: SignatureMatch }`
+/// — which means a code path that never verified anything cannot construct the verdict, and
+/// "forgot to verify" becomes a compile error rather than a CVE (the shape of MinIO CVE-2025-31489).
 ///
 /// It has no `Debug` and no `PartialEq`: it carries nothing to print and nothing to compare.
 pub struct SignatureMatch(());
+
+/// Mints a [`SignatureMatch`] exclusively for [`crate::sigv4a_derive::verify_sigv4a_signature`]
+/// after ECDSA P-256 verification succeeds. Kept as a crate-private free function rather than an
+/// inherent method so [`SignatureMatch`] exposes no constructor hints on compile-fail probes.
+pub(crate) const fn ecdsa_signature_match() -> SignatureMatch {
+    SignatureMatch(())
+}
 
 /// Why a signature comparison did not produce a [`SignatureMatch`].
 ///

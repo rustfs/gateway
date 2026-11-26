@@ -112,7 +112,7 @@ pub(crate) fn signed_with(request: &RawRequest, access_key: &str, secret_key: &s
             PayloadMode::parse(EMPTY_PAYLOAD_SHA256_HEX, TrailerSet::None).map_err(|error| format!("empty payload: {error:?}"))?
         }
     };
-    if matches!(payload, PayloadMode::StreamingSigned { .. }) {
+    if matches!(payload, PayloadMode::StreamingSigned { .. } | PayloadMode::StreamingEcdsa { .. }) {
         return Err("chunk signatures cannot be signed again without re-framing the body".to_owned());
     }
 

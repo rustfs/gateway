@@ -181,9 +181,9 @@ impl AuthenticationOutcome {
     }
 }
 
-#[path = "chunk_verification.rs"]
-mod chunk_verification;
-pub use chunk_verification::{ChunkSink, ChunkVerification};
+#[path = "authenticator_chunk.rs"]
+mod chunk;
+pub use chunk::{ChunkSink, ChunkVerification};
 
 /// One request the security floor has admitted, with everything an authenticator needs to
 /// reconstruct what was signed.
@@ -467,6 +467,13 @@ impl SigV4Authenticator {
     /// A verdict, a rejection, or (under the switch) the store outage `VerificationFailure::Unavailable`.
     async fn try_verify(&self, request: &Authentication<'_>) -> Result<VerifiedWithSecret, VerificationFailure> {
         let sealed = request.sealed();
+        if sealed.marker().family() == SigFamily::V4a {
+            return self.try_verify_sigv4a(request).await;
+        }
+        // Cross-algorithm refusal: SigV4 HMAC cannot pair with ECDSA P-256 streaming chunks.
+        if request.payload().is_ecdsa_streaming() {
+            return Err(AuthError::AuthorizationHeaderMalformed.into());
+        }
         let view = sealed.view();
         let location = sealed.marker().location();
         let service = sealed.expected_service();
@@ -712,6 +719,8 @@ impl From<AuthError> for VerificationFailure {
 #[path = "authenticator_presented.rs"]
 mod presented;
 use presented::Presented;
+#[path = "authenticator_sigv4a.rs"]
+mod sigv4a;
 #[path = "authenticator_sts_body.rs"]
 mod sts_body;
 

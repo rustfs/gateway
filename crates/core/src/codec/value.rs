@@ -38,6 +38,7 @@ use rustfs_gateway_types::{
 
 use crate::codec::error::CodecError;
 use crate::codec::response::{ResponseOverride, override_header_value};
+pub use crate::codec::value_ext::*;
 use crate::codec::view::MetaView;
 
 /// The error a decoder raises for a required member the wire did not carry.
@@ -337,7 +338,7 @@ pub(crate) const ENCODING_TYPE_URL: &str = "url";
 
 pub(crate) use super::delete_objects::{delete_object_etag, delete_object_key, render_delete_key_echo};
 pub use crate::codec::body_literal::{BODY_LITERALS, body_literal};
-pub use crate::codec::rustfs_listing::{RustFsListing, rustfs_listing_echo};
+pub use crate::codec::rustfs_listing::{RustFsListing, query, rustfs_listing_echo, xml_cursor_text};
 pub(crate) use crate::codec::rustfs_listing::{any_requires_url_encoding, requires_url_encoding};
 
 /// Whether this response percent-encodes the members its operation declares as key-shaped.
@@ -373,7 +374,7 @@ pub enum UrlEncoding {
 /// unknown spelling as "encode anyway" would percent-encode a listing whose echo says it did not.
 #[must_use]
 pub fn url_encoding(request: &MetaView<'_>) -> UrlEncoding {
-    match request.query(ENCODING_TYPE) {
+    match request.query(ENCODING_TYPE).ok().flatten() {
         Some(value) if value.eq_ignore_ascii_case(ENCODING_TYPE_URL) => UrlEncoding::Requested,
         _ => UrlEncoding::Absent,
     }
@@ -614,11 +615,7 @@ pub(crate) fn checksum_spec_of_fields<'a>(
         if ignore_unknown && ChecksumAlgorithm::from_header_name(&name).is_none() {
             continue;
         }
-        // Refused, never skipped. Skipping a value this binder cannot read means the input reaches
-        // the handler with no checksum at all, so the caller's claim is dropped on the floor and
-        // the object is stored as though none had been made. The head-level arbitration in
-        // `rustfs-gateway-http` has already applied the identical rule above the body read; this
-        // agreeing with it is what makes the two one decision instead of two.
+        // Refused, never skipped: head-level arbitration applies the same rule above the body read.
         let Ok(spec) = ChecksumSpec::parse_header(&name, value) else {
             return Err(CodecError::invalid_request(
                 "the request carries a checksum value that is not valid for the algorithm its header names",
@@ -626,12 +623,14 @@ pub(crate) fn checksum_spec_of_fields<'a>(
             .about(member));
         };
         if let Some(existing) = &found
-            && existing.algorithm() != spec.algorithm()
+            && existing != &spec
         {
-            return Err(CodecError::invalid_request(
-                "the request carries more than one checksum algorithm, which is a contradiction rather than a choice",
-            )
-            .about(member));
+            let message = if existing.algorithm() != spec.algorithm() {
+                "the request carries more than one checksum algorithm, which is a contradiction rather than a choice"
+            } else {
+                "the request carries conflicting checksum values for the same algorithm"
+            };
+            return Err(CodecError::invalid_request(message).about(member));
         }
         found = Some(spec);
     }
@@ -779,7 +778,7 @@ pub fn verify_body_digest(request: &MetaView<'_>, body: &[u8]) -> Result<(), Cod
 /// `model/overlays/error-status.toml`'s to state, not this function's.
 pub fn verify_response_overrides(request: &MetaView<'_>, table: &[ResponseOverride]) -> Result<(), CodecError> {
     for entry in table {
-        let Some(value) = request.query(entry.query) else {
+        let Some(value) = request.query(entry.query).map_err(|error| error.about(entry.member))? else {
             continue;
         };
         if override_header_value(value.as_ref()).is_none() {

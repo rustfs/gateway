@@ -646,6 +646,31 @@ impl Verdict {
         }
     }
 
+    /// Builds an authenticated SigV4a verdict carrying the cross-checked SigV4a scope and
+    /// `x-amz-region-set`.
+    ///
+    /// Keeps [`crate::VerifiedSigV4aScope`] separate from [`VerifiedScope`] so a SigV4a region set
+    /// (such as `"*"`) can never be fed into SigV4 HMAC key derivation while still exposing the
+    /// verified date, region set, and service to downstream authorizers.
+    #[must_use]
+    pub fn authenticated_in_sigv4a_scope(
+        identity: Identity,
+        scheme: AuthScheme,
+        scope: &crate::sigv4a::VerifiedSigV4aScope,
+        proof: SignatureMatch,
+    ) -> Self {
+        Self::Authenticated {
+            identity,
+            scheme,
+            scope: Some(VerifiedScope::from_checked_parts(
+                scope.date(),
+                scope.region_set().as_str(),
+                scope.service(),
+            )),
+            proof,
+        }
+    }
+
     /// Builds an anonymous verdict from evidence that nothing was presented.
     #[must_use]
     pub fn anonymous(evidence: AnonymousAck) -> Self {

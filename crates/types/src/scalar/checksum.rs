@@ -338,7 +338,10 @@ impl ChecksumSpec {
         let algo = ChecksumAlgorithm::from_header_name(name).ok_or(ChecksumError::UnknownAlgorithm)?;
         let (body, kind) = match value.rsplit_once('-') {
             Some((body, count)) => {
-                let valid = !count.starts_with('0') && count.parse::<u32>().is_ok_and(|n| (1..=MAX_MULTIPART_PARTS).contains(&n));
+                let valid = !count.is_empty()
+                    && !count.starts_with('0')
+                    && count.bytes().all(|byte| byte.is_ascii_digit())
+                    && count.parse::<u32>().is_ok_and(|n| (1..=MAX_MULTIPART_PARTS).contains(&n));
                 if !valid {
                     return Err(ChecksumError::InvalidChecksumValue);
                 }
@@ -480,7 +483,11 @@ impl ChecksumSpec {
         };
         let algo = first.algo;
         let count = u32::try_from(parts.len()).unwrap_or(u32::MAX);
-        if count > MAX_MULTIPART_PARTS || parts.iter().any(|spec| spec.algo != algo) {
+        if count > MAX_MULTIPART_PARTS
+            || parts
+                .iter()
+                .any(|spec| spec.algo != algo || spec.checksum_type() == ChecksumType::Composite)
+        {
             return Err(ChecksumError::NotCombinable);
         }
 
@@ -741,11 +748,17 @@ where
 
     for (name, value) in headers {
         if name.eq_ignore_ascii_case(SDK_ALGORITHM_HEADER) {
-            declared = Some(ChecksumAlgorithm::from_wire_name(value).ok_or(ChecksumError::UnknownAlgorithm)?);
+            let algo = ChecksumAlgorithm::from_wire_name(value).ok_or(ChecksumError::UnknownAlgorithm)?;
+            if declared.replace(algo).is_some() {
+                return Err(ChecksumError::MultipleChecksumHeaders);
+            }
             continue;
         }
         if name.eq_ignore_ascii_case(CHECKSUM_TYPE_HEADER) {
-            declared_type = Some(ChecksumType::parse(value).map_err(|_| ChecksumError::InvalidChecksumValue)?);
+            let kind = ChecksumType::parse(value).map_err(|_| ChecksumError::InvalidChecksumValue)?;
+            if declared_type.replace(kind).is_some() {
+                return Err(ChecksumError::MultipleChecksumHeaders);
+            }
             continue;
         }
         if name.eq_ignore_ascii_case(CHECKSUM_ALGORITHM_HEADER) || name.eq_ignore_ascii_case(CHECKSUM_MODE_HEADER) {

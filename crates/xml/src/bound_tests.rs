@@ -199,9 +199,10 @@ fn an_alias_root_and_a_self_closing_element_read() {
 /// and a member validated for the legacy stack but carried by no decoder is left out.
 #[test]
 fn an_unknown_element_at_the_root_is_skipped_and_a_dropped_member_is_left_out() {
-    let tree =
-        bound("<Config><Future><Deep a=b>x<Deeper/></Deep></Future><Status>s</Status><Legacy><Name>n</Name></Legacy></Config>")
-            .expect("the unknown element is skipped");
+    let tree = bound(
+        "<Config><Future><Deep a=\"b\">x<Deeper/></Deep></Future><Status>s</Status><Legacy><Name>n</Name></Legacy></Config>",
+    )
+    .expect("the unknown element is skipped");
     assert_eq!(names(&tree), ["Status"]);
 }
 
@@ -451,4 +452,93 @@ fn an_empty_optional_wrapper_is_read_as_a_present_empty_list() {
     let listed = bound("<Config><Status>s</Status><TagSet><Tag><ID>t</ID></Tag></TagSet></Config>");
     assert!(listed.is_ok_and(|tree| tree.child("TagSet").is_some_and(|wrapper| wrapper.children.len() == 1)));
     assert!(bound("<Config><Status>s</Status></Config>").is_ok_and(|tree| tree.child("TagSet").is_none()));
+}
+
+/// Negative — elements without `shape.attribute` (root, nested structure, scalar, wrapper, skipped
+/// unknown element) and non-matching attributes on shaped elements still enforce attribute count,
+/// byte length, syntax, entity resolution, and XML 1.0 character representability.
+#[test]
+fn n_attributes_are_validated_on_every_element_and_attribute() {
+    let narrow = XmlLimits::new(1 << 20, 32, 100, 2, 8).expect("non-zero limits");
+
+    // Exceeding `max_attributes_per_element` on root, nested, scalar, wrapper, and skipped elements.
+    for body in [
+        "<Config a=\"1\" b=\"2\" c=\"3\"><Status>s</Status></Config>",
+        "<Config><Status>s</Status><Rule a=\"1\" b=\"2\" c=\"3\"><ID>1</ID></Rule></Config>",
+        "<Config><Status a=\"1\" b=\"2\" c=\"3\">s</Status></Config>",
+        "<Config><Status>s</Status><TagSet a=\"1\" b=\"2\" c=\"3\"/></Config>",
+        "<Config><Future a=\"1\" b=\"2\" c=\"3\"/><Status>s</Status></Config>",
+    ] {
+        assert_eq!(read_with(body, narrow), Err(BoundRefusal::Xml(XmlError::TooManyAttributes)), "{body}");
+    }
+
+    // Exceeding `max_attribute_bytes` on unshaped, scalar, wrapper, and skipped elements.
+    for body in [
+        "<Config a=\"123456789\"><Status>s</Status></Config>",
+        "<Config><Status a=\"123456789\">s</Status></Config>",
+        "<Config><Status>s</Status><TagSet a=\"123456789\"/></Config>",
+        "<Config><Future a=\"123456789\"/><Status>s</Status></Config>",
+    ] {
+        assert_eq!(read_with(body, narrow), Err(BoundRefusal::Xml(XmlError::AttributeTooLong)), "{body}");
+    }
+
+    // Unsupported entity references and malformed/duplicate attributes on unshaped, scalar,
+    // wrapper, skipped, and non-matching attributes of shaped elements.
+    for body in [
+        "<Config a=\"&bogus;\"><Status>s</Status></Config>",
+        "<Config><Status a=\"&bogus;\">s</Status></Config>",
+        "<Config><Status>s</Status><TagSet a=\"&bogus;\"/></Config>",
+        "<Config><Future a=\"&bogus;\"/><Status>s</Status></Config>",
+        "<Config><Status>s</Status><Grantee xsi:type=\"Group\" extra=\"&bogus;\"><ID>g</ID></Grantee></Config>",
+        "<Config a=\"1\" a=\"2\"><Status>s</Status></Config>",
+        "<Config a=unquoted><Status>s</Status></Config>",
+        "<Config><Future><Deep a=b/></Future><Status>s</Status></Config>",
+    ] {
+        refused(body, Reason::Attribute);
+    }
+
+    // Characters XML 1.0 cannot represent inside attribute names or values on any element.
+    for body in [
+        "<Config a=\"\u{1}\"><Status>s</Status></Config>",
+        "<Config a\u{1}=\"x\"><Status>s</Status></Config>",
+        "<Config a=\"&#x1;\"><Status>s</Status></Config>",
+        "<Config><Status a=\"\u{1}\">s</Status></Config>",
+        "<Config><Status>s</Status><TagSet a=\"&#1;\"/></Config>",
+        "<Config><Future a=\"\u{1}\"/><Status>s</Status></Config>",
+        "<Config><Status>s</Status><Grantee xsi:type=\"Group\" extra=\"\u{1}\"><ID>g</ID></Grantee></Config>",
+    ] {
+        assert_eq!(bound(body), Err(BoundRefusal::Xml(XmlError::ForbiddenCharacter)), "{body}");
+    }
+
+    // Positive control: valid attributes within limits on unshaped elements are accepted and not
+    // leaked into the returned tree.
+    let valid = read_with(
+        "<Config xmlns=\"urn:s3\" a=\"ok&amp;1\"><Status b=\"ok\">s</Status><TagSet c=\"ok\"/></Config>",
+        narrow,
+    )
+    .expect("valid attributes within limits read cleanly");
+    assert!(valid.attributes.is_empty());
+    assert_eq!(valid.child_text("Status"), Some("s"));
+}
+
+/// Negative — XML 1.0 numeric character references admit digits only, never a leading `+` or `-`.
+#[test]
+fn n_signed_numeric_character_references_are_refused() {
+    for body in [
+        "<Config><Status>&#+65;</Status></Config>",
+        "<Config><Status>&#x+41;</Status></Config>",
+        "<Config><Status>&#-65;</Status></Config>",
+        "<Config><Status>&#x-41;</Status></Config>",
+    ] {
+        refused(body, Reason::Reference);
+    }
+    for body in [
+        "<Config a=\"&#+65;\"><Status>s</Status></Config>",
+        "<Config a=\"&#x+41;\"><Status>s</Status></Config>",
+    ] {
+        refused(body, Reason::Attribute);
+    }
+    let valid = bound("<Config a=\"&#65;&#x42;\"><Status>&#65;&#x42;</Status></Config>")
+        .expect("unsigned numeric character references remain valid");
+    assert_eq!(valid.child_text("Status"), Some("AB"));
 }

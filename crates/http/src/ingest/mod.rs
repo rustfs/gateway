@@ -58,18 +58,65 @@ mod decoder;
 mod pipeline;
 mod reject;
 mod signer;
+mod signer_ecdsa;
 mod trailer;
 
 pub use crate::ingest::decoder::MIN_CHUNK_META_BYTES;
-pub use crate::ingest::pipeline::{IngestPipeline, IngestPolicy};
+pub use crate::ingest::pipeline::IngestPipeline;
 pub use crate::ingest::reject::{ChunkReject, ModeConfusion};
 pub use crate::ingest::signer::{
     ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, MAX_SCOPE_LINE_BYTES, ScopeId, SigningKeyCache,
 };
+pub use crate::ingest::signer_ecdsa::{ChunkVerifyingKey, EcdsaChunkSeed};
 pub use crate::ingest::trailer::{MAX_TRAILER_SECTION_BYTES, TrailerDeclaration};
+
+use core::num::NonZeroU8;
 
 use crate::framing::Framing;
 use crate::limits::ChunkLimits;
+
+/// When a decoded chunk becomes visible to the consumer.
+///
+/// One variant, on purpose. The alternative — deliver first and abort the object afterwards — is
+/// defensible for a plain `PutObject`, whose commit happens after the body, and indefensible for
+/// `UploadPart`, where the part must not reach storage at all. A policy with an opt-out variant
+/// would be selected by somebody, once, for a benchmark; a policy with no such variant cannot be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IngestPolicy {
+    /// Hold each chunk until its signature verifies, then deliver it.
+    VerifyBeforeDeliver {
+        /// How many chunks may be resident but undelivered. One: the chunk being verified.
+        ///
+        /// It is a [`NonZeroU8`] because zero would mean "deliver before verifying", which is the
+        /// state this enum exists to make unrepresentable.
+        lookahead_chunks: NonZeroU8,
+    },
+}
+
+impl IngestPolicy {
+    /// The only sane lookahead: the chunk currently being verified.
+    #[must_use]
+    pub fn verify_before_deliver() -> Self {
+        Self::VerifyBeforeDeliver {
+            // One is not zero.
+            lookahead_chunks: NonZeroU8::MIN,
+        }
+    }
+
+    /// How many chunks may be resident but not yet delivered.
+    #[must_use]
+    pub fn lookahead_chunks(&self) -> u8 {
+        match self {
+            Self::VerifyBeforeDeliver { lookahead_chunks } => lookahead_chunks.get(),
+        }
+    }
+}
+
+impl Default for IngestPolicy {
+    fn default() -> Self {
+        Self::verify_before_deliver()
+    }
+}
 
 /// The signature-derived facts the ingest layer is allowed to read about a payload.
 ///
@@ -94,6 +141,11 @@ pub trait PayloadFramingSource {
 
     /// Whether a trailer section was declared through `x-amz-trailer`.
     fn declares_trailers(&self) -> bool;
+
+    /// Whether chunk signatures use ECDSA P-256 (SigV4a) rather than HMAC-SHA256 (SigV4).
+    fn has_ecdsa_chunk_signatures(&self) -> bool {
+        false
+    }
 }
 
 /// Whether, and how, the `aws-chunked` parser runs for one request.
@@ -106,6 +158,7 @@ pub trait PayloadFramingSource {
 pub struct ChunkFraming {
     framed: bool,
     signed: bool,
+    ecdsa: bool,
     trailers: bool,
 }
 
@@ -116,12 +169,15 @@ impl ChunkFraming {
     ///
     /// [`ChunkReject::ModeConfusion`] when the source contradicts itself: a source that is framed
     /// but does not require a decoded length, one that is not framed but requires one, one that
-    /// signs chunks without being framed at all, or one that declares trailers without being
-    /// framed. Every one of those is a bug in the source rather than in the request, and a
-    /// pipeline built on a contradictory framing decision is a pipeline whose limits apply to a
-    /// body shape it is not actually reading.
+    /// signs chunks without being framed at all, one that declares ECDSA chunk signatures without
+    /// signed framing, or one that declares trailers without being framed. Every one of those is a
+    /// bug in the source rather than in the request, and a pipeline built on a contradictory
+    /// framing decision is a pipeline whose limits apply to a body shape it is not actually
+    /// reading.
     pub fn derive<S: PayloadFramingSource + ?Sized>(source: &S) -> Result<Self, ChunkReject> {
         let framed = source.is_framed();
+        let signed = source.has_chunk_signatures();
+        let ecdsa = source.has_ecdsa_chunk_signatures();
         if framed != source.requires_decoded_length() {
             return Err(ChunkReject::ModeConfusion(if framed {
                 ModeConfusion::DecodedLengthMissing
@@ -129,12 +185,16 @@ impl ChunkFraming {
                 ModeConfusion::DecodedLengthNotAllowed
             }));
         }
-        if !framed && (source.has_chunk_signatures() || source.declares_trailers()) {
+        if !framed && (signed || ecdsa || source.declares_trailers()) {
+            return Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthNotAllowed));
+        }
+        if ecdsa && !signed {
             return Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthNotAllowed));
         }
         Ok(Self {
             framed,
-            signed: source.has_chunk_signatures(),
+            signed,
+            ecdsa,
             trailers: source.declares_trailers(),
         })
     }
@@ -149,6 +209,12 @@ impl ChunkFraming {
     #[must_use]
     pub fn has_chunk_signatures(&self) -> bool {
         self.signed
+    }
+
+    /// Whether each chunk signature uses ECDSA P-256 (SigV4a) rather than HMAC-SHA256 (SigV4).
+    #[must_use]
+    pub fn has_ecdsa_chunk_signatures(&self) -> bool {
+        self.ecdsa
     }
 
     /// Whether a trailer section follows the terminal chunk.
@@ -177,9 +243,11 @@ impl DecodedLength {
     }
 }
 
-/// The smallest framing a signed chunk can be spelled with: one hex digit, the signature
-/// extension, and the two CRLFs around the data.
+/// The smallest framing a signed SigV4 HMAC chunk can be spelled with: one hex digit, the
+/// signature extension, and the two CRLFs around the data.
 const MIN_SIGNED_CHUNK_OVERHEAD: u64 = 1 + 17 + 64 + 2 + 2;
+/// The smallest framing a signed SigV4a ECDSA DER chunk can be spelled with (minimum 16 hex chars).
+const MIN_ECDSA_CHUNK_OVERHEAD: u64 = 1 + 17 + 16 + 2 + 2;
 /// The same for unsigned framing.
 const MIN_UNSIGNED_CHUNK_OVERHEAD: u64 = 1 + 2 + 2;
 
@@ -264,7 +332,9 @@ pub fn validate_decoded_length_with(
     // here would fail closed rather than skip the check.
     let wire_length = wire.declared_length().unwrap_or(0);
 
-    let per_chunk = if framing.has_chunk_signatures() {
+    let per_chunk = if framing.has_ecdsa_chunk_signatures() {
+        MIN_ECDSA_CHUNK_OVERHEAD
+    } else if framing.has_chunk_signatures() {
         MIN_SIGNED_CHUNK_OVERHEAD
     } else {
         MIN_UNSIGNED_CHUNK_OVERHEAD

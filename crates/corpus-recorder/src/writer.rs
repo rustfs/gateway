@@ -33,6 +33,25 @@ use rustfs_gateway_corpus::base64;
 use rustfs_gateway_corpus::redact;
 use rustfs_gateway_corpus::schema::{self, Capture, Chunk, Entry, Response, Sut};
 
+/// RAII reservation of `bytes` against [`Sink`]'s shared `in_flight_bytes` counter.
+///
+/// Held inside [`RawRecord`] so the budget stays charged while a record waits in the writer queue
+/// and is returned only once the writer finishes processing it (or immediately when a full queue
+/// drops the record). Holding the `Arc<AtomicUsize>` rather than `Arc<Sink>` keeps the channel's
+/// `SyncSender` free to close on shutdown.
+pub(crate) struct BudgetGuard {
+    in_flight: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for BudgetGuard {
+    fn drop(&mut self) {
+        if self.bytes > 0 {
+            self.in_flight.fetch_sub(self.bytes, Ordering::AcqRel);
+        }
+    }
+}
+
 /// Everything observed about one request, before it is an entry.
 pub(crate) struct RawRecord {
     pub(crate) op: &'static str,
@@ -43,6 +62,7 @@ pub(crate) struct RawRecord {
     /// was not observed.
     pub(crate) body: Option<Vec<u8>>,
     pub(crate) response: Option<ResponseHead>,
+    pub(crate) budget: BudgetGuard,
 }
 
 /// A response status and its header pairs.
@@ -63,9 +83,10 @@ pub struct RecorderStats {
     /// Requests whose head was not representable as text; passed through unrecorded.
     pub unrepresentable_head: u64,
     /// Requests whose whole body was not observed: it exceeded a cap, or the inner service
-    /// stopped reading before its end. Written without a body when the head declares none, and
-    /// not written at all when it declares one, since that entry would claim a body nobody
-    /// measured.
+    /// stopped reading before its end. Written without a body only when the head declares none and
+    /// no body bytes were observed; never written when the head declares a body or body bytes were
+    /// already observed (such as an HTTP/2 upload hitting a cap), since that entry would claim an
+    /// empty body nobody sent.
     pub body_not_recorded: u64,
     /// Admitted entries that failed to reach the file.
     pub write_errors: u64,
@@ -102,7 +123,7 @@ pub(crate) struct Sink {
     pub(crate) counters: Arc<Counters>,
     pub(crate) max_body_bytes: usize,
     max_in_flight_bytes: usize,
-    in_flight_bytes: AtomicUsize,
+    in_flight_bytes: Arc<AtomicUsize>,
 }
 
 impl Sink {
@@ -126,7 +147,7 @@ impl Sink {
             counters,
             max_body_bytes,
             max_in_flight_bytes,
-            in_flight_bytes: AtomicUsize::new(0),
+            in_flight_bytes: Arc::new(AtomicUsize::new(0)),
         }))
     }
 
@@ -152,6 +173,14 @@ impl Sink {
         self.in_flight_bytes.fetch_sub(bytes, Ordering::AcqRel);
     }
 
+    /// Transfers an already-reserved byte count into a [`BudgetGuard`] that releases on drop.
+    pub(crate) fn adopt_reservation(&self, bytes: usize) -> BudgetGuard {
+        BudgetGuard {
+            in_flight: Arc::clone(&self.in_flight_bytes),
+            bytes,
+        }
+    }
+
     /// Hands a finished record to the writer without waiting. A full queue drops the record and
     /// counts it: the request has already been served and must not be slowed by recording.
     pub(crate) fn submit(&self, record: RawRecord) {
@@ -162,11 +191,33 @@ impl Sink {
             }
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        queue_capacity: usize,
+        max_body_bytes: usize,
+        max_in_flight_bytes: usize,
+    ) -> (Arc<Self>, Receiver<RawRecord>) {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(queue_capacity);
+        let sink = Arc::new(Self {
+            sender,
+            counters: Arc::new(Counters::default()),
+            max_body_bytes,
+            max_in_flight_bytes,
+            in_flight_bytes: Arc::new(AtomicUsize::new(0)),
+        });
+        (sink, receiver)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_flight_bytes(&self) -> usize {
+        self.in_flight_bytes.load(Ordering::Acquire)
+    }
 }
 
 fn run(receiver: Receiver<RawRecord>, mut file: File, src: &str, sut: Sut, counters: &Counters) {
     while let Ok(record) = receiver.recv() {
-        let mut entry = entry_of(record, src, sut, &today());
+        let (mut entry, _budget) = entry_of(record, src, sut, &today());
         let _ = redact::sanitize(&mut entry);
         if redact::admit(&entry).is_err() {
             // The refusal names where the credential material was, and so is never logged here.
@@ -184,14 +235,14 @@ fn run(receiver: Receiver<RawRecord>, mut file: File, src: &str, sut: Sut, count
 /// Builds the corpus entry for one record. The body becomes a single data chunk without a
 /// delay: a passive tap sees when the service pulled bytes, not when the client sent them, so
 /// it claims neither frame boundaries nor timing.
-pub(crate) fn entry_of(record: RawRecord, src: &str, sut: Sut, recorded: &str) -> Entry {
+pub(crate) fn entry_of(record: RawRecord, src: &str, sut: Sut, recorded: &str) -> (Entry, BudgetGuard) {
     let chunks = record.body.filter(|body| !body.is_empty()).map(|body| {
         vec![Chunk::Data {
             bytes_b64: base64::encode(&body),
             delay_ms: None,
         }]
     });
-    Entry {
+    let entry = Entry {
         v: schema::CORPUS_SCHEMA_VERSION,
         op: record.op.to_owned(),
         src: src.to_owned(),
@@ -208,7 +259,8 @@ pub(crate) fn entry_of(record: RawRecord, src: &str, sut: Sut, recorded: &str) -
             body_b64: None,
         }),
         redacted: Vec::new(),
-    }
+    };
+    (entry, record.budget)
 }
 
 /// Today's UTC date as `YYYY-MM-DD`, read from the one wall clock the gateway allows.

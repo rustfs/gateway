@@ -102,7 +102,20 @@
 #   the maintainer accepted this client-contract difference in
 #   https://github.com/rustfs/gateway/issues/1445#issuecomment-6446176328.
 #
-# generation: 5
+# GENERATION 6 (rustfs/gateway#1624, rustfs/gateway#1621, ADR-0050 / rustfs/gateway#1600)
+#   https://github.com/rustfs/gateway/actions/runs/45324020308 (c0291e66) measured a
+#   complete 15/15 SDK generation-5 record run (with aws-sdk-java-v2 7 PASS / 0 FAIL /
+#   0 NA OK), matching the first failing run 44014781136 (c93c7940, #1621): minio-js
+#   222 PASS / 17 FAIL (previously 234 PASS / 11 FAIL in run 42753626778 on 371d91b2).
+#   Only minio-js rises, 11 -> 17 (+6 FAIL, -12 PASS). Every added failure is a
+#   compat-sut-only consequence of ADR-0050 / #1600 (baf0fb23, fixing #1588): under
+#   Selection::RustfsLegacy, `GET /{bucket}?list-type=2&metadata=true` is claimed as
+#   `rustfs:ListObjectsV2WithMetadata`, and compat-sut intentionally builds
+#   ServiceBuilder::rustfs_profile() without rustfs-gateway-dialect-rustfs-admin (#1199),
+#   so it now returns 501 NotImplemented instead of falling through to standard
+#   ListObjectsV2. All 6 added failures are attributed below.
+#
+# generation: 6
 #   MakeBucket_Test1, reported as its signature `Task MakeBucketAsync(string bucketName, string
 #   location = 'us-east-1', ...)`: the test names its bucket `minio-dotnet-example-` plus 50 random
 #   characters, 71 bytes, and the SUT refuses it 400 InvalidBucketName, as legacy RustFS does
@@ -160,19 +173,27 @@ minio-go 0
 #     compiled-client replay and independent signed response control are recorded at
 #     https://github.com/rustfs/gateway/issues/1445#issuecomment-6138457341.
 minio-java 16
-#   11 failures. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
+#   17 failures in total. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
 #   - copyObject(... conditions ...): `x-amz-copy-source-if-unmodified-since: Invalid Date` is
 #     refused, as legacy RustFS refuses an unreadable copy-source date: the RustFS profile's
 #     `refuse_unreadable_date_conditions` (ruling R14 of rustfs/backlog#1677); the generic profile
 #     ignores it since rustfs/gateway#764.
 #   - listObjects(... recursive:false): the objects the failed copy leaves in the shared bucket.
-#   - extensions.listObjectsV2WithMetadata, selectObjectContent, the `after all` hook for "Remove
-#     Object post select of content:" and the `after all` hook in "functional tests".
+#   - extensions.listObjectsV2WithMetadata (in "listObjectsV2WithMetadata with tags and metadata";
+#     now 501 S3Error on compat-sut, 0 delta), selectObjectContent, the `after all` hook for
+#     "Remove Object post select of content:" and the `after all` hook in "functional tests".
 #   Not on legacy RustFS:
 #   - listObjects(... recursive:true) x2 in "Force Deletion of objects with versions" and "... of
 #     prefix with versions", and the three `after all` hooks of the force-deletion blocks: MinIO's
 #     force delete, served by legacy RustFS, not by the launcher (#1199).
-minio-js 11
+#   - 3 x extensions.listObjectsV2WithMetadata (501 NotImplemented / S3Error) in the three
+#     mocha-steps special-character suites (without prefix, with prefix, and non-recursive prefix)
+#     and their 3 x `after` removeBucket hooks (409 BucketNotEmpty, because each aborted
+#     mocha-steps chain skips removeObject, accounting for -12 PASS / +6 FAIL): intentional
+#     ADR-0050 / #1600 (baf0fb23) routing of `metadata=true` listings to
+#     `rustfs:ListObjectsV2WithMetadata`, which compat-sut intentionally does not register without
+#     the admin dialect (#1199; served by a real RustFS assembly with the dialect installed).
+minio-js 17
 #   (unnamed): upload_snowball_objects. The archive is stored as one object, so its listing check
 #   fails; legacy RustFS extracts it (measured). Served by legacy RustFS, not by the launcher (#1199).
 minio-py 1

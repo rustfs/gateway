@@ -43,16 +43,48 @@ use std::collections::BTreeMap;
 use rustfs_gateway_model::ir::{Field, Type};
 use rustfs_gateway_model::{CodecRule, CodecValue};
 
-/// One inclusive integer range.
+/// One inclusive numeric range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Bound {
-    /// Smallest accepted value.
-    pub min: i32,
-    /// Largest accepted value.
-    pub max: i32,
+pub enum Bound {
+    /// Inclusive 32-bit range, with an optional `ErrorCode::*` constant for out-of-range refusal.
+    Int {
+        /// Smallest accepted value.
+        min: i32,
+        /// Largest accepted value.
+        max: i32,
+        /// Error code constant when out-of-range uses a code other than `InvalidArgument`.
+        code: Option<&'static str>,
+    },
+    /// Inclusive 32-bit range enforced under `DocumentReading::Tree` (deferred to legacy RustFS
+    /// handlers under `DocumentReading::RustFs`).
+    TreeInt {
+        /// Smallest accepted value.
+        min: i32,
+        /// Largest accepted value.
+        max: i32,
+    },
+    /// Inclusive 64-bit range.
+    Long {
+        /// Smallest accepted value.
+        min: i64,
+        /// Largest accepted value.
+        max: i64,
+    },
 }
 
-/// The range one field's quirks declare, if any.
+impl Bound {
+    /// Inclusive 32-bit range using the default `InvalidArgument` refusal.
+    #[must_use]
+    pub const fn int(min: i32, max: i32) -> Self {
+        Self::Int { min, max, code: None }
+    }
+}
+
+/// The range one field's quirks or protocol contract declare, if any.
+///
+/// Typed codec rules in `rules` are consulted first so mutation tests over `q-part-number-0072`
+/// and `q-max-keys-0073` control their exact members. Members without a typed codec rule fall back
+/// to `protocol_bound`, which carries the remaining AWS S3 integer and long boundaries.
 ///
 /// # Errors
 ///
@@ -65,7 +97,7 @@ pub fn of(field: &Field, rules: &BTreeMap<String, CodecRule>, operation: &str) -
             continue;
         };
         let bound = match &rule.current {
-            CodecValue::IntegerRange { min, max } => Bound { min: *min, max: *max },
+            CodecValue::IntegerRange { min, max } => Bound::int(*min, *max),
             _ => continue,
         };
         if !matches!(scalar_of(&field.ty), Type::Integer) {
@@ -82,7 +114,47 @@ pub fn of(field: &Field, rules: &BTreeMap<String, CodecRule>, operation: &str) -
         }
         found = Some(bound);
     }
-    Ok(found)
+    if found.is_some() {
+        return Ok(found);
+    }
+    Ok(protocol_bound(operation, field))
+}
+
+/// Whether `field` carries a `TreeInt` range check that needs `DocumentReading` threaded into its
+/// enclosing XML reader.
+#[must_use]
+pub(super) fn uses_tree_reading(operation: &str, field: &Field) -> bool {
+    matches!(protocol_bound(operation, field), Some(Bound::TreeInt { .. }))
+}
+
+/// Protocol ranges for bounded S3 integer/long members not already governed by a typed codec rule.
+///
+/// Intentionally excludes `UploadPart.PartNumber` (`q-part-number-0072`) and
+/// `ListObjectsV2.MaxKeys` (`q-max-keys-0073`) so mutating either rule removes its bound.
+fn protocol_bound(operation: &str, field: &Field) -> Option<Bound> {
+    match (operation, field.name.as_str(), scalar_of(&field.ty)) {
+        ("UploadPartCopy", "PartNumber", Type::Integer) => Some(Bound::int(1, 10_000)),
+        // Under `DocumentReading::Tree` (standard AWS mode), out-of-range part numbers are refused
+        // at decode; under `DocumentReading::RustFs`, legacy RustFS handlers enforce bucket
+        // existence first and return `InvalidPart` ("Part number N must be between 1 and 10000").
+        ("CompleteMultipartUpload", "PartNumber", Type::Integer) => Some(Bound::TreeInt { min: 1, max: 10_000 }),
+        ("GetObject" | "HeadObject", "PartNumber", Type::Integer) => Some(Bound::Int {
+            min: 1,
+            max: 10_000,
+            code: Some("INVALID_PART_NUMBER"),
+        }),
+        ("ListObjects" | "ListObjectVersions", "MaxKeys", Type::Integer) => Some(Bound::int(0, 1_000)),
+        ("ListMultipartUploads", "MaxUploads", Type::Integer) => Some(Bound::int(1, 1_000)),
+        // `c-mpu-0048` / `q-mpu-marker-0040`: `max-parts > 1000` is capped to 1000 by the handler,
+        // while negative values are refused at decode.
+        ("ListParts", "MaxParts", Type::Integer) => Some(Bound::int(0, i32::MAX)),
+        ("ListBuckets", "MaxBuckets", Type::Integer) => Some(Bound::int(1, 10_000)),
+        ("ListDirectoryBuckets", "MaxDirectoryBuckets", Type::Integer) => Some(Bound::int(1, 1_000)),
+        ("PutObject", "WriteOffsetBytes", Type::Long)
+        | ("CompleteMultipartUpload", "MpuObjectSize", Type::Long)
+        | ("DeleteObject", "IfMatchSize", Type::Long) => Some(Bound::Long { min: 0, max: i64::MAX }),
+        _ => None,
+    }
 }
 
 /// The scalar a field ultimately reads, looking through a list.

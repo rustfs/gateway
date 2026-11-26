@@ -123,8 +123,13 @@ fn legacy_refusal(head: &SignedHead<'_>) -> Option<(ErrorCode, &'static str)> {
             "The authorization query parameters that you provided are not valid.",
         ))
     };
-    let (Some(algorithm), Some(credential), Some(date), Some(expires), Some(signed_headers), Some(signature)) = (
-        unique("X-Amz-Algorithm"),
+    let Some(algorithm) = unique("X-Amz-Algorithm") else {
+        return unreadable();
+    };
+    if algorithm == rustfs_gateway_sig::ALGORITHM_SIGV4A {
+        return None;
+    }
+    let (Some(credential), Some(date), Some(expires), Some(signed_headers), Some(signature)) = (
         unique("X-Amz-Credential"),
         unique("X-Amz-Date"),
         unique("X-Amz-Expires"),

@@ -476,3 +476,94 @@ fn n_version_listing_etag_all_missing() {
 fn version_listing_etag_present_values_are_preserved() {
     assert_version_listing_entity_tags([Some("a"), Some("b"), Some("c")]);
 }
+
+/// Negative (q-token-form-0075) — invalid UTF-8 percent-escapes in query parameters are refused
+/// strictly rather than silently rewritten to `U+FFFD`.
+#[test]
+fn n_invalid_utf8_query_parameters_are_rejected_without_lossy_replacement() {
+    for (target, expected_member) in [
+        ("/conf-list?list-type=2&continuation-token=%FF%FE", "ContinuationToken"),
+        ("/conf-list?list-type=2&prefix=%C0%AF", "Prefix"),
+        ("/conf-list?list-type=2&encoding-type=%FF", "EncodingType"),
+    ] {
+        let request = accepted("GET", target, &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+        let err =
+            dto::ListObjectsV2::decode(&view, RequestBody::None).expect_err("invalid UTF-8 query parameter must be refused");
+        assert_eq!(err.code().as_str(), "InvalidArgument", "{target}");
+        assert_eq!(err.member(), Some(expected_member), "{target}");
+    }
+
+    let request = accepted("GET", "/photos/key?response-content-type=%FF", &[]);
+    let view = MetaView::of(&request, TargetKind::Object).expect("view");
+    let err = dto::GetObject::decode(&view, RequestBody::None).expect_err("invalid UTF-8 override must fail");
+    assert_eq!(err.code().as_str(), "InvalidArgument");
+    assert_eq!(err.member(), Some("ResponseContentType"));
+}
+
+/// Negative — non-URL-encoded echoed cursors and RustFS `encoding-type` echoes carrying XML-1.0
+/// forbidden C0 controls are refused rather than silently corrupted to `U+FFFD` in XML output.
+#[test]
+fn n_non_url_encoded_echoed_cursors_with_c0_controls_are_refused() {
+    let v2_req = accepted("GET", "/conf-list?list-type=2", &[]);
+    let v2_view = MetaView::of(&v2_req, TargetKind::Bucket).expect("view");
+
+    let mut bad_tok = v2_listing();
+    bad_tok.continuation_token = Some(OpaqueString::new("tok\u{1}en".to_owned()));
+    assert!(
+        dto::ListObjectsV2::encode(bad_tok, &v2_view, 200).is_err(),
+        "ContinuationToken with C0 control must not corrupt to U+FFFD"
+    );
+
+    let mut bad_next = v2_listing();
+    bad_next.next_continuation_token = Some(OpaqueString::new("nxt\u{0}ok".to_owned()));
+    assert!(
+        dto::ListObjectsV2::encode(bad_next, &v2_view, 200).is_err(),
+        "NextContinuationToken with C0 control must not corrupt to U+FFFD"
+    );
+
+    let ver_req = accepted("GET", "/conf-list?versions", &[]);
+    let ver_view = MetaView::of(&ver_req, TargetKind::Bucket).expect("view");
+    let bad_ver = dto::ListObjectVersionsOutput {
+        name: BucketName::new("conf-list").expect("bucket"),
+        version_id_marker: OpaqueString::new("ver\u{1}".to_owned()),
+        ..Default::default()
+    };
+    assert!(
+        dto::ListObjectVersions::encode(bad_ver, &ver_view, 200).is_err(),
+        "VersionIdMarker with C0 control must not corrupt to U+FFFD"
+    );
+
+    let mpu_req = accepted("GET", "/conf-list?uploads", &[]);
+    let mpu_view = MetaView::of(&mpu_req, TargetKind::Bucket).expect("view");
+    let bad_mpu = dto::ListMultipartUploadsOutput {
+        bucket: BucketName::new("conf-list").expect("bucket"),
+        upload_id_marker: Some("up\u{1}".to_owned()),
+        ..Default::default()
+    };
+    assert!(
+        dto::ListMultipartUploads::encode(bad_mpu, &mpu_view, 200).is_err(),
+        "UploadIdMarker with C0 control must not corrupt to U+FFFD"
+    );
+
+    let bkt_req = accepted("GET", "/", &[]);
+    let bkt_view = MetaView::of(&bkt_req, TargetKind::Service).expect("view");
+    let bad_bkt = dto::ListBucketsOutput {
+        continuation_token: Some(OpaqueString::new("bkt\u{1}".to_owned())),
+        ..Default::default()
+    };
+    assert!(
+        dto::ListBuckets::encode(bad_bkt, &bkt_view, 200).is_err(),
+        "ListBuckets ContinuationToken with C0 control must not corrupt to U+FFFD"
+    );
+
+    // RustFS verbatim encoding-type echo with C0 control must also refuse instead of U+FFFD.
+    let bad_echo_req = accepted("GET", "/conf-list?list-type=2&encoding-type=foo%01", &[]);
+    let bad_echo_view = MetaView::of(&bad_echo_req, TargetKind::Bucket)
+        .expect("view")
+        .with_rustfs_listing_encoding(V2);
+    assert!(
+        dto::ListObjectsV2::encode(v2_listing(), &bad_echo_view, 200).is_err(),
+        "RustFS encoding-type echo with C0 control must not corrupt to U+FFFD"
+    );
+}

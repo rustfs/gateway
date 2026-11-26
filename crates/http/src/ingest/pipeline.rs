@@ -45,7 +45,6 @@
 //!
 //! [`ChunkLimits::max_chunk_size`]: crate::ChunkLimits::max_chunk_size
 
-use core::num::NonZeroU8;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
@@ -56,57 +55,15 @@ use smallvec::SmallVec;
 
 use crate::ingest::ChunkFraming;
 use crate::ingest::DecodedLength;
-use crate::ingest::decoder::{ChunkDecoder, DecodeEvent, MIN_CHUNK_META_BYTES};
-use crate::ingest::reject::{ChunkReject, ModeConfusion};
+use crate::ingest::IngestPolicy;
+use crate::ingest::decoder::{ChunkAuth, ChunkDecoder, DecodeEvent, MIN_CHUNK_META_BYTES};
+use crate::ingest::reject::{ChunkReject, ModeConfusion, ZeroFillViolation};
 use crate::ingest::signer::ChunkSigner;
 use crate::ingest::trailer::{TrailerDeclaration, TrailerProgress, parse_trailer_section};
 use crate::limits::ChunkLimits;
 
 /// The window size the pipeline starts from before it learns how large the chunks really are.
 const INITIAL_WINDOW_BYTES: usize = 64 * 1024;
-
-/// When a decoded chunk becomes visible to the consumer.
-///
-/// One variant, on purpose. The alternative — deliver first and abort the object afterwards — is
-/// defensible for a plain `PutObject`, whose commit happens after the body, and indefensible for
-/// `UploadPart`, where the part must not reach storage at all. A policy with an opt-out variant
-/// would be selected by somebody, once, for a benchmark; a policy with no such variant cannot be.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IngestPolicy {
-    /// Hold each chunk until its signature verifies, then deliver it.
-    VerifyBeforeDeliver {
-        /// How many chunks may be resident but undelivered. One: the chunk being verified.
-        ///
-        /// It is a [`NonZeroU8`] because zero would mean "deliver before verifying", which is the
-        /// state this enum exists to make unrepresentable.
-        lookahead_chunks: NonZeroU8,
-    },
-}
-
-impl IngestPolicy {
-    /// The only sane lookahead: the chunk currently being verified.
-    #[must_use]
-    pub fn verify_before_deliver() -> Self {
-        Self::VerifyBeforeDeliver {
-            // One is not zero.
-            lookahead_chunks: NonZeroU8::MIN,
-        }
-    }
-
-    /// How many chunks may be resident but not yet delivered.
-    #[must_use]
-    pub fn lookahead_chunks(&self) -> u8 {
-        match self {
-            Self::VerifyBeforeDeliver { lookahead_chunks } => lookahead_chunks.get(),
-        }
-    }
-}
-
-impl Default for IngestPolicy {
-    fn default() -> Self {
-        Self::verify_before_deliver()
-    }
-}
 
 /// A run of bytes inside the window.
 type Run = (usize, usize);
@@ -173,19 +130,36 @@ impl<R> IngestPipeline<R> {
         if framing.has_chunk_signatures() != signer.is_some() {
             return Err(ChunkReject::SignatureChainBroken { chunk_index: 0 });
         }
+        if let Some(active) = signer.as_ref()
+            && active.is_ecdsa() != framing.has_ecdsa_chunk_signatures()
+        {
+            return Err(ChunkReject::SignatureChainBroken { chunk_index: 0 });
+        }
 
         let meta = usize::from(limits.max_chunk_meta_size());
         let chunk = usize::try_from(limits.max_chunk_size()).unwrap_or(usize::MAX);
         let lookahead = usize::from(policy.lookahead_chunks());
+        let trailer = if framing.declares_trailers() {
+            usize::from(limits.max_trailer_section_bytes()).saturating_add(1)
+        } else {
+            0
+        };
         let window_ceiling = chunk
             .saturating_mul(lookahead)
             .saturating_add(meta.saturating_mul(2))
-            .saturating_add(MIN_CHUNK_META_BYTES);
+            .saturating_add(MIN_CHUNK_META_BYTES)
+            .max(trailer);
         let initial = INITIAL_WINDOW_BYTES.min(window_ceiling).max(meta.saturating_mul(2));
 
         Ok(Self {
             inner,
-            decoder: ChunkDecoder::new(framing.has_chunk_signatures(), framing.declares_trailers(), declared.get(), limits),
+            decoder: ChunkDecoder::new(
+                framing.has_chunk_signatures(),
+                framing.has_ecdsa_chunk_signatures(),
+                framing.declares_trailers(),
+                declared.get(),
+                limits,
+            ),
             signer,
             observers,
             framing,
@@ -393,9 +367,9 @@ impl<R> IngestPipeline<R> {
     }
 
     /// Verifies the chunk that has just ended and promotes its bytes to deliverable.
-    fn end_chunk(&mut self, signature: Option<[u8; 32]>) -> Result<(), ChunkReject> {
+    fn end_chunk(&mut self, signature: Option<ChunkAuth>) -> Result<(), ChunkReject> {
         match (self.signer.as_mut(), signature) {
-            (Some(signer), Some(presented)) => signer.verify_chunk(&presented)?,
+            (Some(signer), Some(presented)) => signer.verify_chunk_auth(&presented)?,
             (None, None) => {}
             // The decoder's extension whitelist already refuses these, so reaching here would be
             // a decoder bug; failing closed keeps it from becoming a verification bypass.
@@ -493,6 +467,14 @@ impl<R> IngestPipeline<R> {
         })
     }
 
+    /// Fails closed when the inner reader breaks the `AsyncPayloadRead` contract by reporting
+    /// `ReadProgress::Filled(0)` on a non-empty buffer.
+    fn fail_zero_fill(&mut self) -> StreamError {
+        self.failed = true;
+        self.commit_allowed = false;
+        StreamError::upstream(Box::new(ZeroFillViolation)).with_bytes_before_error(self.delivered_bytes)
+    }
+
     /// The refusal that ended this body, if one did.
     ///
     /// Named rather than recovered by downcast: the response layer reads
@@ -552,7 +534,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 }
                 Poll::Ready(Ok(()))
             }
-            DecodeEvent::ChunkEnd { signature, .. } => match self.end_chunk(signature) {
+            DecodeEvent::ChunkEnd { signature } => match self.end_chunk(signature) {
                 Ok(()) => Poll::Ready(Ok(())),
                 Err(reject) => Poll::Ready(Err(self.fail(reject))),
             },
@@ -567,7 +549,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
             return Poll::Ready(Err(self.fail(reject)));
         }
         let filled = self.filled;
-        let Some(tail) = self.window.get_mut(filled..) else {
+        let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
             return Poll::Ready(Err(self.fail(ChunkReject::ChunkMetaTooLong)));
         };
         match Pin::new(&mut self.inner).poll_fill(cx, tail) {
@@ -576,6 +558,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(self.fail_zero_fill())),
             Poll::Ready(Ok(ReadProgress::Filled(n))) => {
                 self.filled = self.filled.saturating_add(n);
                 Poll::Ready(Ok(()))
@@ -591,12 +574,18 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
     fn refill_trailer(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
         if self.filled >= self.window.len() {
             let start = self.decoder.cursor();
-            if start == 0 {
-                return Poll::Ready(Err(self.fail(ChunkReject::TrailerSizeExceeded)));
+            if start > 0 {
+                self.window.copy_within(start..self.filled, 0);
+                self.filled = self.filled.saturating_sub(start);
+                self.decoder.rebase(start);
             }
-            self.window.copy_within(start..self.filled, 0);
-            self.filled = self.filled.saturating_sub(start);
-            self.decoder.rebase(start);
+            if self.filled >= self.window.len() {
+                if self.window.len() >= self.window_ceiling {
+                    return Poll::Ready(Err(self.fail(ChunkReject::TrailerSizeExceeded)));
+                }
+                let next = self.window.len().saturating_mul(2).min(self.window_ceiling);
+                self.window.resize(next, 0);
+            }
         }
         let filled = self.filled;
         let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
@@ -608,6 +597,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(self.fail_zero_fill())),
             Poll::Ready(Ok(ReadProgress::Filled(n))) => {
                 self.filled = self.filled.saturating_add(n);
                 Poll::Ready(Ok(()))
@@ -723,14 +713,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
-            Poll::Ready(Ok(ReadProgress::Filled(0))) if self.framing.declares_trailers() => {
-                Poll::Ready(Err(self.fail(ChunkReject::TruncatedBeforeTrailer)))
-            }
-            Poll::Ready(Ok(ReadProgress::Filled(0))) => {
-                self.finished = true;
-                self.commit_allowed = true;
-                Poll::Ready(Ok(()))
-            }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => Poll::Ready(Err(self.fail_zero_fill())),
             Poll::Ready(Ok(ReadProgress::Eof { trailers })) if self.framing.declares_trailers() && !trailers.is_empty() => {
                 Poll::Ready(Err(self.fail(ChunkReject::DataAfterTrailer)))
             }

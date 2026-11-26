@@ -145,6 +145,24 @@ fn sentence(headers: &HeaderMap, query: &str) -> Option<&'static str> {
             if value.starts_with(SIGV4_ALGORITHM) {
                 return Some(INVALID_HEADER);
             }
+            if value.starts_with(rustfs_gateway_sig::ALGORITHM_SIGV4A) {
+                let Ok(v4a) =
+                    rustfs_gateway_sig::SigV4aAuthorization::parse_with(value, rustfs_gateway_sig::ServiceReading::AnyName)
+                else {
+                    return Some(INVALID_HEADER);
+                };
+                let exempt = |name: &str| {
+                    name == CLOUDFRONT_ID
+                        || HEADER_SIGNED_ENVELOPE.contains(&name)
+                        || v4a
+                            .signed_headers()
+                            .split(';')
+                            .any(|signed| signed.eq_ignore_ascii_case(name))
+                };
+                if unsigned_amz_header(headers, exempt) {
+                    return Some(UNSIGNED_HEADERS);
+                }
+            }
             continue;
         };
         if signature.algorithm() != SIGV4_ALGORITHM {

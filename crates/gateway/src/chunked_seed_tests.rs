@@ -113,7 +113,11 @@ async fn mismatched_verified_seed_rejects_chunk_chain() {
 /// Negative — an empty `ChunkSink` fails closed with `501 NotImplemented` and closes the socket.
 #[test]
 fn empty_chunk_sink_is_refused() {
-    let error = build_signer(&ChunkSink::new()).expect_err("missing material must refuse");
+    let payload = PayloadMode::StreamingSigned {
+        trailer: rustfs_gateway_sig::TrailerSet::None,
+    };
+    let framing = ChunkFraming::derive(&FramingOf(&payload)).expect("streaming signed framing");
+    let error = build_signer(&framing, &ChunkSink::new()).expect_err("missing material must refuse");
     assert_eq!(error.status(), http::StatusCode::NOT_IMPLEMENTED);
     assert!(error.must_close_connection());
 }
