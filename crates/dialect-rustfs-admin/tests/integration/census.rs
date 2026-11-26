@@ -429,10 +429,38 @@ fn the_zip_download_keeps_its_bearer_claim() {
 /// Negative — the zip download's floor refuses SigV2 under every policy without requiring SigV4,
 /// which closes the difference recorded on rustfs/gateway#1592 (ADR-0052): legacy RustFS refuses
 /// a SigV2 header in its access check, and the floor now refuses it before any credential lookup
-/// rather than leaving it to a later refusal. Every other exempt floor is the OIDC bootstrap's,
-/// which admits SigV2 as RustFS does.
+/// rather than leaving it to a later refusal.
 #[test]
 fn the_zip_download_refuses_sigv2_without_requiring_sigv4() {
     assert!(Download::floor().refuses_sigv2_under_every_policy());
     assert!(!Download::floor().requires_sigv4_under_every_policy());
+}
+
+/// Negative — every OIDC bootstrap operation (`admin::anonymous_floor`) refuses SigV2 under every
+/// policy while continuing to admit anonymous requests (without requiring SigV4).
+#[test]
+fn n_every_oidc_bootstrap_operation_refuses_sigv2_while_admitting_anonymous() {
+    struct OidcFloors;
+    impl OperationFold for OidcFloors {
+        type Carry = Vec<(&'static str, bool, bool, bool)>;
+        fn step<O: AdminOperation>(&mut self, mut carry: Self::Carry) -> Self::Carry {
+            let floor = O::floor();
+            if floor.allows_anonymous() {
+                carry.push((
+                    O::NAME,
+                    floor.allows_anonymous(),
+                    floor.requires_sigv4_under_every_policy(),
+                    floor.refuses_sigv2_under_every_policy(),
+                ));
+            }
+            carry
+        }
+    }
+    let oidc = fold_every_operation(&mut OidcFloors, Vec::new());
+    assert_eq!(oidc.len(), 4, "expected the four OIDC bootstrap operations: {oidc:?}");
+    for (name, allows_anon, requires_sigv4, refuses_sigv2) in oidc {
+        assert!(allows_anon, "{name} lost anonymous admission");
+        assert!(!requires_sigv4, "{name} must not require SigV4");
+        assert!(refuses_sigv2, "{name} must refuse SigV2 under every policy");
+    }
 }

@@ -26,10 +26,13 @@
 //! Upstream: `super`'s harness, `super::zip_token_tests`' fixtures, `super::lambda_tests`' SigV2
 //! signer. Downstream: nothing.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::lambda_tests::sigv2_header_signed;
-use super::tests::rows;
-use super::zip_token_tests::{FixtureVerifier, GOOD, ZIP_GET, asked_of, floors, unsigned, with_verifier};
-use super::{ACCESS_KEY, Exchange, assemble_on};
+use super::sigv2_census_tests::{CONTROL_PATH, ControlHandler, SigV2ControlOp, control_dialect};
+use super::zip_token_tests::{FixtureVerifier, GOOD, asked_of, floors, unsigned, with_verifier};
+use super::{ACCESS_KEY, Exchange, assemble_installing, assemble_on};
 
 const DOWNLOAD: &str = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
 
@@ -70,19 +73,29 @@ fn n_a_sigv2_header_download_is_refused_at_the_floor_with_a_verifier() {
     }
 }
 
-/// Positive — the control in the other direction: the same SigV2 header fixture on an OIDC
-/// bootstrap row, whose floor does not refuse SigV2, is verified as the shared caller and reaches
-/// its handler on both floors, so the refusals above are the download floor's.
+/// Positive — the control in the other direction: the same SigV2 header fixture on a local
+/// claimed row whose floor does not refuse SigV2 is verified as the shared caller and reaches its
+/// handler on both floors, so the refusals above are the download floor's.
 #[test]
 fn the_same_sigv2_fixture_is_served_on_a_row_whose_floor_does_not_refuse_it() {
-    let (record, path) = rows()
-        .find(|(record, _)| record.anonymous && record.method == "GET")
-        .expect("the inventory has a GET OIDC bootstrap row");
-    assert_ne!(record.operation, ZIP_GET);
+    let dialect = control_dialect();
     for (at, floor) in floors() {
-        let exchange = assemble_on(floor, |_, _| true).exchange(sigv2_header_signed(unsigned("GET", &path)));
+        let hits = Arc::new(AtomicUsize::new(0));
+        let handler_hits = Arc::clone(&hits);
+        let assembled = assemble_installing(
+            floor,
+            |_, _| true,
+            false,
+            None,
+            |builder| {
+                builder
+                    .dialect(&dialect)
+                    .register::<SigV2ControlOp, _>(Arc::new(ControlHandler(handler_hits)))
+            },
+        );
+        let exchange = assembled.exchange(sigv2_header_signed(unsigned("GET", CONTROL_PATH)));
         assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
-        assert_eq!(exchange.reached, [record.operation], "{at}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "{at}");
         assert!(
             !exchange.asked.is_empty() && exchange.asked.iter().all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
             "{at}: the SigV2 signature was not verified as the caller: {:?}",

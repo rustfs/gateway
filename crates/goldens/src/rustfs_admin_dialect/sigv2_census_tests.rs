@@ -13,26 +13,32 @@
 // limitations under the License.
 
 //! The SigV2 census of the RustFS dialect (rustfs/gateway#1582): a SigV2 header signature on
-//! every claimed admin row, every admin-router extension and both admin fallbacks is `403 AccessDenied`
-//! before the authorizer, on the default floor and on the RustFS profile's.
+//! every claimed admin row (OIDC bootstrap rows included), every admin-router extension and both
+//! admin fallbacks is `403 AccessDenied` before the authorizer, on the default floor and on the
+//! RustFS profile's.
 //!
-//! Responsible for: that census, the zip download's rows included, whose floor refuses SigV2
-//! beside its bearer claim (ADR-0052, rustfs/gateway#1592); the rows it leaves out with their
-//! reason — the OIDC bootstrap rows, which RustFS answers before it reads any credential; and the
-//! positive control, a SigV2 header signature on an exempt row that is verified and reaches its
-//! handler, so a fixture that is refused for its own reasons fails the control rather than
-//! passing the census; and ADR-0044's claimed-route SigV2 canonical resource on an OIDC row, the
-//! one claimed family that still admits SigV2. The metadata listings are extension routes on the standard listing floor
-//! and are covered by `super::metadata_listing_tests`.
+//! Responsible for: that census across all 670 claimed rows, the zip download's rows and the four
+//! OIDC bootstrap operations included; verifying that anonymous OIDC requests are still admitted;
+//! and the positive and ADR-0044 virtual-host controls on a local exempt claimed operation, so a
+//! fixture refused for its own reasons fails the control rather than passing the census.
+//! The metadata listings are extension routes on the standard listing floor and are covered by
+//! `super::metadata_listing_tests`.
 //! NOT responsible for: SigV2 presigned URLs (refused by every privileged floor already) or the
 //! object lambda's own lanes (`super::lambda_tests`).
 //! Upstream: `super`, `super::tests`, `super::extension_tests`, `super::lambda_tests`.
 //! Downstream: nothing.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use rustfs_gateway::{LegacyRustfsVirtualHosts, Observer, RequestEvent, SecurityFloor};
-use rustfs_gateway_dialect_rustfs_admin::RouteRecord;
+use rustfs_gateway::{Handler, HandlerResult, LegacyRustfsVirtualHosts, Observer, Req, RequestEvent, Resp, SecurityFloor};
+use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody};
+use rustfs_gateway_core::dialect::{ClaimedRoute, ClaimedRow, Dialect, DialectOverlay, OverlayRow};
+use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
+use rustfs_gateway_core::registry::OperationSpec;
+use rustfs_gateway_core::route::{PathClaim, Predicate};
+use rustfs_gateway_dialect_rustfs_admin::{RouteRecord, admin};
+use rustfs_gateway_sig::{OperationFloor, SigService};
 
 use super::extension_tests::{admin_router_records, unsigned as unsigned_extension, unsigned_at};
 use super::lambda_tests::{sigv2_header_signed, sigv2_header_signed_over};
@@ -48,9 +54,9 @@ fn floors() -> [(&'static str, SecurityFloor); 2] {
     ]
 }
 
-/// Every claimed row the census covers: all but the OIDC bootstrap rows.
+/// Every claimed row the census covers: all 670 rows, including the eight OIDC bootstrap rows.
 fn census() -> Vec<(&'static RouteRecord, String)> {
-    rows().filter(|(record, _)| !record.anonymous).collect()
+    rows().collect()
 }
 
 /// Why `exchange` is not the floor's refusal: `403 AccessDenied` (a `HEAD` answer carries no
@@ -92,7 +98,7 @@ fn refused_on_both_floors<T: Sync>(items: &[T], send: impl Fn(&super::Assembled,
 #[test]
 fn n_a_sigv2_header_signature_on_every_claimed_admin_row_is_refused_without_asking() {
     let rows = census();
-    assert_eq!(rows.len(), 670 - 8, "every row but the eight OIDC rows");
+    assert_eq!(rows.len(), 670, "every claimed row including the eight OIDC rows");
     refused_on_both_floors(&rows, |assembled, (record, path)| {
         let exchange = assembled.exchange(sigv2_header_signed(unsigned(record, path)));
         not_refused(&exchange, record.method).map(|why| format!("{} {path}: {why}", record.method))
@@ -157,47 +163,172 @@ fn n_a_sigv2_header_signature_on_either_admin_fallback_is_refused_without_asking
     });
 }
 
-/// Positive — the control: the same SigV2 header fixture on an OIDC bootstrap row
-/// (`admin::anonymous_floor`), the one exempt family, is verified as the shared caller and reaches
-/// its handler, on both floors. A fixture refused for its own reasons would fail here instead of
-/// passing the census as a refusal. The zip download was a second exempt row until
-/// rustfs/gateway#1592; its floor now refuses SigV2 (ADR-0052), so it is in the census instead.
+/// Positive — refusing SigV2 on `admin::anonymous_floor` leaves anonymous OIDC bootstrap access
+/// intact on both floors.
 #[test]
-fn a_sigv2_header_signature_on_an_exempt_row_is_verified_and_reaches_its_handler() {
+fn an_anonymous_oidc_bootstrap_request_is_still_admitted() {
     let (record, path) = rows()
         .find(|(record, _)| record.anonymous && record.method == "GET")
         .expect("the inventory has a GET OIDC bootstrap row");
     for (at, floor) in floors() {
         let assembled = assemble_on(floor, |_, _| true);
-        let exchange = assembled.exchange(sigv2_header_signed(unsigned(record, &path)));
-        assert_eq!(exchange.status, 200, "{at}: GET {path}: {}", exchange.body);
+        let exchange = assembled.exchange(unsigned(record, &path));
+        assert_eq!(exchange.status, 200, "{at}: anonymous GET {path}: {}", exchange.body);
         assert_eq!(exchange.reached, [record.operation], "{at}: {path}");
-        assert!(!exchange.asked.is_empty(), "{at}: {path}: the authorizer was not asked");
+    }
+}
+
+pub(super) const CONTROL_PATH: &str = "/_test/sigv2-control/ping";
+
+pub(super) struct SigV2ControlOp;
+
+static CONTROL_SPEC: OperationSpec = admin::spec(
+    "test:SigV2Control",
+    AuthRequirement::new("test:SigV2Control", ResourceShape::Service),
+    false,
+);
+
+static CONTROL_FLOOR: OperationFloor =
+    OperationFloor::custom("test:SigV2Control", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
+
+static CONTROL_GET: &[Predicate] = &[Predicate::Method(http::Method::GET)];
+
+static CONTROL_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: CONTROL_PATH,
+    selector: CONTROL_GET,
+}];
+
+static CONTROL_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "sigv2-control",
+    vendor: "test",
+    claims: &[PathClaim {
+        prefix: "/_test/sigv2-control",
+        reason: "Local test prefix verifying SigV2 header signature verification on a claimed route.",
+        evidence: &["https://github.com/rustfs/gateway/issues/1632"],
+    }],
+    operations: &[OverlayRow {
+        name: "test:SigV2Control",
+        precedence: 1,
+        selector: "PathTemplate(\"/_test/sigv2-control/ping\") ∧ Method(GET)",
+        action: "test:SigV2Control",
+        resource: ResourceShape::Service,
+        success_status: 200,
+        anonymous: true,
+        evidence: &["https://github.com/rustfs/gateway/issues/1632"],
+    }],
+};
+
+impl Operation for SigV2ControlOp {
+    const NAME: &'static str = "test:SigV2Control";
+    type Input = ();
+    type Output = ();
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
+
+    fn spec() -> &'static OperationSpec {
+        &CONTROL_SPEC
+    }
+
+    fn floor() -> &'static OperationFloor {
+        &CONTROL_FLOOR
+    }
+}
+
+impl OperationCodec for SigV2ControlOp {
+    fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<(), CodecError> {
+        Ok(())
+    }
+
+    fn encode(_output: (), _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
+        Ok(EncodedResponse::of(status))
+    }
+}
+
+pub(super) struct ControlHandler(pub(super) Arc<AtomicUsize>);
+
+impl Handler<SigV2ControlOp> for ControlHandler {
+    async fn call(&self, _request: Req<SigV2ControlOp>) -> HandlerResult<SigV2ControlOp> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Resp::new(()))
+    }
+}
+
+pub(super) fn control_dialect() -> Dialect {
+    Dialect::assemble(&CONTROL_OVERLAY)
+        .declare_claimed::<SigV2ControlOp>(ClaimedRoute {
+            precedence: 1,
+            rows: CONTROL_ROWS,
+            shadows: &[],
+            bucket_param: None,
+        })
+        .build()
+        .expect("the local SigV2 control dialect builds")
+}
+
+/// Positive — the control: the same SigV2 header fixture on a local exempt claimed row is verified
+/// as the shared caller and reaches its handler, on both floors. A fixture refused for its own
+/// reasons would fail here instead of passing the census as a refusal. Every RustFS admin dialect
+/// row (including the four OIDC bootstrap operations) now refuses SigV2 under every policy.
+#[test]
+fn a_sigv2_header_signature_on_an_exempt_row_is_verified_and_reaches_its_handler() {
+    let dialect = control_dialect();
+    for (at, floor) in floors() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let handler_hits = Arc::clone(&hits);
+        let assembled = assemble_installing(
+            floor,
+            |_, _| true,
+            false,
+            None,
+            |builder| {
+                builder
+                    .dialect(&dialect)
+                    .register::<SigV2ControlOp, _>(Arc::new(ControlHandler(handler_hits)))
+            },
+        );
+        let exchange = assembled.exchange(sigv2_header_signed(unsigned_at("GET", CONTROL_PATH)));
+        assert_eq!(exchange.status, 200, "{at}: GET {CONTROL_PATH}: {}", exchange.body);
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "{at}: control handler not reached");
+        assert!(!exchange.asked.is_empty(), "{at}: {CONTROL_PATH}: the authorizer was not asked");
         assert!(
             exchange.asked.iter().all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
-            "{at}: {path}: the SigV2 signature was not verified as the caller: {:?}",
+            "{at}: {CONTROL_PATH}: the SigV2 signature was not verified as the caller: {:?}",
             exchange.asked
         );
     }
 }
 
-/// Positive and negative — ADR-0044's claimed-route SigV2 canonical resource, on the one family of
-/// claimed rows that still admits SigV2: under RustFS's addressing, which claims an admin path on
-/// any host, an OIDC bootstrap row requested on a virtual host is verified over its declared
-/// service-level path. A SigV2 header signed over that path is the
-/// caller's and reaches the handler. The same request signed over the host-derived bucket is
-/// refused `SignatureDoesNotMatch` without asking, because a claimed row has no host bucket. The
-/// STS goldens `sec1_16`/`sec1_17` pinned this until ADR-0052 refused SigV2 on the STS route.
+/// Positive and negative — ADR-0044's claimed-route SigV2 canonical resource on a claimed route
+/// that admits SigV2: under RustFS's addressing, which claims a prefix on any host, a claimed row
+/// requested on a virtual host is verified over its declared service-level path. A SigV2 header
+/// signed over that path is the caller's and reaches the handler; the same request signed over the
+/// host-derived bucket is refused `SignatureDoesNotMatch` without asking.
 #[test]
-fn a_claimed_oidc_row_on_a_virtual_host_is_signed_over_its_service_level_path() {
-    let (record, path) = rows()
-        .find(|(record, _)| record.anonymous && record.method == "GET")
-        .expect("the inventory has a GET OIDC bootstrap row");
+fn a_claimed_row_on_a_virtual_host_is_signed_over_its_service_level_path() {
+    let dialect = control_dialect();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let handler_hits = Arc::clone(&hits);
     let host = format!("photos.{BASE_DOMAIN}");
     let resolver = LegacyRustfsVirtualHosts::new([BASE_DOMAIN]).expect("the base domain");
-    let assembled = assemble_installing(SecurityFloor::new(), |_, _| true, true, None, |builder| builder.host_resolver(resolver));
+    let assembled = assemble_installing(
+        SecurityFloor::new(),
+        |_, _| true,
+        true,
+        None,
+        |builder| {
+            builder
+                .host_resolver(resolver)
+                .dialect(&dialect)
+                .register::<SigV2ControlOp, _>(Arc::new(ControlHandler(handler_hits)))
+        },
+    );
     let on_virtual_host = || {
-        let mut request = unsigned(record, &path);
+        let mut request = unsigned_at("GET", CONTROL_PATH);
         request
             .headers_mut()
             .insert(http::header::HOST, http::HeaderValue::from_str(&host).expect("a host"));
@@ -205,7 +336,7 @@ fn a_claimed_oidc_row_on_a_virtual_host_is_signed_over_its_service_level_path() 
     };
     let exchange = assembled.exchange(sigv2_header_signed_over(on_virtual_host(), None));
     assert_eq!(exchange.status, 200, "service-level path: {}", exchange.body);
-    assert_eq!(exchange.reached, [record.operation]);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
     assert!(
         !exchange.asked.is_empty() && exchange.asked.iter().all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
         "{:?}",
@@ -214,5 +345,6 @@ fn a_claimed_oidc_row_on_a_virtual_host_is_signed_over_its_service_level_path() 
     let exchange = assembled.exchange(sigv2_header_signed_over(on_virtual_host(), Some("photos")));
     assert_eq!(exchange.status, 403, "host bucket: {}", exchange.body);
     assert!(exchange.body.contains("<Code>SignatureDoesNotMatch</Code>"), "{}", exchange.body);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
     assert!(exchange.asked.is_empty() && exchange.reached.is_empty(), "{exchange:?}");
 }

@@ -154,7 +154,7 @@ pub fn encode(output: AdminResponse, status: u16) -> Result<EncodedResponse, Cod
     }
     for (name, value) in output.headers {
         if !RESERVED_HEADERS.iter().any(|reserved| reserved.eq_ignore_ascii_case(name)) {
-            encoded.set_header(name, &value);
+            encoded.append_header(name, &value);
         }
     }
     encoded.body = match output.body {
@@ -279,12 +279,14 @@ pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
         .with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
 }
 
-/// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or
-/// anonymous, never presigned. The opt-in is per operation, so the start-up
+/// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): SigV4 header-signed or
+/// anonymous, never presigned and never SigV2. The opt-in is per operation, so the start-up
 /// `SECURITY_POSTURE anonymous_reachable_ops=[…]` line names it, and the authorizer is still asked.
 #[must_use]
 pub const fn anonymous_floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3).allow_anonymous_after_listing_in_the_posture_report()
+    OperationFloor::custom(name, SigService::S3)
+        .allow_anonymous_after_listing_in_the_posture_report()
+        .refuse_sigv2_under_every_policy()
 }
 
 /// A generated admin operation: its codec answers an [`AdminResponse`], and it knows its rows.
@@ -335,4 +337,43 @@ pub trait ExtensionFold {
 
     /// Takes one operation's step.
     fn step<O: ExtensionOperation>(&mut self, carry: Self::Carry) -> Self::Carry;
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn n_anonymous_floor_refuses_sigv2_while_preserving_anonymous_access() {
+        let oidc = anonymous_floor("rustfs:GetV3OidcProviders");
+        assert!(oidc.allows_anonymous(), "OIDC bootstrap routes must still admit anonymous requests");
+        assert!(
+            !oidc.requires_sigv4_under_every_policy(),
+            "OIDC bootstrap routes must not require SigV4 (would block anonymous)"
+        );
+        assert!(
+            oidc.refuses_sigv2_under_every_policy(),
+            "OIDC bootstrap routes must refuse SigV2 under every policy"
+        );
+    }
+
+    #[test]
+    fn n_encode_preserves_multi_valued_headers_such_as_set_cookie() {
+        let response = AdminResponse::empty()
+            .with_header("set-cookie", "session=abc; Path=/; HttpOnly")
+            .with_header("set-cookie", "csrf=xyz; Path=/; SameSite=Lax")
+            .with_header("content-length", "999")
+            .with_header("transfer-encoding", "chunked");
+        let encoded = encode(response, 200).expect("encode succeeds");
+        let cookies: Vec<&str> = encoded
+            .headers
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert_eq!(cookies, vec!["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/; SameSite=Lax"]);
+        assert!(encoded.headers.get("content-length").is_none());
+        assert!(encoded.headers.get("transfer-encoding").is_none());
+    }
 }

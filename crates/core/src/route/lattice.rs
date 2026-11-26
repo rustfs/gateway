@@ -100,12 +100,13 @@ impl HeaderConstraint {
             (Self::Absent, Self::Absent) => Some(Self::Absent),
             (Self::Absent, _) | (_, Self::Absent) => None,
             (Self::Present, keep) | (keep, Self::Present) => Some(keep),
-            // Two prefixes are compatible exactly when one extends the other; the longer one is
-            // then the meet. `multipart/form-data` and `multipart/` overlap, `text/` does not.
+            // Two prefixes are compatible exactly when one extends the other (ASCII
+            // case-insensitively, matching `Predicate::HeaderPrefix`); the longer one is then the
+            // meet. `multipart/form-data` and `Multipart/` overlap, `text/` does not.
             (Self::Prefix(a), Self::Prefix(b)) => {
-                if a.starts_with(b) {
+                if super::selector::starts_with_ascii_ignore_case(a, b) {
                     Some(Self::Prefix(a))
-                } else if b.starts_with(a) {
+                } else if super::selector::starts_with_ascii_ignore_case(b, a) {
                     Some(Self::Prefix(b))
                 } else {
                     None
@@ -118,7 +119,7 @@ impl HeaderConstraint {
         match (self, other) {
             (Self::Absent, Self::Absent) | (Self::Present, Self::Present) => true,
             (Self::Prefix(_), Self::Present) => true,
-            (Self::Prefix(a), Self::Prefix(b)) => a.starts_with(b),
+            (Self::Prefix(a), Self::Prefix(b)) => super::selector::starts_with_ascii_ignore_case(a, b),
             _ => false,
         }
     }
@@ -398,3 +399,37 @@ impl fmt::Display for OverlapError {
 }
 
 impl std::error::Error for OverlapError {}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn n_header_prefix_lattice_meet_and_implies_are_ascii_case_insensitive() {
+        let upper = HeaderConstraint::Prefix("Multipart/");
+        let lower = HeaderConstraint::Prefix("multipart/form-data");
+        assert_eq!(upper.meet(lower), Some(HeaderConstraint::Prefix("multipart/form-data")));
+        assert_eq!(lower.meet(upper), Some(HeaderConstraint::Prefix("multipart/form-data")));
+        assert!(lower.implies(upper));
+        assert!(!upper.implies(lower));
+        assert_eq!(upper.meet(HeaderConstraint::Prefix("text/")), None);
+
+        let a = RouteSelector::owned(vec![
+            Predicate::Method(Method::POST),
+            Predicate::Target(TargetKind::Bucket),
+            Predicate::HeaderPrefix("content-type", "Multipart/"),
+        ]);
+        let b = RouteSelector::owned(vec![
+            Predicate::Method(Method::POST),
+            Predicate::Target(TargetKind::Bucket),
+            Predicate::HeaderPrefix("content-type", "multipart/form-data"),
+        ]);
+        let ac = Constraints::of(&a).expect("valid selector a");
+        let bc = Constraints::of(&b).expect("valid selector b");
+        assert!(
+            overlap_witness(&a, &ac, &b, &bc).expect("consistent").is_some(),
+            "mixed-case prefix selectors must overlap with a matching witness"
+        );
+    }
+}

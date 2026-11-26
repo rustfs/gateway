@@ -159,10 +159,7 @@ impl LegacyRustfsCors {
     /// (`RUSTFS_CONSOLE_PREFIX`), with no trailing `/`.
     #[must_use]
     pub fn with_console_prefix(mut self, prefix: &str) -> Self {
-        prefix
-            .strip_suffix('/')
-            .unwrap_or(prefix)
-            .clone_into(&mut self.console_prefix);
+        prefix.trim_end_matches('/').clone_into(&mut self.console_prefix);
         self
     }
 
@@ -233,6 +230,9 @@ impl LegacyRustfsCors {
             (ACCESS_CONTROL_ALLOW_HEADERS, FALLBACK_HEADERS),
             (ACCESS_CONTROL_EXPOSE_HEADERS, FALLBACK_EXPOSED),
         ];
+        if !matches!(allowance, AllowOrigin::Wildcard) {
+            pairs.push((VARY, HeaderValue::from_static("Origin")));
+        }
         if let Some(credential) = credential_allowance(policy, headers, allowance, origin_text) {
             let vary = if headers.contains_key(ACCESS_CONTROL_REQUEST_METHOD) {
                 // A credentialed browser treats Allow-Headers: * as a literal name. Enumerate
@@ -259,7 +259,10 @@ impl LegacyRustfsCors {
                 HeaderValue::from_static("Origin")
             };
             pairs.push(credential);
-            pairs.push((VARY, vary));
+            match pairs.iter_mut().find(|(name, _)| *name == VARY) {
+                Some((_, existing)) => *existing = vary,
+                None => pairs.push((VARY, vary)),
+            }
         }
         pairs
     }
@@ -419,22 +422,29 @@ fn rule_matches(rule: &CorsRule, origin: &str, method: &str, requested_headers: 
 }
 
 /// A pattern with exactly one `*` matches an origin that begins with what precedes it and ends with
-/// what follows it; a pattern with none matches itself; any other pattern matches nothing.
+/// what follows it without overlapping the prefix and suffix; a pattern with none matches itself;
+/// any other pattern matches nothing.
 fn matches_origin_pattern(pattern: &str, origin: &str) -> bool {
     if !pattern.contains('*') {
         return pattern == origin;
     }
     let mut parts = pattern.split('*');
     match (parts.next(), parts.next(), parts.next()) {
-        (Some(head), Some(tail), None) => origin.starts_with(head) && origin.ends_with(tail),
+        (Some(head), Some(tail), None) => {
+            origin.len() >= head.len().saturating_add(tail.len()) && origin.starts_with(head) && origin.ends_with(tail)
+        }
         _ => false,
     }
 }
 
-/// The prefix itself, or the prefix followed by `/` and anything.
+/// The prefix itself, or the prefix followed by `/` and anything. An empty prefix matches nothing
+/// so `with_console_prefix("/")` or `with_console_prefix("")` cannot classify every S3 path as a
+/// console path.
 fn has_path_prefix(path: &str, prefix: &str) -> bool {
-    path.strip_prefix(prefix)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    !prefix.is_empty()
+        && path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// The first segment of `path`, after its leading slashes: legacy RustFS's bucket, however the

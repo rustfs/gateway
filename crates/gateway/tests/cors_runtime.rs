@@ -667,5 +667,83 @@ async fn a_preflight_reaches_no_handler() {
     assert_eq!(served.body().as_ref(), b"<Ping/>");
 }
 
+/// Negative — ordinary CORS decoration must preserve any `Vary` dimension already written by
+/// the handler (such as `Accept-Encoding`) instead of overwriting it with `Vary: origin`, and must
+/// not duplicate `Origin` when already present.
+#[tokio::test]
+async fn n_ordinary_cors_decoration_preserves_existing_vary_header() {
+    struct VaryingPingBackend(&'static str);
+
+    impl Handler<BucketPing> for VaryingPingBackend {
+        async fn call(&self, _request: Req<BucketPing>) -> HandlerResult<BucketPing> {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::VARY, http::HeaderValue::from_static(self.0));
+            Ok(Resp::new(BucketPingOutput).with_extra_headers(headers))
+        }
+
+        async fn call_with_context(
+            &self,
+            request: Req<BucketPing>,
+            _context: rustfs_gateway::HandlerContext,
+        ) -> HandlerResult<BucketPing> {
+            self.call(request).await
+        }
+    }
+
+    let build_varying = |vary_value: &'static str| {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id");
+        ServiceBuilder::new()
+            .register::<BucketPing, _>(Arc::new(VaryingPingBackend(vary_value)))
+            .dialect(&bucket_ping_dialect())
+            .authenticator(SigV4Authenticator::new(
+                Arc::new(StaticCredentials::new().with(credentials)),
+                RegionSet::new(["us-east-1"]).expect("non-empty"),
+            ))
+            .authorizer(allow_when(|_| true))
+            .clock_with_skew_ack(
+                FixedClock::at_unix_seconds(1_767_225_600),
+                rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            )
+            .cors_source(CountingSource::new(&reads, &[NAMED], &["POST"]))
+            .cors_policy(CorsPolicy::default())
+            .build()
+            .expect("a complete assembly")
+    };
+
+    let vary_tokens = |response: &WireResponse| -> Vec<String> {
+        response
+            .headers()
+            .iter()
+            .filter(|(name, _)| *name == http::header::VARY)
+            .filter_map(|(_, value)| value.to_str().ok())
+            .flat_map(|value| value.split(',').map(|token| token.trim().to_owned()))
+            .collect()
+    };
+
+    let service = build_varying("Accept-Encoding");
+    for origin in [NAMED, STRANGER] {
+        let response = send(&service, "POST", PING, &[("origin", origin)]).await;
+        assert_eq!(response.status().as_u16(), 200);
+        let tokens = vary_tokens(&response);
+        assert!(
+            tokens.iter().any(|token| token.eq_ignore_ascii_case("Accept-Encoding")),
+            "origin={origin}: lost Accept-Encoding in Vary: {tokens:?}"
+        );
+        assert!(
+            tokens.iter().any(|token| token.eq_ignore_ascii_case("Origin")),
+            "origin={origin}: missing Origin in Vary: {tokens:?}"
+        );
+    }
+
+    let already_origin = build_varying("Accept-Encoding, Origin");
+    let response = send(&already_origin, "POST", PING, &[("origin", NAMED)]).await;
+    let origin_count = vary_tokens(&response)
+        .iter()
+        .filter(|token| token.eq_ignore_ascii_case("Origin"))
+        .count();
+    assert_eq!(origin_count, 1, "Vary must not duplicate Origin: {:?}", response.headers());
+}
+
 #[path = "cors_runtime/headerless.rs"]
 mod headerless;
