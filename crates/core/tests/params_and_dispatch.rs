@@ -1275,19 +1275,26 @@ fn the_acl_operations_declare_their_own_actions_and_resource_shapes() {
     }
 }
 
-/// An unhandled rename is refused by name instead of being dispatched as PutObject.
+/// An unhandled rename is refused by name on S3Express and never dispatched as PutObject on Standard.
 #[test]
 fn n_unhandled_rename_object_is_refused_instead_of_dispatched_as_put_object() {
     let mut registry = Registry::new();
     registry.register(&PUT_OBJECT).expect("a registrable spec");
     let router = Router::from_generated(registry).expect("the generated table builds");
 
+    let express = Req::new("PUT /bucket/key?renameObject").host_class(HostClass::S3Express);
     let error = router
-        .dispatch(&Req::new("PUT /bucket/key?renameObject").parts())
+        .dispatch(&express.parts())
         .expect_err("this registry has no RenameObject handler");
     assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
     assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
     assert_eq!(error.operation(), Some("RenameObject"));
+
+    let standard = Req::new("PUT /bucket/key?renameObject").host_class(HostClass::Standard);
+    let standard_error = router
+        .dispatch(&standard.parts())
+        .expect_err("Standard endpoint must never dispatch ?renameObject as PutObject");
+    assert_eq!(standard_error.operation(), None);
 
     let plain = router
         .dispatch(&Req::new("PUT /bucket/key").parts())

@@ -52,44 +52,42 @@ impl OperationCodec for dto::RenameObject {
         // DestinationIfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
             let raw = raw.as_ref();
-            input.destination_if_match = Some(raw.to_owned());
+            input.destination_if_match = Some(value::etag_header(raw, "DestinationIfMatch")?);
         }
         // DestinationIfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
             let raw = raw.as_ref();
-            input.destination_if_none_match = Some(raw.to_owned());
+            input.destination_if_none_match = Some(value::etag_header(raw, "DestinationIfNoneMatch")?);
         }
-        // DestinationIfModifiedSince — header `if-modified-since`, repeated field lines joined.
+        // DestinationIfModifiedSince — header `if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-modified-since") {
             let raw = raw.as_ref();
-            input.destination_if_modified_since =
-                Some(value::timestamp(raw, TimestampFormat::HttpDate, "DestinationIfModifiedSince")?);
+            input.destination_if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
-        // DestinationIfUnmodifiedSince — header `if-unmodified-since`, repeated field lines joined.
+        // DestinationIfUnmodifiedSince — header `if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-unmodified-since") {
             let raw = raw.as_ref();
-            input.destination_if_unmodified_since =
-                Some(value::timestamp(raw, TimestampFormat::HttpDate, "DestinationIfUnmodifiedSince")?);
+            input.destination_if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // SourceIfMatch — header `x-amz-rename-source-if-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-rename-source-if-match") {
             let raw = raw.as_ref();
-            input.source_if_match = Some(raw.to_owned());
+            input.source_if_match = Some(value::etag_header(raw, "SourceIfMatch")?);
         }
         // SourceIfNoneMatch — header `x-amz-rename-source-if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-rename-source-if-none-match") {
             let raw = raw.as_ref();
-            input.source_if_none_match = Some(raw.to_owned());
+            input.source_if_none_match = Some(value::etag_header(raw, "SourceIfNoneMatch")?);
         }
-        // SourceIfModifiedSince — header `x-amz-rename-source-if-modified-since`, repeated field lines joined.
+        // SourceIfModifiedSince — header `x-amz-rename-source-if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-rename-source-if-modified-since") {
             let raw = raw.as_ref();
-            input.source_if_modified_since = Some(value::timestamp(raw, TimestampFormat::HttpDate, "SourceIfModifiedSince")?);
+            input.source_if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
-        // SourceIfUnmodifiedSince — header `x-amz-rename-source-if-unmodified-since`, repeated field lines joined.
+        // SourceIfUnmodifiedSince — header `x-amz-rename-source-if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-rename-source-if-unmodified-since") {
             let raw = raw.as_ref();
-            input.source_if_unmodified_since = Some(value::timestamp(raw, TimestampFormat::HttpDate, "SourceIfUnmodifiedSince")?);
+            input.source_if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // ClientToken — header `x-amz-client-token`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-client-token") {

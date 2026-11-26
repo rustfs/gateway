@@ -1,0 +1,15 @@
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> tests/compile_fail/authz_rename_without_proof.rs:24:20
+   |
+24 |     let _ = source.resolve();
+   |                    ^^^^^^^-- argument #1 of type `&AuthorizedRead` is missing
+   |
+note: method defined here
+  --> src/ops/rename_object.rs
+   |
+   |     pub fn resolve(&self, proof: &crate::AuthorizedRead) -> Option<ResolvedRenameSource> {
+   |            ^^^^^^^
+help: provide the argument
+   |
+24 |     let _ = source.resolve(/* &AuthorizedRead */);
+   |                            +++++++++++++++++++++

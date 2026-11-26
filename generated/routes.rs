@@ -1694,6 +1694,7 @@ pub const ROUTES: &[RouteRow] = &[
             RoutePredicate::Method("PUT"),
             RoutePredicate::Target("Object"),
             RoutePredicate::QueryPresent("renameObject"),
+            RoutePredicate::HostClass("S3Express"),
         ],
     },
     RouteRow {
@@ -1708,6 +1709,7 @@ pub const ROUTES: &[RouteRow] = &[
         predicates: &[
             RoutePredicate::Method("PUT"),
             RoutePredicate::Target("Object"),
+            RoutePredicate::QueryAbsent("renameObject"),
             RoutePredicate::HeaderPresent("x-amz-copy-source", false),
         ],
     },
@@ -1723,6 +1725,7 @@ pub const ROUTES: &[RouteRow] = &[
         predicates: &[
             RoutePredicate::Method("PUT"),
             RoutePredicate::Target("Object"),
+            RoutePredicate::QueryAbsent("renameObject"),
         ],
     },
     RouteRow {

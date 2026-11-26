@@ -40,7 +40,7 @@
                   "CopyObject": {
                                   "method": "PUT",
                                   "path_shape": "/{Bucket}/{Key+}",
-                                  "query_keys": [],
+                                  "query_keys": ["renameObject"],
                                   "key_headers": ["x-amz-copy-source", "x-amz-meta-"],
                                   "host_classes": [],
                                   "error_codes": [
@@ -1228,7 +1228,7 @@
                   "PutObject": {
                                  "method": "PUT",
                                  "path_shape": "/{Bucket}/{Key+}",
-                                 "query_keys": [],
+                                 "query_keys": ["renameObject"],
                                  "key_headers": ["content-length", "etag", "x-amz-checksum-", "x-amz-meta-"],
                                  "host_classes": [],
                                  "error_codes": [
@@ -1381,8 +1381,15 @@
                                     "path_shape": "/{Bucket}/{Key+}",
                                     "query_keys": ["renameObject"],
                                     "key_headers": ["x-amz-rename-source"],
-                                    "host_classes": [],
-                                    "error_codes": ["AccessDenied", "InvalidRequest", "IdempotencyParameterMismatch"],
+                                    "host_classes": ["S3Express"],
+                                    "error_codes": [
+                                                     "AccessDenied",
+                                                     "InvalidRequest",
+                                                     "InvalidArgument",
+                                                     "KeyTooLongError",
+                                                     "PreconditionFailed",
+                                                     "IdempotencyParameterMismatch"
+                                                   ],
                                     "precedence": 780
                                   },
                   "RestoreObject": {
@@ -1955,7 +1962,7 @@
                                            "GetPublicAccessBlock",
                                            "PutPublicAccessBlock"
                                          ],
-                    "renameObject": ["PutObjectAnnotation", "RenameObject"],
+                    "renameObject": ["CopyObject", "PutObject", "PutObjectAnnotation", "RenameObject"],
                     "replication": [
                                      "CreateBucket",
                                      "DeleteBucket",
@@ -2053,7 +2060,7 @@
                      "x-amz-object-attributes": ["GetObjectAttributes"],
                      "x-amz-rename-source": ["RenameObject"]
                    },
-  "by_host_class": { "S3Express": ["ListDirectoryBuckets"] },
+  "by_host_class": { "S3Express": ["ListDirectoryBuckets", "RenameObject"] },
   "by_error_code": {
                      "AccessDenied": [
                                        "AbortMultipartUpload",
@@ -2245,6 +2252,7 @@
                                           "PutObjectRetention",
                                           "PutObjectTagging",
                                           "PutPublicAccessBlock",
+                                          "RenameObject",
                                           "RestoreObject",
                                           "SelectObjectContent",
                                           "UpdateBucketMetadataAnnotationTableConfiguration",
@@ -2295,6 +2303,7 @@
                      "InvalidTextEncoding": ["SelectObjectContent"],
                      "InvalidWriteOffset": ["PutObject"],
                      "JSONParsingError": ["SelectObjectContent"],
+                     "KeyTooLongError": ["RenameObject"],
                      "MalformedPolicy": ["PutBucketPolicy"],
                      "MalformedXML": [
                                        "CompleteMultipartUpload",
@@ -2514,6 +2523,7 @@
                                              "GetObject",
                                              "HeadObject",
                                              "PutObject",
+                                             "RenameObject",
                                              "UploadPartCopy"
                                            ],
                      "ReplicationConfigurationNotFoundError": ["GetBucketReplication"],

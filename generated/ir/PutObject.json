@@ -5,7 +5,11 @@
             "method": "PUT",
             "target": "Object",
             "precedence": 800,
-            "predicates": [{ "kind": "Method", "method": "PUT" }, { "kind": "Target", "target": "Object" }],
+            "predicates": [
+                            { "kind": "Method", "method": "PUT" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryAbsent", "key": "renameObject" }
+                          ],
             "success_status": 200,
             "alt_success_statuses": [],
             "path_shape": "/{Bucket}/{Key+}"

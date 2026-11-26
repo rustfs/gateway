@@ -741,3 +741,8 @@ fn source_erased(value: &rustfs_gateway::CopySourceValue) -> bool {
         }
     }
 }
+
+#[path = "authz_consumption/rename_host.rs"]
+mod rename_host;
+#[path = "authz_consumption/rename_object.rs"]
+mod rename_object;

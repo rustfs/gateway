@@ -10,7 +10,7 @@ path_shape = "/{Bucket}/{Key+}"
 precedence = 790
 success_status = 200
 alt_success_statuses = []
-predicates = ["Method PUT", "Target Object", "HeaderPresent x-amz-copy-source"]
+predicates = ["Method PUT", "Target Object", "QueryAbsent ?renameObject", "HeaderPresent x-amz-copy-source"]
 quirks = ["q-copy-source-split-0077", "q-copy-source-arn-0078", "q-copy-directive-0079", "q-copy-self-0080", "q-copy-error-after-200-0082", "q-copy-source-version-0083"]
 
 [auth]

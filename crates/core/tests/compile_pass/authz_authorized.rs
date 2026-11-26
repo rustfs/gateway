@@ -19,9 +19,13 @@
 //! Upstream: the test harness and subject module. Downstream: the repository verification gate.
 
 use rustfs_gateway_core::Req;
-use rustfs_gateway_types::dto::CopyObject;
+use rustfs_gateway_types::dto::{CopyObject, RenameObject};
 
 fn handler(request: Req<CopyObject>) {
+    let _source = request.resources().source().resolve(request.read_proof());
+}
+
+fn rename_handler(request: Req<RenameObject>) {
     let _source = request.resources().source().resolve(request.read_proof());
 }
 

@@ -274,13 +274,13 @@ pub fn render_timestamp(value: &Timestamp, format: TimestampFormat) -> Result<St
         .map_err(|_| CodecError::internal("an output timestamp has no rendering in the format its binding declares"))
 }
 
-/// Parses an entity tag out of a header value.
+/// Parses a single conditional entity tag via [`crate::ops::shared::etag::parse_conditional_etag`].
 ///
 /// # Errors
 ///
 /// [`CodecError`] naming the member.
 pub fn etag_header(value: &str, member: &'static str) -> Result<ETag, CodecError> {
-    ETag::parse_http_header(value).map_err(|_| unusable(member))
+    crate::ops::shared::etag::parse_conditional_etag(value).map_err(|_| unusable(member))
 }
 
 /// Parses an entity tag out of an XML text node, quoted or bare.

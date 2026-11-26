@@ -64,7 +64,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `policyStatus` | [GetBucketPolicyStatus](#getbucketpolicystatus) |
 | `prefix` | [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `publicAccessBlock` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetPublicAccessBlock](#getpublicaccessblock), [PutPublicAccessBlock](#putpublicaccessblock) |
-| `renameObject` | [PutObjectAnnotation](#putobjectannotation) (absent), [RenameObject](#renameobject) |
+| `renameObject` | [CopyObject](#copyobject) (absent), [PutObject](#putobject) (absent), [PutObjectAnnotation](#putobjectannotation) (absent), [RenameObject](#renameobject) |
 | `replication` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketReplication](#deletebucketreplication), [GetBucketReplication](#getbucketreplication), [PutBucketReplication](#putbucketreplication) |
 | `requestPayment` | [CreateBucket](#createbucket) (absent), [GetBucketRequestPayment](#getbucketrequestpayment), [PutBucketRequestPayment](#putbucketrequestpayment) |
 | `response-cache-control` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -230,7 +230,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `IdempotencyParameterMismatch` | [RenameObject](#renameobject) |
 | `IncompleteBody` | [PutObject](#putobject), [UploadPart](#uploadpart) |
 | `InvalidAnnotationName` | [PutObjectAnnotation](#putobjectannotation) |
-| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `InvalidArgument` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [CreateMultipartUpload](#createmultipartupload), [CreateSession](#createsession), [DeleteBucketTagging](#deletebuckettagging), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [GetBucketTagging](#getbuckettagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RenameObject](#renameobject), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `InvalidBucketName` | [CreateBucket](#createbucket) |
 | `InvalidColumnIndex` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidCompressionFormat` | [SelectObjectContent](#selectobjectcontent) |
@@ -250,6 +250,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `InvalidTextEncoding` | [SelectObjectContent](#selectobjectcontent) |
 | `InvalidWriteOffset` | [PutObject](#putobject) |
 | `JSONParsingError` | [SelectObjectContent](#selectobjectcontent) |
+| `KeyTooLongError` | [RenameObject](#renameobject) |
 | `MalformedPolicy` | [PutBucketPolicy](#putbucketpolicy) |
 | `MalformedXML` | [CompleteMultipartUpload](#completemultipartupload), [CreateBucket](#createbucket), [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration), [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration), [DeleteObjects](#deleteobjects), [PutBucketAbac](#putbucketabac), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketAnalyticsConfiguration](#putbucketanalyticsconfiguration), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketIntelligentTieringConfiguration](#putbucketintelligenttieringconfiguration), [PutBucketInventoryConfiguration](#putbucketinventoryconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketMetricsConfiguration](#putbucketmetricsconfiguration), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketOwnershipControls](#putbucketownershipcontrols), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration), [UpdateBucketMetadataInventoryTableConfiguration](#updatebucketmetadatainventorytableconfiguration), [UpdateBucketMetadataJournalTableConfiguration](#updatebucketmetadatajournaltableconfiguration), [UpdateObjectEncryption](#updateobjectencryption) |
 | `MethodNotAllowed` | [CopyObject](#copyobject), [GetBucketMetadataTableConfiguration](#getbucketmetadatatableconfiguration), [GetObject](#getobject), [HeadObject](#headobject), [UploadPartCopy](#uploadpartcopy) |
@@ -275,7 +276,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `OverMaxRecordSize` | [SelectObjectContent](#selectobjectcontent) |
 | `ParseUnexpectedToken` | [SelectObjectContent](#selectobjectcontent) |
 | `PermanentRedirect` | [CreateBucket](#createbucket), [DeleteBucket](#deletebucket), [GetBucketLocation](#getbucketlocation), [HeadBucket](#headbucket), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
-| `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [UploadPartCopy](#uploadpartcopy) |
+| `PreconditionFailed` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject), [RenameObject](#renameobject), [UploadPartCopy](#uploadpartcopy) |
 | `ReplicationConfigurationNotFoundError` | [GetBucketReplication](#getbucketreplication) |
 | `RestoreAlreadyInProgress` | [RestoreObject](#restoreobject) |
 | `ServerSideEncryptionConfigurationNotFoundError` | [GetBucketEncryption](#getbucketencryption) |
@@ -290,7 +291,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [AbortMultipartUpload](#abortmultipartupload) | DELETE | `/{Bucket}/{Key+}` | `uploadId` | — | 204 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidArgument` | `q-mpu-abort-0035`, `q-mpu-upload-id-0037` |
 | [CompleteMultipartUpload](#completemultipartupload) | POST | `/{Bucket}/{Key+}` | `uploadId` | `x-amz-checksum-` | 200 | `NoSuchBucket`, `NoSuchUpload`, `AccessDenied`, `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`, `MalformedXML`, `InvalidArgument`, `InvalidRequest`, `PreconditionFailed`, `ConditionalRequestConflict` | `q-mpu-etag-0028`, `q-mpu-request-root-0030`, `q-mpu-late-error-0033`, `q-mpu-trailer-0034`, `q-mpu-upload-id-0037`, `q-mpu-limits-0038`, `q-mpu-metadata-0039` |
-| [CopyObject](#copyobject) | PUT | `/{Bucket}/{Key+}` | — | `x-amz-copy-source`, `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `MethodNotAllowed`, `EntityTooLarge`, `ObjectNotInActiveTierError` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-directive-0079`, `q-copy-self-0080`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083` |
+| [CopyObject](#copyobject) | PUT | `/{Bucket}/{Key+}` | `renameObject` | `x-amz-copy-source`, `x-amz-meta-` | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `MethodNotAllowed`, `EntityTooLarge`, `ObjectNotInActiveTierError` | `q-copy-source-split-0077`, `q-copy-source-arn-0078`, `q-copy-directive-0079`, `q-copy-self-0080`, `q-copy-error-after-200-0082`, `q-copy-source-version-0083` |
 | [CreateBucket](#createbucket) | PUT | `/{Bucket}` | `abac`, `accelerate`, `acl`, `analytics`, `cors`, `encryption`, `intelligent-tiering`, `inventory`, `lifecycle`, `logging`, `metadataAnnotationTable`, `metadataInventoryTable`, `metadataJournalTable`, `metrics`, `notification`, `object-lock`, `ownershipControls`, `policy`, `publicAccessBlock`, `replication`, `requestPayment`, `tagging`, `versioning`, `website` | — | 200 | `InvalidLocationConstraint`, `MalformedXML`, `InvalidBucketName`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect`, `BucketAlreadyExists`, `BucketAlreadyOwnedByYou` | `q-bkt-0001`, `q-bkt-0002`, `q-bkt-0003`, `q-bkt-0004`, `q-bkt-0005`, `q-bkt-0006`, `q-bkt-0011` |
 | [CreateBucketMetadataConfiguration](#createbucketmetadataconfiguration) | POST | `/{Bucket}` | `metadataConfiguration` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
 | [CreateBucketMetadataTableConfiguration](#createbucketmetadatatableconfiguration) | POST | `/{Bucket}` | `metadataTable` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
@@ -382,7 +383,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | [PutBucketTagging](#putbuckettagging) | PUT | `/{Bucket}` | `tagging` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
 | [PutBucketVersioning](#putbucketversioning) | PUT | `/{Bucket}` | `versioning` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-ver-0002`, `q-ver-0003`, `q-ver-0004` |
 | [PutBucketWebsite](#putbucketwebsite) | PUT | `/{Bucket}` | `website` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-web-0002`, `q-web-0003`, `q-web-0004`, `q-web-0006` |
-| [PutObject](#putobject) | PUT | `/{Bucket}/{Key+}` | — | `content-length`, `etag`, `x-amz-checksum-`, `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `InvalidDigest`, `BadDigest`, `XAmzContentChecksumMismatch`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `ConditionalRequestConflict`, `EncryptionTypeMismatch`, `InvalidWriteOffset`, `TooManyParts` | `q-checksum-0006`, `q-tag-header-form-0093` |
+| [PutObject](#putobject) | PUT | `/{Bucket}/{Key+}` | `renameObject` | `content-length`, `etag`, `x-amz-checksum-`, `x-amz-meta-` | 200 | `NoSuchBucket`, `AccessDenied`, `MissingContentLength`, `EntityTooLarge`, `IncompleteBody`, `InvalidDigest`, `BadDigest`, `XAmzContentChecksumMismatch`, `InvalidRequest`, `InvalidArgument`, `PreconditionFailed`, `ConditionalRequestConflict`, `EncryptionTypeMismatch`, `InvalidWriteOffset`, `TooManyParts` | `q-checksum-0006`, `q-tag-header-form-0093` |
 | [PutObjectAcl](#putobjectacl) | PUT | `/{Bucket}/{Key+}` | `acl`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-acl-0002`, `q-acl-0003`, `q-acl-0004`, `q-acl-0005`, `q-acl-0006`, `q-acl-0007`, `q-acl-0009`, `q-acl-0010`, `q-acl-0011`, `q-acl-0012`, `q-acl-0013` |
 | [PutObjectAnnotation](#putobjectannotation) | PUT | `/{Bucket}/{Key+}` | `acl`, `annotation`, `annotationName`, `attributes`, `legal-hold`, `renameObject`, `retention`, `tagging`, `uploadId`, `versionId` | `x-amz-copy-source` | 200 | `NoSuchBucket`, `NoSuchKey`, `AnnotationLimitExceeded`, `AnnotationNameTooLong`, `InvalidAnnotationName`, `InvalidRequest`, `UnsupportedMediaType` | — |
 | [PutObjectLegalHold](#putobjectlegalhold) | PUT | `/{Bucket}/{Key+}` | `legal-hold`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0005`, `q-lock-0006`, `q-lock-0007`, `q-lock-0011`, `q-lock-0014`, `q-lock-0015` |
@@ -390,7 +391,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | [PutObjectRetention](#putobjectretention) | PUT | `/{Bucket}/{Key+}` | `retention`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `BadDigest` | `q-lock-0004`, `q-lock-0006`, `q-lock-0007`, `q-lock-0008`, `q-lock-0012`, `q-lock-0013`, `q-lock-0014`, `q-lock-0015` |
 | [PutObjectTagging](#putobjecttagging) | PUT | `/{Bucket}/{Key+}` | `tagging`, `versionId` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `InvalidArgument`, `MalformedXML`, `InvalidTag` | `q-tag-md5-required-0092`, `q-tag-limits-0094` |
 | [PutPublicAccessBlock](#putpublicaccessblock) | PUT | `/{Bucket}` | `publicAccessBlock` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument`, `BadDigest` | `q-pab-0002`, `q-pab-0004`, `q-pab-0005` |
-| [RenameObject](#renameobject) | PUT | `/{Bucket}/{Key+}` | `renameObject` | `x-amz-rename-source` | 200 | `AccessDenied`, `InvalidRequest`, `IdempotencyParameterMismatch` | — |
+| [RenameObject](#renameobject) | PUT | `/{Bucket}/{Key+}` | `renameObject` | `x-amz-rename-source` | 200 | `AccessDenied`, `InvalidRequest`, `InvalidArgument`, `KeyTooLongError`, `PreconditionFailed`, `IdempotencyParameterMismatch` | — |
 | [RestoreObject](#restoreobject) | POST | `/{Bucket}/{Key+}` | `restore`, `versionId` | — | 202 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `RestoreAlreadyInProgress`, `InvalidObjectState`, `ObjectAlreadyInActiveTierError` | `q-restore-0001`, `q-restore-0002`, `q-restore-0003`, `q-restore-0004`, `q-restore-0005`, `q-restore-0006`, `q-restore-0007`, `q-restore-0008` |
 | [SelectObjectContent](#selectobjectcontent) | POST | `/{Bucket}/{Key+}` | `select`, `select-type` | — | 200 | `NoSuchBucket`, `NoSuchKey`, `AccessDenied`, `MalformedXML`, `InvalidRequest`, `InvalidArgument`, `InvalidExpressionType`, `ExpressionTooLong`, `InvalidTextEncoding`, `InvalidCompressionFormat`, `ObjectSerializationConflict`, `UnsupportedFunction`, `ParseUnexpectedToken`, `CSVParsingError`, `JSONParsingError`, `InvalidColumnIndex`, `InvalidDataType`, `OverMaxRecordSize` | `q-select-0001`, `q-select-0002`, `q-select-0003`, `q-select-0004`, `q-select-0005`, `q-select-0006`, `q-select-0007`, `q-select-0008`, `q-select-0009` |
 | [UpdateBucketMetadataAnnotationTableConfiguration](#updatebucketmetadataannotationtableconfiguration) | PUT | `/{Bucket}` | `metadataAnnotationTable` | — | 200 | `NoSuchBucket`, `AccessDenied`, `MalformedXML`, `InvalidArgument` | — |
@@ -515,9 +516,9 @@ First match wins; lower precedence is tried first.
 | 710 | [CreateBucket](#createbucket) | `Method PUT` AND `Target Bucket` AND `QueryAbsent ?abac` AND `QueryAbsent ?accelerate` AND `QueryAbsent ?acl` AND `QueryAbsent ?analytics` AND `QueryAbsent ?cors` AND `QueryAbsent ?encryption` AND `QueryAbsent ?intelligent-tiering` AND `QueryAbsent ?inventory` AND `QueryAbsent ?lifecycle` AND `QueryAbsent ?logging` AND `QueryAbsent ?metadataAnnotationTable` AND `QueryAbsent ?metadataInventoryTable` AND `QueryAbsent ?metadataJournalTable` AND `QueryAbsent ?metrics` AND `QueryAbsent ?notification` AND `QueryAbsent ?object-lock` AND `QueryAbsent ?ownershipControls` AND `QueryAbsent ?policy` AND `QueryAbsent ?publicAccessBlock` AND `QueryAbsent ?replication` AND `QueryAbsent ?requestPayment` AND `QueryAbsent ?tagging` AND `QueryAbsent ?versioning` AND `QueryAbsent ?website` |
 | 720 | [DeleteBucket](#deletebucket) | `Method DELETE` AND `Target Bucket` AND `QueryAbsent ?analytics` AND `QueryAbsent ?cors` AND `QueryAbsent ?encryption` AND `QueryAbsent ?intelligent-tiering` AND `QueryAbsent ?inventory` AND `QueryAbsent ?lifecycle` AND `QueryAbsent ?metadataConfiguration` AND `QueryAbsent ?metadataTable` AND `QueryAbsent ?metrics` AND `QueryAbsent ?ownershipControls` AND `QueryAbsent ?policy` AND `QueryAbsent ?publicAccessBlock` AND `QueryAbsent ?replication` AND `QueryAbsent ?tagging` AND `QueryAbsent ?website` |
 | 730 | [HeadBucket](#headbucket) | `Method HEAD` AND `Target Bucket` |
-| 780 | [RenameObject](#renameobject) | `Method PUT` AND `Target Object` AND `QueryPresent ?renameObject` |
-| 790 | [CopyObject](#copyobject) | `Method PUT` AND `Target Object` AND `HeaderPresent x-amz-copy-source` |
-| 800 | [PutObject](#putobject) | `Method PUT` AND `Target Object` |
+| 780 | [RenameObject](#renameobject) | `Method PUT` AND `Target Object` AND `QueryPresent ?renameObject` AND `HostClass S3Express` |
+| 790 | [CopyObject](#copyobject) | `Method PUT` AND `Target Object` AND `QueryAbsent ?renameObject` AND `HeaderPresent x-amz-copy-source` |
+| 800 | [PutObject](#putobject) | `Method PUT` AND `Target Object` AND `QueryAbsent ?renameObject` |
 | 900 | [GetObject](#getobject) | `Method GET` AND `Target Object` |
 | 950 | [HeadObject](#headobject) | `Method HEAD` AND `Target Object` |
 | 1000 | [DeleteObject](#deleteobject) | `Method DELETE` AND `Target Object` |
@@ -630,13 +631,14 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `Method PUT`
 - `Target Object`
+- `QueryAbsent ?renameObject`
 - `HeaderPresent x-amz-copy-source`
 
 **Query keys**
 
 - routed on, present: —
 - routed on, exact value: —
-- routed on, absent: —
+- routed on, absent: `renameObject`
 - read as parameters: —
 
 **Headers**
@@ -4814,12 +4816,13 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `Method PUT`
 - `Target Object`
+- `QueryAbsent ?renameObject`
 
 **Query keys**
 
 - routed on, present: —
 - routed on, exact value: —
-- routed on, absent: —
+- routed on, absent: `renameObject`
 - read as parameters: —
 
 **Headers**
@@ -5235,6 +5238,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Method PUT`
 - `Target Object`
 - `QueryPresent ?renameObject`
+- `HostClass S3Express`
 
 **Query keys**
 
@@ -5256,7 +5260,17 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Error codes**
 
-`AccessDenied`, `InvalidRequest`, `IdempotencyParameterMismatch`
+`AccessDenied`, `InvalidRequest`, `InvalidArgument`, `KeyTooLongError`, `PreconditionFailed`, `IdempotencyParameterMismatch`
+
+**Quirks**
+
+- `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
+- `q-cond-0050` (header_tolerance on `GetObject.IfModifiedSince`) — A date condition whose value is not a valid HTTP-date, or which points into the server's own future, is ignored rather than rejected or answered with a stale 304; the rule covers both date conditions and both read operations, so one header never gets two answers depending on the method.
+- `q-etag-form-0074` (wire_form on `GetObject.IfMatch`) — A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first.
+- `q-copy-conditions-0081` (independent_conditions on `CopyObject.CopySourceIfMatch`) — The four `x-amz-copy-source-if-*` conditions are evaluated against the source object and the four unprefixed conditions against the destination, as two independent verdicts that are never merged, and a copy-source entity tag arrives unquoted from more than one SDK and is compared as an opaque tag rather than refused.
+- `q-copy-source-date-0159` (header_tolerance on `CopyObject.CopySourceIfUnmodifiedSince`) — A copy-source date condition whose value is not a valid HTTP-date is ignored and the copy proceeds, on both copy-source date members of CopyObject and UploadPartCopy, while a readable one is still evaluated against the source object.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 ### RestoreObject
 

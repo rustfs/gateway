@@ -2991,18 +2991,6 @@ reason   = "The ACL and rename subresources name different object mutations in o
 evidence = ["put-object-acl", "rename-object"]
 
 [[shadowing]]
-winner   = "RenameObject"
-shadowed = "CopyObject"
-reason   = "A PUT carrying both ?renameObject and x-amz-copy-source reaches both rows. RenameObject wins at 780 before CopyObject at 790, so an unsupported rename is refused instead of copying a source object over the destination."
-evidence = ["rename-object", "copy-object"]
-
-[[shadowing]]
-winner   = "RenameObject"
-shadowed = "PutObject"
-reason   = "Every rename is also accepted by PutObject, whose selector pins only PUT and an object target. RenameObject wins at 780 before PutObject at 800; the reverse order writes an empty object to the destination instead of returning operation-specific NotImplemented."
-evidence = ["rename-object", "put-object"]
-
-[[shadowing]]
 winner = "GetBucketAccelerateConfiguration"
 shadowed = "GetBucketIntelligentTieringConfiguration"
 reason_ref = "two-subresource-keys"

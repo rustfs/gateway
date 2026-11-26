@@ -224,3 +224,55 @@ fn the_copy_family_reads_copy_source_dates_tolerantly() {
         }
     }
 }
+
+/// Negative — RenameObject reads all four conditional date headers tolerantly and validates all
+/// four entity-tag conditional headers at decode time.
+#[test]
+fn rename_object_reads_dates_tolerantly_and_validates_conditional_etags() {
+    let artifacts = super::codegen_tests::artifacts();
+    let path = "codec/ops/rename_object.rs";
+    let text = artifacts
+        .files
+        .iter()
+        .find(|(name, _)| name.to_string_lossy().ends_with(path))
+        .map(|(_, body)| body.clone())
+        .unwrap_or_else(|| panic!("{path} is generated"));
+    for header in [
+        "if-modified-since",
+        "if-unmodified-since",
+        "x-amz-rename-source-if-modified-since",
+        "x-amz-rename-source-if-unmodified-since",
+    ] {
+        let line = text
+            .lines()
+            .find(|line| line.contains(&format!("request.header(\"{header}\")")))
+            .unwrap_or_else(|| panic!("{path} binds {header}"));
+        let assignment = text
+            .lines()
+            .skip_while(|candidate| *candidate != line)
+            .nth(2)
+            .unwrap_or_else(|| panic!("{path} assigns {header}"));
+        assert!(assignment.contains("date_condition"), "{path} {header}: {assignment}");
+        assert!(!assignment.contains('?'), "{path} {header} still refuses: {assignment}");
+    }
+    for (header, member) in [
+        ("if-match", "DestinationIfMatch"),
+        ("if-none-match", "DestinationIfNoneMatch"),
+        ("x-amz-rename-source-if-match", "SourceIfMatch"),
+        ("x-amz-rename-source-if-none-match", "SourceIfNoneMatch"),
+    ] {
+        let line = text
+            .lines()
+            .find(|line| line.contains(&format!("request.header(\"{header}\")")))
+            .unwrap_or_else(|| panic!("{path} binds {header}"));
+        let assignment = text
+            .lines()
+            .skip_while(|candidate| *candidate != line)
+            .nth(2)
+            .unwrap_or_else(|| panic!("{path} assigns {header}"));
+        assert!(
+            assignment.contains(&format!("value::etag_header(raw, \"{member}\")?")),
+            "{path} {header}: {assignment}"
+        );
+    }
+}
