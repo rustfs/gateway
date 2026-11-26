@@ -49,6 +49,24 @@ impl S3Service {
         self.inner.view_policy.bodyless_digest.settle(mode, current, question)
     }
 
+    /// Resolves an operation's versioned authorization requirement and `versionId` query value,
+    /// refusing invalid UTF-8 `versionId` values before authorization runs (GHSA-3ppv).
+    pub(super) fn resolve_version_requirement<'a>(
+        &self,
+        operation: &'static str,
+        requirement: rustfs_gateway_core::AuthRequirement,
+        meta: &'a MetaView<'a>,
+    ) -> Result<(rustfs_gateway_core::AuthRequirement, Option<std::borrow::Cow<'a, str>>), rustfs_gateway_core::CodecError> {
+        let named_version = if requirement.version_requirement().is_some() {
+            meta.query("versionId").map_err(|error| error.about("VersionId"))?
+        } else {
+            None
+        };
+        let requirement = requirement
+            .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
+        Ok((requirement, named_version))
+    }
+
     /// The acceptance ceilings in force.
     #[must_use]
     pub fn limits(&self) -> &Limits {

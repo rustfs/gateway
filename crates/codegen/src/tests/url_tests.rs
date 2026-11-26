@@ -183,7 +183,7 @@ fn every_encoded_member_narrows_the_decision_to_its_own_path() {
         );
     }
     assert!(
-        body.contains("value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);"),
+        body.contains("value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type)?;"),
         "the RustFS profile's echo follows the model echo:\n{body}"
     );
 }

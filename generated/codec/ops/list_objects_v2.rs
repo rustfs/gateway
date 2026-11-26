@@ -41,41 +41,41 @@ impl OperationCodec for dto::ListObjectsV2 {
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
         // Delimiter — query `delimiter`, percent-decoded once.
-        if let Some(raw) = request.query("delimiter") {
+        if let Some(raw) = value::query(request, "delimiter", "Delimiter")? {
             let raw = raw.as_ref();
             input.delimiter = Some(raw.to_owned());
         }
         // EncodingType — query `encoding-type`, percent-decoded once.
-        if let Some(raw) = request.query("encoding-type") {
+        if let Some(raw) = value::query(request, "encoding-type", "EncodingType")? {
             let raw = raw.as_ref();
             input.encoding_type = Some(dto::EncodingType::custom(raw.to_owned()));
         }
         // MaxKeys — query `max-keys`, percent-decoded once.
-        if let Some(raw) = request.query("max-keys") {
+        if let Some(raw) = value::query(request, "max-keys", "MaxKeys")? {
             let raw = raw.as_ref();
             input.max_keys = Some(value::integer_in_range(raw, "MaxKeys", 0, 1000)?);
         } else {
             input.max_keys = Some(1000i32);
         }
         // Prefix — query `prefix`, percent-decoded once.
-        if let Some(raw) = request.query("prefix") {
+        if let Some(raw) = value::query(request, "prefix", "Prefix")? {
             let raw = raw.as_ref();
             input.prefix = Some(raw.to_owned());
         }
         // ContinuationToken — query `continuation-token`, percent-decoded once.
-        if let Some(raw) = request.query("continuation-token") {
+        if let Some(raw) = value::query(request, "continuation-token", "ContinuationToken")? {
             let raw = raw.as_ref();
             input.continuation_token = Some(value::opaque(raw));
         }
         // FetchOwner — query `fetch-owner`, percent-decoded once.
-        if let Some(raw) = request.query("fetch-owner") {
+        if let Some(raw) = value::query(request, "fetch-owner", "FetchOwner")? {
             let raw = raw.as_ref();
             input.fetch_owner = Some(value::boolean(raw, "FetchOwner")?);
         } else {
             input.fetch_owner = Some(false);
         }
         // StartAfter — query `start-after`, percent-decoded once.
-        if let Some(raw) = request.query("start-after") {
+        if let Some(raw) = value::query(request, "start-after", "StartAfter")? {
             let raw = raw.as_ref();
             input.start_after = Some(raw.to_owned());
         }
@@ -127,7 +127,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         } else {
             None
         };
-        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);
+        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListBucketResult", Some(rustfs_gateway_xml::S3_XMLNS));
@@ -171,10 +171,10 @@ impl OperationCodec for dto::ListObjectsV2 {
             writer.element("EncodingType", v.as_str());
         }
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element("ContinuationToken", v.as_str());
+            writer.element("ContinuationToken", value::xml_cursor_text(v.as_str(), "ContinuationToken")?);
         }
         if let Some(v) = output.next_continuation_token.as_ref() {
-            writer.element("NextContinuationToken", v.as_str());
+            writer.element("NextContinuationToken", value::xml_cursor_text(v.as_str(), "NextContinuationToken")?);
         }
         if let Some(v) = output.start_after.as_ref() {
             let url_encoding = url_encoding.member("StartAfter");

@@ -294,7 +294,7 @@ fn one_field(
                 "request.names()",
             )?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
-            let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
+            let _ = writeln!(out, "        if let Some(raw) = value::query(request, \"{wire}\", \"{member}\")? {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
             out.push_str(&assign(12, target, &wrap(&owner, field, &conversion)));
             out.push_str(&otherwise(&owner, field, target, codes)?);

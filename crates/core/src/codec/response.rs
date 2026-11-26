@@ -147,7 +147,7 @@ impl EncodedResponse {
             return;
         }
         for entry in table {
-            let Some(value) = request.query(entry.query) else {
+            let Some(value) = request.query(entry.query).ok().flatten() else {
                 continue;
             };
             let Ok(name) = HeaderName::from_bytes(entry.header.as_bytes()) else {

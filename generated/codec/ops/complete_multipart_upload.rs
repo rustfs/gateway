@@ -51,7 +51,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         }
         input.multipart_upload = read_completed_multipart_upload(&root)?;
         // UploadId — query `uploadId`, percent-decoded once.
-        if let Some(raw) = request.query("uploadId") {
+        if let Some(raw) = value::query(request, "uploadId", "UploadId")? {
             let raw = raw.as_ref();
             input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);
         } else {

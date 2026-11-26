@@ -126,7 +126,7 @@ impl OperationCodec for PutObjectReplica {
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         // Read before the body is handed on: a replica write that names no version is refused
         // without the object decode ever holding the stream.
-        let version_id = match request.query(VERSION_ID_QUERY) {
+        let version_id = match request.query(VERSION_ID_QUERY).map_err(|error| error.about("VersionId"))? {
             Some(value) if !value.is_empty() => value.into_owned(),
             Some(_) => {
                 return Err(CodecError::invalid_argument(

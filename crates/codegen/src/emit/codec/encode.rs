@@ -306,7 +306,7 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
             );
             // The RustFS profile's echo (rustfs/gateway#1059), after the AWS-model one it may
             // replace; a no-op under every other decision.
-            out.push_str("        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);\n");
+            out.push_str("        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type)?;\n");
         }
     }
     order::new_document(&mut out, "        ");
@@ -459,7 +459,8 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             let _ = writeln!(out, "{pad}}}");
         }
         other => {
-            let rendered = wire_expr(other, member, &ir.operation, encoded)?;
+            let rendered = layout::echoed_cursor_wire(field, encoded)
+                .map_or_else(|| wire_expr(other, member, &ir.operation, encoded), Ok)?;
             let call = layout::element_call(other, policy);
             let narrowed = url::member_binding(&format!("{pad}    "), member, encoded);
             if field.required {
@@ -543,10 +544,6 @@ fn shape_opener(name: &str, shape: &Shape) -> String {
 }
 
 /// The wire expression for one member, encoded or not.
-///
-/// One call rather than an `if` at each of the four sites that render a scalar: the two forms are
-/// interchangeable everywhere a value is written, and a site that forgot the encoded one would
-/// write the raw spelling into a document whose echo claims otherwise.
 fn wire_expr(ty: &Type, member: &str, operation: &str, encoded: bool) -> Result<String, String> {
     if encoded {
         return expr::to_wire_url_encoded(ty, member, operation);

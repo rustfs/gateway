@@ -50,7 +50,7 @@
 
 use percent_encoding::percent_decode_str;
 use rustfs_gateway_types::{
-    BucketName, ByteRange, CopySourceValue, ErrorCode, KeyFloor, NamePolicy, ObjectKey, PathSplit, RangeParse,
+    BucketName, ByteRange, CopySourceValue, ErrorCode, KeyFloor, NamePolicy, ObjectKey, PathSplit, RangeParse, SlashPolicy,
 };
 
 use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
@@ -633,7 +633,10 @@ fn decode(value: &str) -> Result<String, CopySourceRejection> {
 
 /// Validates a key already decoded once, retaining the recursive safety checks of the default floor.
 fn decoded_key(decoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceRejection> {
-    if names.key_floor() == KeyFloor::RustfsLegacy {
+    // A copy source header key is never slash-folded even under `SlashPolicy::RustfsLegacy`, while
+    // retaining the deployment's key floor and validator.
+    let source_policy = names.clone().with_slash_policy(SlashPolicy::AwsPreserve);
+    if source_policy.key_floor() == KeyFloor::RustfsLegacy {
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a copy source's key as the one
         // decode of the header and checks only its length, so a source it stores under a control
         // character, a backslash or a literal `%2F` can be copied, and a traversal or an empty key
@@ -641,7 +644,7 @@ fn decoded_key(decoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourc
         // build). The same materialisation as a body-carried key keeps the source under the key
         // floor the destination is held to; the intended future behaviour is the unconditional
         // check below, with the default floor.
-        return ObjectKey::materialize_decoded(decoded, names).map_err(|_| {
+        return ObjectKey::materialize_decoded(decoded, &source_policy).map_err(|_| {
             CopySourceRejection::new(
                 ErrorCode::INVALID_ARGUMENT,
                 "the key named by x-amz-copy-source is not a valid object key",
@@ -672,7 +675,7 @@ fn decoded_key(decoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourc
     }
     // The same materialisation as a body-carried key, so the deployment's validator judges the
     // source as it judges the destination (the floor already ran at every decode pass above).
-    ObjectKey::materialize_decoded(decoded, names).map_err(|_| {
+    ObjectKey::materialize_decoded(decoded, &source_policy).map_err(|_| {
         CopySourceRejection::new(
             ErrorCode::INVALID_ARGUMENT,
             "the key named by x-amz-copy-source is not a valid object key",

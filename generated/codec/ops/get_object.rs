@@ -85,37 +85,37 @@ impl OperationCodec for dto::GetObject {
             input.if_range = Some(raw.to_owned());
         }
         // ResponseCacheControl — query `response-cache-control`, percent-decoded once.
-        if let Some(raw) = request.query("response-cache-control") {
+        if let Some(raw) = value::query(request, "response-cache-control", "ResponseCacheControl")? {
             let raw = raw.as_ref();
             input.response_cache_control = Some(raw.to_owned());
         }
         // ResponseContentDisposition — query `response-content-disposition`, percent-decoded once.
-        if let Some(raw) = request.query("response-content-disposition") {
+        if let Some(raw) = value::query(request, "response-content-disposition", "ResponseContentDisposition")? {
             let raw = raw.as_ref();
             input.response_content_disposition = Some(raw.to_owned());
         }
         // ResponseContentEncoding — query `response-content-encoding`, percent-decoded once.
-        if let Some(raw) = request.query("response-content-encoding") {
+        if let Some(raw) = value::query(request, "response-content-encoding", "ResponseContentEncoding")? {
             let raw = raw.as_ref();
             input.response_content_encoding = Some(raw.to_owned());
         }
         // ResponseContentLanguage — query `response-content-language`, percent-decoded once.
-        if let Some(raw) = request.query("response-content-language") {
+        if let Some(raw) = value::query(request, "response-content-language", "ResponseContentLanguage")? {
             let raw = raw.as_ref();
             input.response_content_language = Some(raw.to_owned());
         }
         // ResponseContentType — query `response-content-type`, percent-decoded once.
-        if let Some(raw) = request.query("response-content-type") {
+        if let Some(raw) = value::query(request, "response-content-type", "ResponseContentType")? {
             let raw = raw.as_ref();
             input.response_content_type = Some(raw.to_owned());
         }
         // ResponseExpires — query `response-expires`, percent-decoded once.
-        if let Some(raw) = request.query("response-expires") {
+        if let Some(raw) = value::query(request, "response-expires", "ResponseExpires")? {
             let raw = raw.as_ref();
             input.response_expires = Some(value::timestamp(raw, TimestampFormat::HttpDate, "ResponseExpires")?);
         }
         // VersionId — query `versionId`, percent-decoded once.
-        if let Some(raw) = request.query("versionId") {
+        if let Some(raw) = value::query(request, "versionId", "VersionId")? {
             let raw = raw.as_ref();
             input.version_id = Some(raw.to_owned());
         }
@@ -140,7 +140,7 @@ impl OperationCodec for dto::GetObject {
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
         // PartNumber — query `partNumber`, percent-decoded once.
-        if let Some(raw) = request.query("partNumber") {
+        if let Some(raw) = value::query(request, "partNumber", "PartNumber")? {
             let raw = raw.as_ref();
             input.part_number = Some(value::integer(raw, "PartNumber")?);
         }

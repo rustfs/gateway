@@ -1022,11 +1022,11 @@ impl S3Service {
             // Registration requires an action. Fail closed if that invariant breaks (rustfs/rustfs#4845).
             return outcome.refuse_handler(HandlerError::internal_error("this operation declares no authorisation action"));
         };
-        // A named version selects the version action unless the RustFS profile keeps the legacy
-        // unversioned action. Both questions name the version (GHSA-3ppv).
-        let named_version = requirement.version_requirement().and(meta.query("versionId"));
-        let requirement = requirement
-            .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
+        // A named version selects the version action unless the RustFS profile keeps the legacy one (GHSA-3ppv).
+        let (requirement, named_version) = match self.resolve_version_requirement(operation, requirement, &meta) {
+            Ok(resolved) => resolved,
+            Err(error) => return outcome.refuse_at(Refused::Decode, from_codec(error, response_kind)),
+        };
         let asked_version = named_version.as_deref();
         let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();

@@ -39,7 +39,7 @@ impl OperationCodec for dto::ListBucketIntelligentTieringConfigurations {
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
         // ContinuationToken — query `continuation-token`, percent-decoded once.
-        if let Some(raw) = request.query("continuation-token") {
+        if let Some(raw) = value::query(request, "continuation-token", "ContinuationToken")? {
             let raw = raw.as_ref();
             input.continuation_token = Some(value::opaque(raw));
         }
@@ -64,10 +64,10 @@ impl OperationCodec for dto::ListBucketIntelligentTieringConfigurations {
             writer.element("IsTruncated", if *v { "true" } else { "false" });
         }
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element("ContinuationToken", v.as_str());
+            writer.element("ContinuationToken", value::xml_cursor_text(v.as_str(), "ContinuationToken")?);
         }
         if let Some(v) = output.next_continuation_token.as_ref() {
-            writer.element("NextContinuationToken", v.as_str());
+            writer.element("NextContinuationToken", value::xml_cursor_text(v.as_str(), "NextContinuationToken")?);
         }
         for item in &output.intelligent_tiering_configuration_list {
             writer.open("IntelligentTieringConfiguration", None);

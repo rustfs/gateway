@@ -40,7 +40,7 @@ impl OperationCodec for dto::GetBucketInventoryConfiguration {
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
         // Id — query `id`, percent-decoded once.
-        if let Some(raw) = request.query("id") {
+        if let Some(raw) = value::query(request, "id", "Id")? {
             let raw = raw.as_ref();
             input.id = raw.to_owned();
         } else {

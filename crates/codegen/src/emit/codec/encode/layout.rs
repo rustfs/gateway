@@ -73,6 +73,28 @@ pub fn absent_when_unheld(shape: &str, member: &str) -> bool {
     ABSENT_WHEN_UNHELD.iter().any(|(s, m)| *s == shape && *m == member)
 }
 
+/// Wire expression for one non-URL-encoded echoed cursor, refusing XML-unrepresentable C0 controls
+/// rather than letting `XmlWriter` substitute `U+FFFD`.
+#[must_use]
+pub fn echoed_cursor_wire(field: &rustfs_gateway_model::ir::Field, encoded: bool) -> Option<String> {
+    if encoded {
+        return None;
+    }
+    let is_cursor = matches!(field.ty, Type::OpaqueString)
+        || matches!(
+            field.name.as_str(),
+            "ContinuationToken"
+                | "NextContinuationToken"
+                | "VersionIdMarker"
+                | "NextVersionIdMarker"
+                | "UploadIdMarker"
+                | "NextUploadIdMarker"
+                | "PartNumberMarker"
+                | "NextPartNumberMarker"
+        );
+    is_cursor.then(|| format!("value::xml_cursor_text(v.as_str(), \"{}\")?", field.name))
+}
+
 /// The `XmlWriter` method one scalar body member is written with.
 ///
 /// `empty_value_policy` chooses between writing an empty value as a paired element and dropping

@@ -526,23 +526,26 @@ impl<'a> MetaView<'a> {
             .filter_map(move |(name, value)| name.as_str().strip_prefix(prefix).map(|suffix| (suffix, value)))
     }
 
-    /// A query parameter, percent-decoded exactly once.
+    /// A query parameter, percent-decoded once as strict UTF-8.
     ///
-    /// `None` covers "absent"; a present parameter with an empty value is `Some("")`, because
-    /// `?prefix=` and no `prefix` at all are different requests.
+    /// `Ok(None)` covers "absent"; `Ok(Some(""))` is a present empty value. A parameter clamped by
+    /// [`MetaView::with_page_size_ceiling`] reads as its ceiling when the request asked for more.
     ///
-    /// A parameter the deployment clamps ([`MetaView::with_page_size_ceiling`]) reads as its
-    /// ceiling when the request asked for more.
-    #[must_use]
-    pub fn query(&self, key: &str) -> Option<Cow<'a, str>> {
-        let value = self.query.get(key).map(decode_component)?;
+    /// # Errors
+    ///
+    /// [`CodecError::invalid_argument`] when the percent-decoded bytes are not valid UTF-8.
+    pub fn query(&self, key: &str) -> Result<Option<Cow<'a, str>>, CodecError> {
+        let Some(raw) = self.query.get(key) else {
+            return Ok(None);
+        };
+        let value = decode_component(raw)?;
         if let Some(ceiling) = self.page_size_ceiling
             && ceiling.parameter() == key
             && let Some(clamped) = ceiling.clamp(&value)
         {
-            return Some(Cow::Owned(clamped.to_string()));
+            return Ok(Some(Cow::Owned(clamped.to_string())));
         }
-        Some(value)
+        Ok(Some(value))
     }
 
     /// Whether a query parameter is present, whatever its value.
@@ -667,13 +670,11 @@ fn bucket_of(raw: &str, names: &NamePolicy) -> Result<BucketName, CodecError> {
         .map_err(|rejection| CodecError::new(rejection.bucket_error_code(), "The specified bucket is not valid").about("Bucket"))
 }
 
-/// Percent-decodes one query component, borrowing when there is nothing to decode.
-///
-/// A byte sequence that is not UTF-8 after decoding is returned lossily rather than refused: S3
-/// query values carry object keys, and a key is bytes. The refusal, when there is one, belongs to
-/// the type the value is parsed into.
-fn decode_component(raw: &str) -> Cow<'_, str> {
-    percent_encoding::percent_decode_str(raw).decode_utf8_lossy()
+/// Percent-decodes one query component as strict UTF-8, borrowing when unchanged.
+fn decode_component(raw: &str) -> Result<Cow<'_, str>, CodecError> {
+    percent_encoding::percent_decode_str(raw)
+        .decode_utf8()
+        .map_err(|_| CodecError::invalid_argument("the request carries a query value that is not valid UTF-8"))
 }
 
 /// The four shapes a request body reaches a decoder in.

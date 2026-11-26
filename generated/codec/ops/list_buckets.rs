@@ -38,24 +38,24 @@ impl OperationCodec for dto::ListBuckets {
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
         // MaxBuckets — query `max-buckets`, percent-decoded once.
-        if let Some(raw) = request.query("max-buckets") {
+        if let Some(raw) = value::query(request, "max-buckets", "MaxBuckets")? {
             let raw = raw.as_ref();
             input.max_buckets = Some(value::integer(raw, "MaxBuckets")?);
         } else {
             input.max_buckets = Some(10000i32);
         }
         // ContinuationToken — query `continuation-token`, percent-decoded once.
-        if let Some(raw) = request.query("continuation-token") {
+        if let Some(raw) = value::query(request, "continuation-token", "ContinuationToken")? {
             let raw = raw.as_ref();
             input.continuation_token = Some(value::opaque(raw));
         }
         // Prefix — query `prefix`, percent-decoded once.
-        if let Some(raw) = request.query("prefix") {
+        if let Some(raw) = value::query(request, "prefix", "Prefix")? {
             let raw = raw.as_ref();
             input.prefix = Some(raw.to_owned());
         }
         // BucketRegion — query `bucket-region`, percent-decoded once.
-        if let Some(raw) = request.query("bucket-region") {
+        if let Some(raw) = value::query(request, "bucket-region", "BucketRegion")? {
             let raw = raw.as_ref();
             input.bucket_region = Some(raw.to_owned());
         }
@@ -85,7 +85,7 @@ impl OperationCodec for dto::ListBuckets {
         }
         writer.close();
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element("ContinuationToken", v.as_str());
+            writer.element("ContinuationToken", value::xml_cursor_text(v.as_str(), "ContinuationToken")?);
         }
         if let Some(v) = output.prefix.as_ref() {
             writer.element("Prefix", v.as_str());

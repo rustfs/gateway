@@ -40,34 +40,34 @@ impl OperationCodec for dto::ListMultipartUploads {
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
         // Delimiter — query `delimiter`, percent-decoded once.
-        if let Some(raw) = request.query("delimiter") {
+        if let Some(raw) = value::query(request, "delimiter", "Delimiter")? {
             let raw = raw.as_ref();
             input.delimiter = Some(raw.to_owned());
         }
         // EncodingType — query `encoding-type`, percent-decoded once.
-        if let Some(raw) = request.query("encoding-type") {
+        if let Some(raw) = value::query(request, "encoding-type", "EncodingType")? {
             let raw = raw.as_ref();
             input.encoding_type = Some(dto::EncodingType::custom(raw.to_owned()));
         }
         // KeyMarker — query `key-marker`, percent-decoded once.
-        if let Some(raw) = request.query("key-marker") {
+        if let Some(raw) = value::query(request, "key-marker", "KeyMarker")? {
             let raw = raw.as_ref();
             input.key_marker = Some(raw.to_owned());
         }
         // MaxUploads — query `max-uploads`, percent-decoded once.
-        if let Some(raw) = request.query("max-uploads") {
+        if let Some(raw) = value::query(request, "max-uploads", "MaxUploads")? {
             let raw = raw.as_ref();
             input.max_uploads = Some(value::integer(raw, "MaxUploads")?);
         } else {
             input.max_uploads = Some(1000i32);
         }
         // Prefix — query `prefix`, percent-decoded once.
-        if let Some(raw) = request.query("prefix") {
+        if let Some(raw) = value::query(request, "prefix", "Prefix")? {
             let raw = raw.as_ref();
             input.prefix = Some(raw.to_owned());
         }
         // UploadIdMarker — query `upload-id-marker`, percent-decoded once.
-        if let Some(raw) = request.query("upload-id-marker") {
+        if let Some(raw) = value::query(request, "upload-id-marker", "UploadIdMarker")? {
             let raw = raw.as_ref();
             input.upload_id_marker = Some(raw.to_owned());
         }
@@ -107,7 +107,7 @@ impl OperationCodec for dto::ListMultipartUploads {
         } else {
             None
         };
-        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);
+        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListMultipartUploadsResult", Some(rustfs_gateway_xml::S3_XMLNS));
@@ -121,7 +121,7 @@ impl OperationCodec for dto::ListMultipartUploads {
             writer.element("KeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.upload_id_marker.as_ref() {
-            writer.element("UploadIdMarker", v.as_str());
+            writer.element("UploadIdMarker", value::xml_cursor_text(v.as_str(), "UploadIdMarker")?);
         }
         if let Some(v) = output.next_key_marker.as_ref() {
             let url_encoding = url_encoding.member("NextKeyMarker");
@@ -136,7 +136,7 @@ impl OperationCodec for dto::ListMultipartUploads {
             writer.element("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_upload_id_marker.as_ref() {
-            writer.element("NextUploadIdMarker", v.as_str());
+            writer.element("NextUploadIdMarker", value::xml_cursor_text(v.as_str(), "NextUploadIdMarker")?);
         }
         {
             let v = &output.max_uploads;

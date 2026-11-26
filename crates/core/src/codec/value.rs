@@ -337,7 +337,7 @@ pub(crate) const ENCODING_TYPE_URL: &str = "url";
 
 pub(crate) use super::delete_objects::{delete_object_etag, delete_object_key, render_delete_key_echo};
 pub use crate::codec::body_literal::{BODY_LITERALS, body_literal};
-pub use crate::codec::rustfs_listing::{RustFsListing, rustfs_listing_echo};
+pub use crate::codec::rustfs_listing::{RustFsListing, query, rustfs_listing_echo, xml_cursor_text};
 pub(crate) use crate::codec::rustfs_listing::{any_requires_url_encoding, requires_url_encoding};
 
 /// Whether this response percent-encodes the members its operation declares as key-shaped.
@@ -373,7 +373,7 @@ pub enum UrlEncoding {
 /// unknown spelling as "encode anyway" would percent-encode a listing whose echo says it did not.
 #[must_use]
 pub fn url_encoding(request: &MetaView<'_>) -> UrlEncoding {
-    match request.query(ENCODING_TYPE) {
+    match request.query(ENCODING_TYPE).ok().flatten() {
         Some(value) if value.eq_ignore_ascii_case(ENCODING_TYPE_URL) => UrlEncoding::Requested,
         _ => UrlEncoding::Absent,
     }
@@ -777,7 +777,7 @@ pub fn verify_body_digest(request: &MetaView<'_>, body: &[u8]) -> Result<(), Cod
 /// `model/overlays/error-status.toml`'s to state, not this function's.
 pub fn verify_response_overrides(request: &MetaView<'_>, table: &[ResponseOverride]) -> Result<(), CodecError> {
     for entry in table {
-        let Some(value) = request.query(entry.query) else {
+        let Some(value) = request.query(entry.query).map_err(|error| error.about(entry.member))? else {
             continue;
         };
         if override_header_value(value.as_ref()).is_none() {

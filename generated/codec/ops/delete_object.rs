@@ -47,7 +47,7 @@ impl OperationCodec for dto::DeleteObject {
             input.mfa = Some(raw.to_owned());
         }
         // VersionId — query `versionId`, percent-decoded once.
-        if let Some(raw) = request.query("versionId") {
+        if let Some(raw) = value::query(request, "versionId", "VersionId")? {
             let raw = raw.as_ref();
             input.version_id = Some(raw.to_owned());
         }

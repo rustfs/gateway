@@ -41,34 +41,34 @@ impl OperationCodec for dto::ListObjectVersions {
         // Bucket — URI label, decoded once by `MetaView::of`.
         input.bucket = request.require_bucket()?;
         // Delimiter — query `delimiter`, percent-decoded once.
-        if let Some(raw) = request.query("delimiter") {
+        if let Some(raw) = value::query(request, "delimiter", "Delimiter")? {
             let raw = raw.as_ref();
             input.delimiter = Some(raw.to_owned());
         }
         // EncodingType — query `encoding-type`, percent-decoded once.
-        if let Some(raw) = request.query("encoding-type") {
+        if let Some(raw) = value::query(request, "encoding-type", "EncodingType")? {
             let raw = raw.as_ref();
             input.encoding_type = Some(dto::EncodingType::custom(raw.to_owned()));
         }
         // KeyMarker — query `key-marker`, percent-decoded once.
-        if let Some(raw) = request.query("key-marker") {
+        if let Some(raw) = value::query(request, "key-marker", "KeyMarker")? {
             let raw = raw.as_ref();
             input.key_marker = Some(raw.to_owned());
         }
         // MaxKeys — query `max-keys`, percent-decoded once.
-        if let Some(raw) = request.query("max-keys") {
+        if let Some(raw) = value::query(request, "max-keys", "MaxKeys")? {
             let raw = raw.as_ref();
             input.max_keys = Some(value::integer(raw, "MaxKeys")?);
         } else {
             input.max_keys = Some(1000i32);
         }
         // Prefix — query `prefix`, percent-decoded once.
-        if let Some(raw) = request.query("prefix") {
+        if let Some(raw) = value::query(request, "prefix", "Prefix")? {
             let raw = raw.as_ref();
             input.prefix = Some(raw.to_owned());
         }
         // VersionIdMarker — query `version-id-marker`, percent-decoded once.
-        if let Some(raw) = request.query("version-id-marker") {
+        if let Some(raw) = value::query(request, "version-id-marker", "VersionIdMarker")? {
             let raw = raw.as_ref();
             input.version_id_marker = Some(value::opaque(raw));
         }
@@ -117,7 +117,7 @@ impl OperationCodec for dto::ListObjectVersions {
         } else {
             None
         };
-        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);
+        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListVersionsResult", Some(rustfs_gateway_xml::S3_XMLNS));
@@ -138,14 +138,14 @@ impl OperationCodec for dto::ListObjectVersions {
         }
         {
             let v = &output.version_id_marker;
-            writer.element("VersionIdMarker", v.as_str());
+            writer.element("VersionIdMarker", value::xml_cursor_text(v.as_str(), "VersionIdMarker")?);
         }
         if let Some(v) = output.next_key_marker.as_ref() {
             let url_encoding = url_encoding.member("NextKeyMarker");
             writer.element("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_version_id_marker.as_ref() {
-            writer.element("NextVersionIdMarker", v.as_str());
+            writer.element("NextVersionIdMarker", value::xml_cursor_text(v.as_str(), "NextVersionIdMarker")?);
         }
         {
             let v = &output.max_keys;
