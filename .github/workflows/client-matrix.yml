@@ -132,6 +132,8 @@ jobs:
           MATRIX_SUT: ${{ inputs.sut || 'gateway-fs' }}
           MATRIX_ENDPOINT: ${{ inputs.endpoint || '' }}
           MATRIX_PRODUCT: ${{ inputs.product || 'rustfs' }}
+          MATRIX_CLIENTS: ${{ inputs.clients || '' }}
+          MATRIX_SCENARIOS: ${{ inputs.scenarios || '' }}
           COMPAT_EXTERNAL_ACCESS_KEY: ${{ secrets.COMPAT_EXTERNAL_ACCESS_KEY }}
           COMPAT_EXTERNAL_SECRET_KEY: ${{ secrets.COMPAT_EXTERNAL_SECRET_KEY }}
         run: |
@@ -141,9 +143,14 @@ jobs:
             export GATEWAY_COMPAT_ACCESS_KEY="$COMPAT_EXTERNAL_ACCESS_KEY" GATEWAY_COMPAT_SECRET_KEY="$COMPAT_EXTERNAL_SECRET_KEY"
             [ -n "$MATRIX_ENDPOINT" ] || { echo "::error title=matrix usage::sut=external needs the endpoint input"; exit 3; }
           fi
-          bash ci/compat/run_matrix.sh \
-            ${{ inputs.clients && format('--clients {0}', inputs.clients) || '' }} \
-            ${{ inputs.scenarios && format('--scenarios {0}', inputs.scenarios) || '' }}
+          args=()
+          if [ -n "$MATRIX_CLIENTS" ]; then
+            args+=(--clients "$MATRIX_CLIENTS")
+          fi
+          if [ -n "$MATRIX_SCENARIOS" ]; then
+            args+=(--scenarios "$MATRIX_SCENARIOS")
+          fi
+          bash ci/compat/run_matrix.sh "${args[@]}"
 
       # An external run is held to the manifest rules here, including sut-unregistered = 0 for a
       # RustFS endpoint (rustfs/backlog#2758); the launcher's own manifest is checked on every PR.
@@ -156,9 +163,15 @@ jobs:
       # corpus/. A full run must record at least one aws-chunked request; a filtered one may not.
       - name: Record the run as corpus
         if: (success() || failure()) && steps.matrix.outcome != 'skipped'
+        env:
+          MATRIX_CLIENTS: ${{ inputs.clients || '' }}
+          MATRIX_SCENARIOS: ${{ inputs.scenarios || '' }}
         run: |
-          bash ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus \
-            ${{ (inputs.clients || inputs.scenarios) && ' ' || '--require-chunked' }}
+          args=()
+          if [ -z "$MATRIX_CLIENTS" ] && [ -z "$MATRIX_SCENARIOS" ]; then
+            args+=(--require-chunked)
+          fi
+          bash ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus "${args[@]}"
 
       - name: Probe report
         if: always()

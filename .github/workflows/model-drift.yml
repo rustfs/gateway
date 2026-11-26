@@ -316,8 +316,10 @@ jobs:
           set -euo pipefail
           # One issue per upstream SHA. A second cron run before the first is
           # handled must update that issue, not stack another one on top.
+          # Match via python3 (installed by ci_install_host_tools.sh) reading TITLE from env
+          # rather than interpolating `$TITLE` into a `gh --jq` filter string.
           existing="$(gh issue list --state open --limit 200 --json number,title \
-            --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")"
+            | python3 -c 'import json, os, sys; title = os.environ["TITLE"]; print(next((str(i["number"]) for i in json.load(sys.stdin) if i.get("title") == title), ""), end="")')"
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body-file "$BODY"
             echo "updated issue #$existing"
