@@ -53,7 +53,6 @@
 
 use std::io::{self, Write as _};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 
 use rustfs_gateway::dto::{self, CompletedPart};
 use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ChecksumType, ErrorCode, HandlerError, RecordedUpload};
@@ -416,6 +415,31 @@ impl RecordedUpload for UploadRecord {
     }
 }
 
+/// Acquires the exclusive upload-directory file lock with bounded retries on `WouldBlock` so
+/// concurrent `FsBackend` instances sharing a data root serialize cleanly, while a permanently
+/// held external lock still fails closed rather than deadlocking.
+async fn acquire_upload_dir_lock(directory: &std::fs::File) -> Result<(), HandlerError> {
+    const MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(1_500);
+    let mut waited = std::time::Duration::ZERO;
+    let mut attempt: u32 = 0;
+    loop {
+        match directory.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if waited >= MAX_WAIT {
+                    return Err(storage_error());
+                }
+                attempt = attempt.saturating_add(1);
+                let remaining = MAX_WAIT.saturating_sub(waited);
+                let delay = std::time::Duration::from_millis(u64::from(attempt.min(10))).min(remaining);
+                tokio::time::sleep(delay).await;
+                waited = waited.saturating_add(delay);
+            }
+            Err(_) => return Err(storage_error()),
+        }
+    }
+}
+
 impl FsBackend {
     /// Issues the next ID of the bucket's window, reserving a new window first when the current one
     /// is spent or the sequence no longer holds its high-water mark. A sequence that cannot hold
@@ -424,7 +448,7 @@ impl FsBackend {
         let mut windows = self.upload_id_windows.lock().await;
         let uploads = self.uploads_path(bucket);
         let directory = std::fs::File::open(&uploads).map_err(|_| storage_error())?;
-        directory.try_lock().map_err(|_| storage_error())?;
+        acquire_upload_dir_lock(&directory).await?;
         let persisted = initialize_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
         let issued = match windows.get_mut(bucket) {
             Some(window) if window.high == persisted && window.next < window.high => {
@@ -565,13 +589,15 @@ impl FsBackend {
     }
 
     /// Records one upload's capability, its negotiated checksum, and its initiating metadata.
+    /// The caller holds `self.version_lock` so bucket creation/deletion and upload initiation are
+    /// serialized.
     ///
     /// # Errors
     ///
     /// The metadata refusals of [`validate_user_metadata`], applied before the directory exists so
     /// that an upload whose metadata could never be published is never initiated, and
     /// [`storage_error`] for a filesystem failure.
-    pub(super) async fn create_upload(
+    pub(super) async fn create_upload_locked(
         &self,
         bucket: &rustfs_gateway::BucketName,
         key: &rustfs_gateway::ObjectKey,
@@ -586,43 +612,47 @@ impl FsBackend {
         if tokio::fs::symlink_metadata(&destination).await.is_ok() {
             return Err(storage_error());
         }
-        let temporary = uploads.join(format!(
-            ".tmp-upload-{}-{}",
-            std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
-        ));
-        tokio::fs::create_dir(&temporary).await.map_err(|_| storage_error())?;
-        let initialized = async {
-            tokio::fs::create_dir(temporary.join(PARTS_DIR)).await?;
-            let (algorithm, kind) =
-                checksum.map_or(("-", "-"), |checksum| (checksum.algorithm.wire_name(), checksum.kind.wire_name()));
-            let record = format!(
-                "{}\n{}\n{}\n{}\n{algorithm}\n{kind}\n{}",
-                hex::encode(bucket.as_str()),
-                hex::encode(key.as_str()),
-                hex::encode(&upload_id),
-                self.clock.now().unix_seconds(),
-                encode_trailing_sections(attributes),
-            );
-            let mut file = tokio::fs::OpenOptions::new()
+        let temporary = uploads.join(format!(".tmp-upload-{}-{}", std::process::id(), super::staging::next_temporary_id()));
+        let mut temp_guard = super::staging::TempDirGuard::create(temporary.clone())?;
+        std::fs::create_dir(temporary.join(PARTS_DIR)).map_err(|_| storage_error())?;
+        let (algorithm, kind) =
+            checksum.map_or(("-", "-"), |checksum| (checksum.algorithm.wire_name(), checksum.kind.wire_name()));
+        let record = format!(
+            "{}\n{}\n{}\n{}\n{algorithm}\n{kind}\n{}",
+            hex::encode(bucket.as_str()),
+            hex::encode(key.as_str()),
+            hex::encode(&upload_id),
+            self.clock.now().unix_seconds(),
+            encode_trailing_sections(attributes),
+        );
+        let std_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(temporary.join(UPLOAD_RECORD))
+            .map_err(|_| storage_error())?;
+        let mut file = tokio::fs::File::from_std(std_file);
+        file.write_all(record.as_bytes()).await.map_err(|_| storage_error())?;
+        file.sync_all().await.map_err(|_| storage_error())?;
+        drop(file);
+        // The initiation's tags travel beside the record, in the form a version stores them,
+        // and are published with the completed object (rustfs/gateway#1000).
+        if !attributes.tags.is_empty() {
+            let std_tags = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .open(temporary.join(UPLOAD_RECORD))
-                .await?;
-            file.write_all(record.as_bytes()).await?;
-            file.sync_all().await?;
-            // The initiation's tags travel beside the record, in the form a version stores them,
-            // and are published with the completed object (rustfs/gateway#1000).
-            if !attributes.tags.is_empty() {
-                tokio::fs::write(temporary.join(TAGS_FILE), super::tagging::serialize_tags(&attributes.tags)).await?;
-            }
-            tokio::fs::rename(&temporary, destination).await
+                .open(temporary.join(TAGS_FILE))
+                .map_err(|_| storage_error())?;
+            let mut tags_file = tokio::fs::File::from_std(std_tags);
+            tags_file
+                .write_all(super::tagging::serialize_tags(&attributes.tags).as_ref())
+                .await
+                .map_err(|_| storage_error())?;
+            drop(tags_file);
         }
-        .await;
-        if initialized.is_err() {
-            let _ = tokio::fs::remove_dir_all(&temporary).await;
-            return Err(storage_error());
-        }
+        #[cfg(test)]
+        super::staging::test_hooks::maybe_pause("create_upload").await;
+        std::fs::rename(&temporary, destination).map_err(|_| storage_error())?;
+        temp_guard.disarm();
         Ok(upload_id)
     }
 

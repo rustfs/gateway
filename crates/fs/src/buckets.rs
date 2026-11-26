@@ -173,9 +173,9 @@ impl Handler<CreateBucket> for FsBackend {
         )?;
         let bucket = input.bucket.as_str();
         let path = self.bucket_path(bucket);
-        match tokio::fs::create_dir(&path).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        let _guard = self.version_lock.lock().await;
+        match tokio::fs::symlink_metadata(&path).await {
+            Ok(_) => {
                 self.require_bucket(bucket).await?;
                 // The status matrix is the operation's (`crates/core/src/ops/create_bucket.rs`):
                 // re-creating your own bucket is the historical `200` in us-east-1 and
@@ -188,26 +188,37 @@ impl Handler<CreateBucket> for FsBackend {
                     location: Some(format!("/{bucket}")),
                 }));
             }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(_) => return Err(storage_error()),
         }
-        if tokio::fs::create_dir(path.join(OBJECTS_DIR)).await.is_err() {
-            let _ = tokio::fs::remove_dir(&path).await;
-            return Err(storage_error());
+        let staging = self
+            .root
+            .join(format!(".tmp-bucket-{}-{}", std::process::id(), super::staging::next_temporary_id()));
+        let mut temp_guard = super::staging::TempDirGuard::create(staging.clone())?;
+        std::fs::create_dir(staging.join(OBJECTS_DIR)).map_err(|_| storage_error())?;
+        std::fs::create_dir(staging.join(UPLOADS_DIR)).map_err(|_| storage_error())?;
+        std::fs::create_dir(staging.join(VERSIONS_DIR)).map_err(|_| storage_error())?;
+        #[cfg(test)]
+        super::staging::test_hooks::maybe_pause("create_bucket").await;
+        match std::fs::rename(&staging, &path) {
+            Ok(()) => {
+                temp_guard.disarm();
+                Ok(Resp::new(CreateBucketOutput {
+                    location: Some(format!("/{bucket}")),
+                }))
+            }
+            Err(error) if matches!(error.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::DirectoryNotEmpty) => {
+                drop(temp_guard);
+                self.require_bucket(bucket).await?;
+                if self.region() != US_EAST_1 {
+                    return Err(HandlerErrorContext::owned_bucket_recreation().into());
+                }
+                Ok(Resp::new(CreateBucketOutput {
+                    location: Some(format!("/{bucket}")),
+                }))
+            }
+            Err(_) => Err(storage_error()),
         }
-        if tokio::fs::create_dir(path.join(UPLOADS_DIR)).await.is_err() {
-            let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
-            let _ = tokio::fs::remove_dir(&path).await;
-            return Err(storage_error());
-        }
-        if tokio::fs::create_dir(path.join(VERSIONS_DIR)).await.is_err() {
-            let _ = tokio::fs::remove_dir(path.join(UPLOADS_DIR)).await;
-            let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
-            let _ = tokio::fs::remove_dir(&path).await;
-            return Err(storage_error());
-        }
-        Ok(Resp::new(CreateBucketOutput {
-            location: Some(format!("/{bucket}")),
-        }))
     }
 }
 
@@ -256,20 +267,17 @@ impl Handler<GetBucketLocation> for FsBackend {
 impl Handler<DeleteBucket> for FsBackend {
     async fn call(&self, request: Req<DeleteBucket>) -> HandlerResult<DeleteBucket> {
         let bucket = request.input().bucket.as_str();
+        // Under the version lock from the existence and emptiness checks through removal of the
+        // bucket layout: CreateBucket, CreateMultipartUpload, and version publication all take the
+        // same lock, so a racing operation either lands before deletion starts or after it finishes.
+        let _guard = self.version_lock.lock().await;
         self.require_bucket(bucket).await?;
         let objects = self.objects_path(bucket);
         let uploads = self.uploads_path(bucket);
         let versions = self.versions_path(bucket);
-        // Under the version lock from the emptiness check through the removal of the two content
-        // directories: a write publishes its version under the same lock, so it either lands before
-        // the check (the bucket is not empty) or after the bucket is gone (its publish fails). Without
-        // the lock a version renamed in between left `objects/` removed and `versions/` not, and
-        // `require_bucket` then answered every later request on the bucket — a retry of this delete
-        // included — with `500`.
-        let _guard = self.version_lock.lock().await;
         if !self.directory_is_empty(&objects).await?
             || !self.upload_directory_allows_delete(bucket)?
-            || !self.directory_is_empty(&versions).await?
+            || !self.versions_directory_allows_delete(bucket)?
         {
             return Err(HandlerError::new(
                 ErrorCode::BUCKET_NOT_EMPTY,
@@ -277,6 +285,7 @@ impl Handler<DeleteBucket> for FsBackend {
             ));
         }
         tokio::fs::remove_dir(&objects).await.map_err(|_| storage_error())?;
+        self.discard_interrupted_version_temps(bucket)?;
         if tokio::fs::remove_dir(&versions).await.is_err() {
             // Whatever made `versions/` non-empty is content; put the bucket back the way the
             // check found it rather than leaving it half-deleted, and say it is not empty.

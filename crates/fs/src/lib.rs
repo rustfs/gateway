@@ -27,7 +27,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
@@ -147,6 +147,8 @@ mod completion_replay;
 mod conditions;
 #[macro_use]
 mod checksums;
+#[cfg(test)]
+mod cancellation_tests;
 pub(crate) mod copy;
 mod deletes;
 mod encryption;
@@ -165,6 +167,7 @@ mod reads;
 mod records;
 mod registry;
 mod rustfs_parity;
+mod staging;
 mod tagging;
 mod transitions;
 mod upload_part;
@@ -190,7 +193,6 @@ pub struct FsBackend {
     regions: RegionSet,
     region_match_policy: RegionMatchPolicy,
     owner: Option<Owner>,
-    temporary_id: AtomicU64,
     /// Each bucket's reserved upload-ID window, keyed by bucket name; the lock serializes allocation.
     upload_id_windows: tokio::sync::Mutex<std::collections::HashMap<String, uploads::UploadIdWindow>>,
     version_lock: tokio::sync::Mutex<()>,
@@ -238,7 +240,6 @@ impl FsBackend {
             regions,
             region_match_policy: REGION_MATCH_POLICY,
             owner: None,
-            temporary_id: AtomicU64::new(0),
             upload_id_windows: tokio::sync::Mutex::default(),
             version_lock: tokio::sync::Mutex::new(()),
             clock,
@@ -406,27 +407,21 @@ impl FsBackend {
 
     async fn write_atomic(&self, directory: &Path, destination: &Path, bytes: &[u8]) -> Result<(), HandlerError> {
         self.require_directory(directory, storage_error()).await?;
-        let temporary = directory.join(format!(
-            ".tmp-{}-{}",
-            std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
-        ));
-        let mut file = tokio::fs::OpenOptions::new()
+        let temporary = directory.join(format!(".tmp-{}-{}", std::process::id(), staging::next_temporary_id()));
+        let std_file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temporary)
-            .await
             .map_err(|_| storage_error())?;
-        let written = async {
-            file.write_all(bytes).await?;
-            file.sync_all().await?;
-            tokio::fs::rename(&temporary, destination).await
-        }
-        .await;
-        if written.is_err() {
-            let _ = tokio::fs::remove_file(&temporary).await;
-            return Err(storage_error());
-        }
+        let mut temp_guard = staging::TempFileGuard::adopt(temporary.clone());
+        let mut file = tokio::fs::File::from_std(std_file);
+        file.write_all(bytes).await.map_err(|_| storage_error())?;
+        file.sync_all().await.map_err(|_| storage_error())?;
+        drop(file);
+        #[cfg(test)]
+        staging::test_hooks::maybe_pause("write_atomic").await;
+        std::fs::rename(&temporary, destination).map_err(|_| storage_error())?;
+        temp_guard.disarm();
         Ok(())
     }
 
@@ -535,6 +530,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         refuse_unstored_object_lock!(input)?;
         let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
         let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
+        let _guard = self.version_lock.lock().await;
         // S3 carries user metadata and the representation headers on the initiating request and on
         // neither the parts nor the completion, so this is the only call in the multipart family
         // that has them to persist.
@@ -552,7 +548,9 @@ impl Handler<CreateMultipartUpload> for FsBackend {
             headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             ..ObjectAttributes::default()
         };
-        let upload_id = self.create_upload(&input.bucket, &input.key, checksum, &attributes).await?;
+        let upload_id = self
+            .create_upload_locked(&input.bucket, &input.key, checksum, &attributes)
+            .await?;
         Ok(Resp::new(CreateMultipartUploadOutput {
             bucket: input.bucket,
             key: input.key,
@@ -653,10 +651,14 @@ impl Handler<AbortMultipartUpload> for FsBackend {
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".abort-{}-{}",
             std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
+            staging::next_temporary_id()
         ));
-        tokio::fs::rename(upload, &tombstone).await.map_err(|_| no_such_upload())?;
-        tokio::fs::remove_dir_all(tombstone).await.map_err(|_| storage_error())?;
+        std::fs::rename(upload, &tombstone).map_err(|_| no_such_upload())?;
+        let mut tombstone_guard = staging::TempDirGuard::adopt(tombstone.clone());
+        #[cfg(test)]
+        staging::test_hooks::maybe_pause("abort_upload").await;
+        tokio::fs::remove_dir_all(&tombstone).await.map_err(|_| storage_error())?;
+        tombstone_guard.disarm();
         Ok(Resp::new(AbortMultipartUploadOutput::default()))
     }
 }
