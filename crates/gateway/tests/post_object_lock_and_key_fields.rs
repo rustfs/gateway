@@ -345,7 +345,14 @@ async fn n_a_form_without_lock_fields_asks_only_the_base_action_whatever_its_hea
 #[tokio::test]
 async fn n_an_unreadable_retain_until_date_is_refused_before_authorization() {
     for legacy_grammar in [true, false] {
-        for value in ["Tue, 01 Jan 2030 00:00:00 GMT", "2030-01-01", "", "20300101T000000Z", "value"] {
+        for value in [
+            "Tue, 01 Jan 2030 00:00:00 GMT",
+            "2030-01-01",
+            "",
+            "20300101T000000Z",
+            "2030-01-01T00:00:00.Z",
+            "value",
+        ] {
             let setup = Setup {
                 legacy_grammar,
                 allow: false,
@@ -370,7 +377,6 @@ async fn n_each_grammar_refuses_the_dates_only_the_other_reads() {
         ("2030-01-01 00:00:00Z", true, "2030-01-01T00:00:00Z"),
         ("2030-12-31T23:59:60Z", true, "2030-12-31T23:59:59.999999999Z"),
         ("2030-01-01T08:00:00+0800", false, "2030-01-01T00:00:00Z"),
-        ("2030-01-01T00:00:00.Z", false, "2030-01-01T00:00:00Z"),
     ] {
         for legacy_grammar in [true, false] {
             let setup = Setup {

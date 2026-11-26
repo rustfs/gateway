@@ -160,7 +160,10 @@ fn n_bounded_s3_params_reject_out_of_range_values_at_decode() {
         let rustfs_view = view.with_document_reading(crate::codec::DocumentReading::RustFs);
         let decoded = dto::CompleteMultipartUpload::decode(&rustfs_view, RequestBody::Buffered(Bytes::from(xml)))
             .expect("RustFs profile defers part number bounds to handler");
-        assert_eq!(decoded.multipart_upload.parts[0].part_number, bad.parse::<i32>().expect("int"));
+        assert_eq!(
+            decoded.multipart_upload.parts.first().map(|part| part.part_number),
+            Some(bad.parse::<i32>().expect("int"))
+        );
     }
 
     // GetObject & HeadObject PartNumber: 1..=10000 -> 400 InvalidPartNumber
@@ -246,7 +249,9 @@ fn n_list_objects_v2_omits_owner_when_fetch_owner_is_false_while_v1_keeps_it() {
     };
     let make_v2_out = || {
         let mut out = one_entry_listing("a.txt", "b28354b543375bfa94dabaeda722927f");
-        out.contents[0].owner = Some(owner.clone());
+        if let Some(first) = out.contents.first_mut() {
+            first.owner = Some(owner.clone());
+        }
         out
     };
 
