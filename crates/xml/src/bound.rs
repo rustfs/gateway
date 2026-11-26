@@ -42,18 +42,21 @@
 //!   text is the character data exactly as written (no line-end normalisation), with entity and
 //!   character references resolved and CDATA sections, comments and processing instructions left
 //!   out entirely;
-//! * attributes are read on one element only, a structure's declared type attribute (`xsi:type` on
-//!   `Grantee`), matched by its literal spelling rather than by namespace;
+//! * every element's attributes are validated against [`XmlLimits`] (`max_attributes_per_element`,
+//!   `max_attribute_bytes`), XML 1.0 attribute parsing and entity normalization, and
+//!   `is_xml_representable`; only a structure's declared type attribute (`xsi:type` on `Grantee`),
+//!   matched by its literal spelling rather than by namespace, is carried into the returned tree;
 //! * text between the members of a structure, and after the root, is ignored.
 //!
 //! Every refusal is the legacy stack's `MalformedXML`; the caller decides the code.
 //!
 //! # What this reader keeps from [`crate::parse`], deliberately
 //!
-//! The limits (body bytes, depth, element count) and three refusals legacy RustFS does not make:
-//! a `DOCTYPE` (the entity-expansion entry point, refused rather than trusted to a dependency), a
-//! character XML 1.0 cannot represent (stored, it makes every later read of the document
-//! unparseable), and a document that is not UTF-8. They are registered divergences, not parity.
+//! The limits (body bytes, depth, element count, attribute count, attribute bytes) and three
+//! refusals legacy RustFS does not make: a `DOCTYPE` (the entity-expansion entry point, refused
+//! rather than trusted to a dependency), a character XML 1.0 cannot represent (stored, it makes
+//! every later read of the document unparseable), and a document that is not UTF-8. They are
+//! registered divergences, not parity.
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
@@ -372,8 +375,9 @@ impl<'a> Walker<'a, '_> {
         }
     }
 
-    /// Counts an element that was just opened against the depth and element ceilings.
-    fn enter(&mut self) -> Result<(), BoundRefusal> {
+    /// Counts an element that was just opened against the depth and element ceilings and validates
+    /// every attribute on its start tag.
+    fn enter(&mut self, start: &BytesStart<'_>) -> Result<(), BoundRefusal> {
         self.elements = self.elements.saturating_add(1);
         if self.elements > self.limits.max_elements() {
             return Err(XmlError::TooManyElements.into());
@@ -381,6 +385,33 @@ impl<'a> Walker<'a, '_> {
         self.depth = self.depth.saturating_add(1);
         if self.depth > self.limits.max_depth() {
             return Err(XmlError::TooDeep.into());
+        }
+        self.validate_attributes(start)
+    }
+
+    /// Validates every attribute on an element start tag against the configured ceilings, XML 1.0
+    /// attribute entity normalization, and XML 1.0 character representability.
+    fn validate_attributes(&self, start: &BytesStart<'_>) -> Result<(), BoundRefusal> {
+        let mut count = 0usize;
+        for parsed in start.attributes() {
+            let parsed = parsed.map_err(|_| BoundRefusal::Document(Reason::Attribute))?;
+            count = count.saturating_add(1);
+            if count > self.limits.max_attributes_per_element() {
+                return Err(XmlError::TooManyAttributes.into());
+            }
+            if parsed.value.as_ref().len() > self.limits.max_attribute_bytes() {
+                return Err(XmlError::AttributeTooLong.into());
+            }
+            let key = core::str::from_utf8(parsed.key.as_ref()).map_err(|_| XmlError::NotUtf8)?;
+            if !is_xml_representable(key) {
+                return Err(XmlError::ForbiddenCharacter.into());
+            }
+            let value = parsed
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|_| BoundRefusal::Document(Reason::Attribute))?;
+            if !is_xml_representable(&value) {
+                return Err(XmlError::ForbiddenCharacter.into());
+            }
         }
         Ok(())
     }
@@ -414,7 +445,7 @@ impl<'a> Walker<'a, '_> {
         let Some(root) = self.document.roots.iter().find(|root| **root == name) else {
             return refuse(Reason::Root);
         };
-        self.enter()?;
+        self.enter(&start)?;
         let node = self.structure(root, 0, &start)?;
         self.close()?;
         loop {
@@ -459,31 +490,21 @@ impl<'a> Walker<'a, '_> {
         Ok(node)
     }
 
-    /// The declared attribute of a structure's element, matched by its literal spelling. Every
-    /// attribute of that element is parsed, and one that does not parse refuses the document.
+    /// The declared attribute of a structure's element, matched by its literal spelling.
+    ///
+    /// [`Self::validate_attributes`] already checked every attribute on `start` when the element
+    /// was entered; this returns the normalized value of the declared key when present.
     fn typed_attribute(&self, start: &BytesStart<'_>, attribute: &Attribute) -> Result<Option<String>, BoundRefusal> {
-        let mut found = None;
-        let mut count = 0usize;
         for parsed in start.attributes() {
             let parsed = parsed.map_err(|_| BoundRefusal::Document(Reason::Attribute))?;
-            count = count.saturating_add(1);
-            if count > self.limits.max_attributes_per_element() {
-                return Err(XmlError::TooManyAttributes.into());
-            }
-            if parsed.value.as_ref().len() > self.limits.max_attribute_bytes() {
-                return Err(XmlError::AttributeTooLong.into());
-            }
             if parsed.key.as_ref() == attribute.key.as_bytes() {
                 let value = parsed
                     .normalized_value(XmlVersion::Implicit1_0)
                     .map_err(|_| BoundRefusal::Document(Reason::Attribute))?;
-                if !is_xml_representable(&value) {
-                    return Err(XmlError::ForbiddenCharacter.into());
-                }
-                found = Some(value.into_owned());
+                return Ok(Some(value.into_owned()));
             }
         }
-        Ok(found)
+        Ok(None)
     }
 
     /// A structure's members, up to (not including) its end.
@@ -501,7 +522,7 @@ impl<'a> Walker<'a, '_> {
                 }
                 Token::End | Token::Eof => break,
             };
-            self.enter()?;
+            self.enter(&start)?;
             let name = name_of(&start)?;
             match members.iter().position(|member| member.element == name) {
                 Some(index) => {
@@ -537,7 +558,7 @@ impl<'a> Walker<'a, '_> {
             match self.next()? {
                 Token::Text(_) => {}
                 Token::Start(start) => {
-                    self.enter()?;
+                    self.enter(&start)?;
                     let name = name_of(&start)?;
                     let Some(member) = members.iter().find(|member| member.element == name) else {
                         return refuse(Reason::UnknownElement);
@@ -592,7 +613,7 @@ impl<'a> Walker<'a, '_> {
                 }
                 Token::End | Token::Eof => return Ok(wrapper),
             };
-            self.enter()?;
+            self.enter(&start)?;
             if name_of(&start)? == entry {
                 let item = self.value(entry, value, &start)?;
                 wrapper.children.push(item);
@@ -626,8 +647,9 @@ impl<'a> Walker<'a, '_> {
         loop {
             match self.peek()? {
                 Token::Start(_) => {
-                    self.next()?;
-                    self.enter()?;
+                    if let Token::Start(start) = self.next()? {
+                        self.enter(&start)?;
+                    }
                     depth = depth.saturating_add(1);
                 }
                 Token::End => {
@@ -664,8 +686,10 @@ fn resolve(name: &str) -> Result<char, BoundRefusal> {
     }
     let number = name.strip_prefix('#').filter(|number| !number.is_empty());
     let code = number.and_then(|number| match number.strip_prefix('x') {
-        Some(hex) => u32::from_str_radix(hex, 16).ok(),
-        None => number.parse::<u32>().ok(),
+        Some(hex) if !hex.is_empty() && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) => u32::from_str_radix(hex, 16).ok(),
+        Some(_) => None,
+        None if number.bytes().all(|byte| byte.is_ascii_digit()) => number.parse::<u32>().ok(),
+        None => None,
     });
     match code.and_then(char::from_u32) {
         Some(character) if is_xml_char(character) => Ok(character),
