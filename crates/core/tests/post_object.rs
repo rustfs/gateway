@@ -77,3 +77,35 @@ fn a_plain_live_stream_cannot_bypass_the_form_policy_stage() {
         PostObject::decode(&meta(), RequestBody::Stream(ByteStream::from_bytes(Bytes::from_static(b"unproved file"))),).is_err()
     );
 }
+
+#[test]
+fn n_table_routing_matches_mixed_case_multipart_form_data_content_type() {
+    let entries = rustfs_gateway_core::route::generated_entries().expect("generated route rows");
+    let table =
+        rustfs_gateway_core::route::RouteTable::build(entries, &rustfs_gateway_core::route::SHADOWING).expect("generated table");
+    for content_type in [
+        "Multipart/Form-Data; boundary=----abc",
+        "MULTIPART/FORM-DATA; boundary=----abc",
+    ] {
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://host.invalid/example-bucket")
+            .header("host", "host.invalid")
+            .header("content-type", content_type)
+            .body(())
+            .expect("valid request");
+        let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+        let parts = rustfs_gateway_core::route::RouteRequestParts {
+            method: wire.method(),
+            path: wire.raw_path().as_str(),
+            target: rustfs_gateway_core::TargetKind::Bucket,
+            host_class: rustfs_gateway_core::route::HostClass::Standard,
+            arn_form: None,
+            query: wire.query(),
+            headers: wire.headers(),
+            host_named_bucket: false,
+        };
+        let resolved = table.resolve(&parts).map(|entry| entry.op_name);
+        assert_eq!(resolved, Some("PostObject"), "failed to route {content_type}");
+    }
+}

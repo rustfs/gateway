@@ -391,7 +391,7 @@ impl CachedCorsSource {
 }
 
 async fn load_collapsed(inner: Arc<dyn CorsSource>, bucket: BucketName, timeout: Duration) -> LoadOutcome {
-    match load_before_deadline(inner.load(&bucket), timeout).await {
+    match load_before_deadline(inner.as_ref(), &bucket, timeout).await {
         Ok(document) => LoadOutcome::Store(document.map(Arc::new)),
         Err(_) if rustfs_gateway_core::cors::source_absence_is_collapsed() => LoadOutcome::Store(None),
         // The mutation keeps a failed read distinguishable from an ordinary negative entry by
@@ -402,16 +402,20 @@ async fn load_collapsed(inner: Arc<dyn CorsSource>, bucket: BucketName, timeout:
 }
 
 async fn load_before_deadline(
-    mut future: BoxFuture<'_, Result<Option<CorsConfiguration>, CorsSourceError>>,
+    inner: &dyn CorsSource,
+    bucket: &BucketName,
     timeout: Duration,
 ) -> Result<Option<CorsConfiguration>, CorsSourceError> {
     if timeout.is_zero() {
         return Err(CorsSourceError);
     }
+    // Contain both synchronous future-construction and asynchronous poll panics so
+    // `futures_util::future::Shared` never poisons concurrent waiters for the same bucket.
+    let mut future = std::pin::pin!(crate::panic_boundary::catch_boxed_future(|| inner.load(bucket)));
     let mut deadline = Box::pin(Delay::new(timeout));
     poll_fn(move |cx| {
         if let Poll::Ready(result) = future.as_mut().poll(cx) {
-            return Poll::Ready(result);
+            return Poll::Ready(result.unwrap_or(Err(CorsSourceError)));
         }
         if deadline.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err(CorsSourceError));
@@ -741,5 +745,47 @@ mod tests {
         let cache = cache(Arc::new(NoCors), CorsCacheConfig::default());
         assert!(cache.get(&bucket("anything"), at(1)).await.is_none());
         assert!(cache.get(&bucket("anything-else"), at(1)).await.is_none());
+    }
+
+    /// Negative — panicking `CorsSource::load` (sync or async) must not poison `Shared` waiters.
+    #[tokio::test]
+    async fn n_panicking_cors_source_does_not_poison_shared_concurrent_waiters() {
+        struct Panicking {
+            mode: AtomicUsize,
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        impl CorsSource for Panicking {
+            fn load<'a>(&'a self, _: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
+                match self.mode.load(Ordering::SeqCst) {
+                    0 => panic!("sync cors_source panic fixture"),
+                    1 => Box::pin(async {
+                        self.entered.notify_one();
+                        self.release.notified().await;
+                        panic!("async cors_source panic fixture");
+                    }),
+                    _ => Box::pin(async { Ok(None) }),
+                }
+            }
+        }
+        let source = Arc::new(Panicking {
+            mode: AtomicUsize::new(0),
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let cache = Arc::new(cache(Arc::clone(&source) as Arc<dyn CorsSource>, CorsCacheConfig::default()));
+        assert!(cache.get(&bucket("sync-panic"), at(10)).await.is_none());
+        source.mode.store(1, Ordering::SeqCst);
+        let mut waiters = tokio::task::JoinSet::new();
+        for _ in 0..6 {
+            let cache = Arc::clone(&cache);
+            waiters.spawn(async move { cache.get(&bucket("shared-panic"), at(20)).await });
+        }
+        source.entered.notified().await;
+        tokio::task::yield_now().await;
+        source.release.notify_one();
+        while let Some(res) = waiters.join_next().await {
+            assert!(res.expect("waiter must not panic from Shared poisoning").is_none());
+        }
     }
 }

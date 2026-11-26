@@ -56,11 +56,15 @@ impl Outcome<'_> {
             let headers = response.headers_mut();
             if let Some(cors_headers) = &cors.headers {
                 for (name, value) in cors_headers.iter() {
-                    headers.insert(name, value.clone());
+                    if *name == VARY {
+                        merge_vary(headers, value);
+                    } else {
+                        headers.insert(name, value.clone());
+                    }
                 }
             }
             if cors.vary_origin {
-                headers.insert(VARY, VARY_ORIGIN);
+                merge_vary(headers, &VARY_ORIGIN);
             }
         }
     }
@@ -229,14 +233,7 @@ impl S3Service {
             }
             None if headers.contains_key(ACCESS_CONTROL_ALLOW_ORIGIN) => {}
             None => {
-                for (name, value) in legacy.fallback_headers(&self.inner.cors_policy, &request.headers) {
-                    if name == VARY {
-                        // Credentialed fallback adds Origin without erasing the handler's cache dimensions.
-                        headers.append(name, value);
-                    } else {
-                        headers.insert(name, value);
-                    }
-                }
+                insert_all(headers, legacy.fallback_headers(&self.inner.cors_policy, &request.headers));
             }
         }
     }
@@ -368,9 +365,55 @@ pub(super) struct LegacyCorsRequest {
     headers: HeaderMap,
 }
 
+/// Appends every comma-separated `Vary` token in `addition` that is not already present on
+/// `headers` (matched ASCII case-insensitively), preserving existing cache dimensions.
+fn merge_vary(headers: &mut HeaderMap, addition: &HeaderValue) {
+    if !headers.contains_key(VARY) {
+        headers.insert(VARY, addition.clone());
+        return;
+    }
+    let Ok(added_text) = addition.to_str() else {
+        headers.append(VARY, addition.clone());
+        return;
+    };
+    let mut tokens: Vec<String> = Vec::new();
+    for existing in headers.get_all(VARY) {
+        let Ok(text) = existing.to_str() else {
+            headers.append(VARY, addition.clone());
+            return;
+        };
+        for raw in text.split(',') {
+            let token = raw.trim();
+            if !token.is_empty() && !tokens.iter().any(|seen| seen.eq_ignore_ascii_case(token)) {
+                tokens.push(token.to_owned());
+            }
+        }
+    }
+    let mut changed = false;
+    for raw in added_text.split(',') {
+        let token = raw.trim();
+        if !token.is_empty() && !tokens.iter().any(|seen| seen.eq_ignore_ascii_case(token)) {
+            tokens.push(token.to_owned());
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    if let Ok(merged) = HeaderValue::from_str(&tokens.join(", ")) {
+        headers.insert(VARY, merged);
+    } else {
+        headers.append(VARY, addition.clone());
+    }
+}
+
 fn insert_all(headers: &mut HeaderMap, pairs: Vec<(HeaderName, HeaderValue)>) {
     for (name, value) in pairs {
-        headers.insert(name, value);
+        if name == VARY {
+            merge_vary(headers, &value);
+        } else {
+            headers.insert(name, value);
+        }
     }
 }
 

@@ -24,7 +24,7 @@ use std::sync::{Arc, Barrier};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use super::policy_snapshot_with_timeout;
+use super::{PolicySnapshotOutcome, policy_snapshot_with_timeout};
 use crate::clock::{MonotonicClock, SystemMonotonic};
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
 use rustfs_gateway_core::BoxFuture;
@@ -273,7 +273,10 @@ fn immediately_ready_policy_reads_do_not_accumulate_threads() {
         let Some(before) = baseline(&mut context) else { return };
         for _ in 0..READS {
             let mut read = Box::pin(policy_snapshot_with_timeout(&Read::Ready, None, TIMEOUT));
-            assert!(matches!(read.as_mut().poll(&mut context), Poll::Ready(Some(Ok(_)))));
+            assert!(matches!(
+                read.as_mut().poll(&mut context),
+                Poll::Ready(PolicySnapshotOutcome::Ready(Ok(_)))
+            ));
         }
         assert_eq!(threads(), Some(before), "immediately ready policy reads retained timer threads");
     });
@@ -288,7 +291,10 @@ fn completed_policy_reads_do_not_accumulate_threads() {
         for _ in 0..READS {
             let mut read = Box::pin(policy_snapshot_with_timeout(&Read::YieldOnce, None, TIMEOUT));
             assert!(read.as_mut().poll(&mut context).is_pending());
-            assert!(matches!(read.as_mut().poll(&mut context), Poll::Ready(Some(Ok(_)))));
+            assert!(matches!(
+                read.as_mut().poll(&mut context),
+                Poll::Ready(PolicySnapshotOutcome::Ready(Ok(_)))
+            ));
         }
         assert_eq!(threads(), Some(before), "completed policy reads retained timer threads");
     });

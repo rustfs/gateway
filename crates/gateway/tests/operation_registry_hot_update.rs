@@ -246,3 +246,45 @@ async fn n_c_reg_1012_an_inflight_request_holds_one_routing_snapshot() {
     assert_eq!(exchange(&service, signed(Method::HEAD, "/")).await, (StatusCode::OK, String::new()));
     assert_eq!(ping(&service).await, (StatusCode::OK, "<Ping>new</Ping>".to_owned()));
 }
+
+/// Negative — `replace_registry` must run `validate_staged_post` against the live service's form
+/// policy: registering `PostObject` after authorization on a service without legacy post forms
+/// must fail with `AssemblyError::PostObjectAuthorization` and preserve the last-good snapshot.
+#[tokio::test]
+async fn n_replace_registry_rejects_staged_post_object_without_legacy_forms_and_preserves_last_good() {
+    use rustfs_gateway::dto::{PostObject, PostObjectOutput};
+    use rustfs_gateway::{AssemblyError, BoxFuture, HandlerError, PostObjectHandler};
+
+    struct DummyPost;
+
+    impl PostObjectHandler for DummyPost {
+        type Authorization = ();
+
+        fn authorize(&self, _request: &Req<PostObject>) -> BoxFuture<'_, Result<(), HandlerError>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn execute(&self, _authorization: (), _request: Req<PostObject>) -> BoxFuture<'_, HandlerResult<PostObject>> {
+            Box::pin(async { Ok(Resp::new(PostObjectOutput::default())) })
+        }
+    }
+
+    let service = live("before-staged-post");
+    let bad_candidate = ServiceBuilder::new()
+        .dialect(&support::ping_dialect())
+        .register::<Ping, _>(Arc::new(VersionedBackend("should-not-install")))
+        .register_post_object_after_authorization(Arc::new(DummyPost));
+
+    let error = service
+        .replace_registry(bad_candidate)
+        .expect_err("staged PostObject without legacy post forms must be refused by replace_registry");
+    assert!(
+        matches!(error, AssemblyError::PostObjectAuthorization { .. }),
+        "expected PostObjectAuthorization, got: {error:?}"
+    );
+    assert_eq!(
+        ping(&service).await,
+        (StatusCode::OK, "<Ping>before-staged-post</Ping>".to_owned()),
+        "last-good registry snapshot must remain installed"
+    );
+}

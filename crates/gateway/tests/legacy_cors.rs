@@ -687,3 +687,82 @@ async fn allowed_customer_keys_keep_cors() {
         assert_customer_key_cors(&response, "allowed customer keys");
     }
 }
+
+/// Negative — legacy bucket CORS and uncredentialed listed fallback CORS must preserve existing
+/// `Vary` dimensions rather than clobbering them, and uncredentialed listed fallback echoes must
+/// still emit `Vary: Origin` while wildcard `*` fallback does not.
+#[tokio::test]
+async fn n_legacy_bucket_and_uncredentialed_fallback_cors_preserve_vary_and_vary_on_listed_echo() {
+    struct VaryingHandlers;
+
+    fn vary_encoding() -> http::HeaderMap {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::VARY, http::HeaderValue::from_static("Accept-Encoding"));
+        headers
+    }
+
+    impl Handler<GetBucketVersioning> for VaryingHandlers {
+        async fn call(&self, _: Req<GetBucketVersioning>) -> HandlerResult<GetBucketVersioning> {
+            Ok(Resp::new(GetBucketVersioningOutput::default()).with_extra_headers(vary_encoding()))
+        }
+    }
+
+    impl Handler<ListBuckets> for VaryingHandlers {
+        async fn call(&self, _: Req<ListBuckets>) -> HandlerResult<ListBuckets> {
+            Ok(Resp::new(ListBucketsOutput::default()).with_extra_headers(vary_encoding()))
+        }
+    }
+
+    let vary_tokens = |response: &WireResponse| -> Vec<String> {
+        response
+            .headers()
+            .iter()
+            .filter(|(name, _)| *name == http::header::VARY)
+            .filter_map(|(_, value)| value.to_str().ok())
+            .flat_map(|value| value.split(',').map(|token| token.trim().to_owned()))
+            .collect()
+    };
+
+    let backend = Arc::new(VaryingHandlers);
+    let listed = wired_at_signed_time()
+        .cors_source(Arc::new(OneDocument(APP)))
+        .cors_policy(CorsPolicy::default())
+        .answer_cors_as_legacy_rustfs(LegacyRustfsCors::with_fallback_origins(Some(APP)))
+        .register::<GetBucketVersioning, _>(Arc::clone(&backend))
+        .register::<ListBuckets, _>(Arc::clone(&backend))
+        .build()
+        .expect("a listed fallback assembly");
+
+    let bucket_response = exchange_wire(
+        &listed,
+        signed_with(http::Method::GET, &format!("/{DOCUMENTED}?versioning"), &[("origin", APP)]),
+    )
+    .await;
+    assert_eq!(bucket_response.status(), 200);
+    let bucket_vary = vary_tokens(&bucket_response);
+    assert!(bucket_vary.iter().any(|t| t.eq_ignore_ascii_case("Accept-Encoding")), "{bucket_vary:?}");
+    assert!(bucket_vary.iter().any(|t| t.eq_ignore_ascii_case("Origin")), "{bucket_vary:?}");
+
+    let fallback_response = exchange_wire(&listed, signed_with(http::Method::GET, "/", &[("origin", APP)])).await;
+    assert_eq!(fallback_response.status(), 200);
+    assert_eq!(header(&fallback_response, "access-control-allow-origin"), Some(APP));
+    assert_eq!(header(&fallback_response, "access-control-allow-credentials"), None);
+    let fallback_vary = vary_tokens(&fallback_response);
+    assert!(
+        fallback_vary.iter().any(|t| t.eq_ignore_ascii_case("Accept-Encoding")),
+        "{fallback_vary:?}"
+    );
+    assert!(fallback_vary.iter().any(|t| t.eq_ignore_ascii_case("Origin")), "{fallback_vary:?}");
+
+    let wildcard = wired_at_signed_time()
+        .cors_policy(CorsPolicy::default())
+        .answer_cors_as_legacy_rustfs(LegacyRustfsCors::with_fallback_origins(Some("*")))
+        .register::<ListBuckets, _>(backend)
+        .build()
+        .expect("a wildcard fallback assembly");
+    let star_response = exchange_wire(&wildcard, signed_with(http::Method::GET, "/", &[("origin", APP)])).await;
+    assert_eq!(header(&star_response, "access-control-allow-origin"), Some("*"));
+    let star_vary = vary_tokens(&star_response);
+    assert!(star_vary.iter().any(|t| t.eq_ignore_ascii_case("Accept-Encoding")), "{star_vary:?}");
+    assert!(!star_vary.iter().any(|t| t.eq_ignore_ascii_case("Origin")), "{star_vary:?}");
+}

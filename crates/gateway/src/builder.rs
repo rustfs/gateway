@@ -85,7 +85,7 @@ mod not_modified_headers;
 mod operation_registration;
 mod operation_selection;
 pub(crate) mod plaintext_customer_keys;
-mod post_object_handler;
+pub(crate) mod post_object_handler;
 mod rustfs_profile;
 mod secret_scope;
 mod service_scope;
@@ -563,6 +563,7 @@ impl ServiceBuilder {
         }
 
         let routing = assemble_routing(self.router, self.pending, self.op_layers)?;
+        let selection = routing.router.selection();
         post_object_handler::validate_staged_post(&routing, self.view_policy.post_forms.is_legacy_rustfs(), monomorphic)?;
 
         if self.dangerous_allow_all_authorizer {
@@ -628,6 +629,8 @@ impl ServiceBuilder {
         Ok(S3Service::from_inner(Inner {
             floor: self.floor,
             signing_service: runtime.routing.router.signing_service(),
+            selection,
+            monomorphic,
             limits: self.limits,
             names: self.names,
             config: self.config,
@@ -659,8 +662,13 @@ impl ServiceBuilder {
         }))
     }
 
-    /// Consumes only the inputs that define a replaceable routing generation.
-    pub(crate) fn into_routing(self) -> Result<RoutingSnapshot, AssemblyError> {
+    /// Consumes only the inputs that define a replaceable routing generation, preserving the
+    /// live service's operation selection policy.
+    pub(crate) fn into_routing_with_selection(
+        mut self,
+        selection: rustfs_gateway_core::route::Selection,
+    ) -> Result<RoutingSnapshot, AssemblyError> {
+        self.router = self.router.selecting(selection);
         assemble_routing(self.router, self.pending, self.op_layers)
     }
 

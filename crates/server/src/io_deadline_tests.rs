@@ -43,7 +43,8 @@ async fn every_progress_timer_rearms_at_duration_max() {
         Duration::MAX,
         Duration::MAX,
         Duration::MAX,
-    );
+    )
+    .h2_header_read_timeout(Duration::MAX);
     // Written: the idle and write-progress deadlines are both rearmed.
     io.write_all(b"a").await.expect("the first octet fits");
     // Full: the write-progress wait begins.

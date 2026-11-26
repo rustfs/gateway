@@ -47,6 +47,7 @@ tokio-rustls = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tower-http = { workspace = true, features = ["catch-panic", "compression-gzip", "request-id", "trace"] }
 tracing = { workspace = true }
+zeroize = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))'.dependencies]
 nix = { workspace = true }

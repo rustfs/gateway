@@ -43,7 +43,7 @@ use rustfs_gateway_http::WireRequest;
 use rustfs_gateway_types::ErrorCode;
 
 use crate::close::ConnectionIntent;
-use crate::ext::{HostQuery, WireHead};
+use crate::ext::HostQuery;
 use crate::render::{S3Error, from_codec, from_handler, from_pre_auth, from_wire_reject};
 use crate::routed_facts::RoutedFacts;
 use crate::service::S3Service;
@@ -98,24 +98,30 @@ impl S3Service {
         };
         let mut parts = copy(head);
         crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
-        if !runtime.filters.is_empty() {
-            let mut wire_head = WireHead::new(&mut parts);
-            for filter in runtime.filters.iter() {
-                if let Err(error) = filter.on_wire(&mut wire_head) {
-                    return Classification::refused(&from_handler(error, kind, ConnectionIntent::MayKeepAlive));
-                }
-            }
+        if let Err(error) = crate::service::extension_guards::run_wire_filters(&runtime.filters, &mut parts, None) {
+            return Classification::refused(&from_handler(error, kind, ConnectionIntent::MayKeepAlive));
         }
         self.withhold_header_token(&mut parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, ()), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return Classification::refused(&from_wire_reject(reject)),
         };
-        let resolved = self.inner.host_resolver.resolve(&HostQuery {
-            host: wire.host(),
-            path: wire.raw_path().as_str(),
-            method: wire.method(),
-        });
+        let resolved = match crate::panic_boundary::contain_decision(|| {
+            self.inner.host_resolver.resolve(&HostQuery {
+                host: wire.host(),
+                path: wire.raw_path().as_str(),
+                method: wire.method(),
+            })
+        }) {
+            Ok(resolved) => resolved,
+            Err(()) => {
+                return Classification::refused(&from_handler(
+                    rustfs_gateway_core::HandlerError::internal_error("the host resolver failed"),
+                    kind,
+                    ConnectionIntent::MayKeepAlive,
+                ));
+            }
+        };
         match classify_preflight(wire.method(), &wire.headers()) {
             PreflightClass::NotPreflight => {}
             PreflightClass::HeaderlessOptions => {
@@ -131,9 +137,17 @@ impl S3Service {
             }
         }
         let resolver = &*self.inner.host_resolver;
-        let resolved = match crate::legacy_addressing::classify(&self.inner.names, resolver, router, &wire, resolved) {
-            Ok(resolved) => resolved,
-            Err(refusal) => return Classification::refused(&from_codec(refusal, kind)),
+        let resolved = match crate::service::extension_guards::classify_addressing_safely(
+            &self.inner.names,
+            resolver,
+            router,
+            &wire,
+            resolved,
+            None,
+        ) {
+            Ok(Ok(resolved)) => resolved,
+            Ok(Err(refusal)) => return Classification::refused(&from_codec(refusal, kind)),
+            Err(error) => return Classification::refused(&from_handler(error, kind, ConnectionIntent::MayKeepAlive)),
         };
         let dispatched = match router.dispatch(&RouteRequestParts {
             method: wire.method(),

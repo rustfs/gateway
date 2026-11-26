@@ -244,7 +244,9 @@ impl Predicate {
             Self::HostClass(class) => request.host_class == class,
             Self::PathLiteral(path) => request.path == path,
             Self::ArnForm(form) => request.arn_form == Some(form),
-            Self::HeaderPrefix(name, prefix) => request.first_header(name).is_some_and(|value| value.starts_with(prefix)),
+            Self::HeaderPrefix(name, prefix) => request
+                .first_header(name)
+                .is_some_and(|value| starts_with_ascii_ignore_case(value, prefix)),
             Self::HeaderPresent { header, negated } => request.first_header(header).is_some() != negated,
         }
     }
@@ -266,6 +268,18 @@ impl Predicate {
             _ => None,
         }
     }
+}
+
+/// ASCII case-insensitive prefix test, zero allocation and constant-time in the prefix length.
+///
+/// Media types and similar HTTP token prefixes (for example `Content-Type: Multipart/Form-Data`)
+/// are case-insensitive under RFC 9110 §8.3.1.
+#[must_use]
+pub(crate) fn starts_with_ascii_ignore_case(value: &str, prefix: &str) -> bool {
+    value
+        .as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
 impl fmt::Display for Predicate {
@@ -425,3 +439,7 @@ pub struct RouteEntry {
     /// The path shape this operation advertises, for the reverse index and for explanations.
     pub path_shape: &'static str,
 }
+
+#[cfg(test)]
+#[path = "tests/selector.rs"]
+mod tests;

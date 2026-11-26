@@ -150,10 +150,12 @@ fn a_listed_fallback_origin_is_echoed_without_credentials() {
             "access-control-allow-origin",
             "access-control-allow-methods",
             "access-control-allow-headers",
-            "access-control-expose-headers"
+            "access-control-expose-headers",
+            "vary",
         ]
     );
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_ORIGIN), Some("https://allowed.com"));
+    assert_eq!(get(&pairs, &VARY), Some("Origin"));
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_METHODS), Some("GET, POST, PUT, DELETE, OPTIONS, HEAD"));
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_HEADERS), Some("*"));
     let exposed = get(&pairs, &ACCESS_CONTROL_EXPOSE_HEADERS).expect("exposed headers");
@@ -442,4 +444,51 @@ fn a_header_value_that_cannot_be_written_is_left_out() {
         Some("-5"),
         "legacy writes a negative age as it is"
     );
+}
+
+#[test]
+fn n_wildcard_origin_pattern_rejects_overlapping_prefix_and_suffix() {
+    assert!(!matches_origin_pattern("https://a*a.com", "https://a.com"));
+    assert!(!matches_origin_pattern("a*a", "a"));
+    assert!(!matches_origin_pattern("https://foo*foo.example", "https://foo.example"));
+    assert!(matches_origin_pattern("https://a*a.com", "https://aa.com"));
+    assert!(matches_origin_pattern("https://a*a.com", "https://axxa.com"));
+    assert!(matches_origin_pattern("a*a", "aa"));
+
+    let configuration = document(vec![rule(&["https://a*a.com"], &["GET"], &[], &[], None)]);
+    let rejected = bucket_headers(
+        &CorsPolicy::default(),
+        &configuration,
+        &Method::GET,
+        &request(&[("origin", "https://a.com")]),
+    )
+    .expect("readable");
+    assert!(rejected.is_empty(), "overlapping wildcard origin must not match: {rejected:?}");
+
+    let accepted = bucket_headers(
+        &CorsPolicy::default(),
+        &configuration,
+        &Method::GET,
+        &request(&[("origin", "https://aa.com")]),
+    )
+    .expect("readable");
+    assert_eq!(get(&accepted, &ACCESS_CONTROL_ALLOW_ORIGIN), Some("https://aa.com"));
+}
+
+#[test]
+fn n_console_prefix_root_or_empty_does_not_disable_bucket_cors() {
+    let both = request(&[("origin", "https://a.com"), ("access-control-request-method", "GET")]);
+    let origin = request(&[("origin", "https://a.com")]);
+    for prefix in ["/", "///", ""] {
+        let cors = legacy(None).with_console_prefix(prefix);
+        assert!(cors.is_s3_path("/my-bucket/key"), "prefix {prefix:?} disabled bucket S3 path");
+        assert!(cors.is_s3_path("/my-bucket"), "prefix {prefix:?} disabled bucket root S3 path");
+        assert_eq!(cors.preflight_plan("/my-bucket/key", &both), PreflightPlan::Bucket("my-bucket"));
+        assert_eq!(cors.actual_plan("/my-bucket/key", &origin), Some(ActualPlan::Bucket("my-bucket")));
+        assert_eq!(cors.preflight_plan("/", &both), PreflightPlan::Fallback);
+        assert_eq!(cors.actual_plan("/", &origin), Some(ActualPlan::Fallback));
+    }
+    let custom = legacy(None).with_console_prefix("/ui/");
+    assert!(!custom.is_s3_path("/ui/index.html"));
+    assert!(custom.is_s3_path("/my-bucket/key"));
 }
