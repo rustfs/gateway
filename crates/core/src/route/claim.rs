@@ -94,8 +94,7 @@ pub enum ClaimRejection {
     DotSegment,
     /// A byte outside RFC 3986's unreserved set: a `%`, a brace, a space.
     ForbiddenCharacter,
-    /// Fewer than two segments. The first path segment is a bucket, so the claim would take a whole
-    /// bucket away from S3.
+    /// Fewer segments than the assembly permits: two for the S3 table, one for an independent service.
     ShadowsABucket,
     /// No reason written.
     NoReason,
@@ -113,7 +112,7 @@ impl ClaimRejection {
             Self::EmptySegment => "a claim has no empty segment",
             Self::DotSegment => "a claim has no '.' or '..' segment",
             Self::ForbiddenCharacter => "a claim spells only unreserved characters: letters, digits, '-', '.', '_', '~'",
-            Self::ShadowsABucket => "a claim shallower than two segments names a bucket and would take it away from S3",
+            Self::ShadowsABucket => "a claim needs a namespace segment; the S3 assembly requires two to preserve bucket routing",
             Self::NoReason => "a claim says why the dialect owns this prefix",
             Self::NoEvidence => "a claim carries at least one source, and no blank one",
         }
@@ -132,7 +131,8 @@ impl fmt::Display for ClaimRejection {
 /// operations it serves, and the start-up posture report lists every installed claim.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PathClaim {
-    /// The prefix, `/segment/segment[/…]`, with no trailing `/`.
+    /// The prefix, `/segment[/…]`, with no trailing `/`. Ordinary S3 assemblies require two
+    /// segments; [`crate::Dialect::assemble_for_service`] permits one namespace segment.
     pub prefix: &'static str,
     /// Why this dialect owns the prefix. Written by a human; read by whoever changes it.
     pub reason: &'static str,
@@ -144,6 +144,15 @@ impl PathClaim {
     /// Why this claim cannot be installed, or `None` when it can.
     #[must_use]
     pub fn rejection(&self) -> Option<ClaimRejection> {
+        self.rejection_with_depth(2)
+    }
+
+    /// An independently assembled service has no S3 buckets to shadow.
+    pub(crate) fn service_rejection(&self) -> Option<ClaimRejection> {
+        self.rejection_with_depth(1)
+    }
+
+    fn rejection_with_depth(&self, minimum_depth: usize) -> Option<ClaimRejection> {
         let Some(rest) = self.prefix.strip_prefix('/') else {
             return Some(ClaimRejection::NotAbsolute);
         };
@@ -166,7 +175,7 @@ impl PathClaim {
             }
             depth = depth.saturating_add(1);
         }
-        if depth < 2 {
+        if depth < minimum_depth {
             return Some(ClaimRejection::ShadowsABucket);
         }
         if self.reason.trim().is_empty() {

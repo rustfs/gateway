@@ -282,3 +282,121 @@ fn an_auth_refusal_closes_only_when_body_octets_are_owed() {
         );
     }
 }
+
+mod typed_error_extension_tests {
+    use super::*;
+
+    #[test]
+    fn renderer_preserves_typed_refusal_and_existing_wire_representation() {
+        fn extension_bounds<T: Clone + Send + Sync + 'static>() {}
+        extension_bounds::<S3Error>();
+        let trace = trace();
+        for auth in [
+            AuthError::InvalidAccessKeyId,
+            AuthError::SignatureDoesNotMatch,
+            AuthError::AccessDenied,
+        ] {
+            let error = from_auth(auth, ResponseKind::Other, true);
+            let response = render(&error, &trace);
+            let preserved = response.extensions().get::<S3Error>().expect("typed-auth-refusal");
+            assert_eq!(preserved, &error, "auth-original-error");
+            assert_eq!(
+                response.extensions().get::<ConnectionIntent>(),
+                Some(&error.connection_intent()),
+                "auth-connection"
+            );
+            assert_eq!(response.status(), error.status(), "auth-status");
+            assert_eq!(response.headers()["x-amz-request-id"], trace.request_id().as_str(), "auth-request-id");
+            assert_eq!(response.headers()["content-type"], "application/xml", "auth-content-type");
+            let bytes: Vec<u8> = response
+                .body()
+                .try_as_vectored()
+                .expect("rendered memory body")
+                .iter()
+                .flat_map(|part| part.iter().copied())
+                .collect();
+            assert_eq!(bytes, document(&error, &trace).as_bytes(), "auth-body");
+            assert_eq!(
+                response.headers()["content-length"].to_str().expect("length"),
+                bytes.len().to_string(),
+                "auth-length"
+            );
+        }
+    }
+
+    #[test]
+    fn renderer_preserves_typed_refusal_after_head_body_rules() {
+        let error = from_auth(AuthError::AccessDenied, ResponseKind::Head, false);
+        let mut response = render(&error, &trace());
+        crate::invariants::enforce(&mut response, &http::Method::HEAD);
+        let preserved = response.extensions().get::<S3Error>().expect("typed-head-refusal");
+        assert_eq!(preserved, &error, "head-original-error");
+        assert!(response.body().is_empty(), "head-body-empty");
+        assert_eq!(
+            response.extensions().get::<ConnectionIntent>(),
+            Some(&ConnectionIntent::MayKeepAlive),
+            "head-connection"
+        );
+    }
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn renderer_preserves_typed_error_and_unfinished_body_obligation() {
+        let error = from_handler(
+            HandlerError::new(ErrorCode::MISSING_CONTENT_LENGTH, "Missing content length"),
+            ResponseKind::Other,
+            ConnectionIntent::Close,
+        );
+        let response = render(&error, &trace());
+        let preserved = response.extensions().get::<S3Error>().expect("typed-unfinished-refusal");
+        assert_eq!(preserved, &error, "unfinished-original-error");
+        assert!(
+            response
+                .extensions()
+                .get::<rustfs_gateway_server::UnfinishedRequestBody>()
+                .is_some(),
+            "unfinished-body-obligation"
+        );
+        assert_eq!(
+            response.extensions().get::<ConnectionIntent>(),
+            Some(&ConnectionIntent::Close),
+            "unfinished-connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn renderer_preserves_body_ceiling_code_status_and_message() {
+        use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
+        use crate::wire_read::{WireFrames, WireProgress};
+
+        let body = http_body_util::Full::new(bytes::Bytes::from_static(b"abc"));
+        let progress = WireProgress::for_body(BodyDigestObligation::None, Some(&body));
+        let ceilings = BodyCeilings {
+            buffered: 2,
+            whole_body: true,
+            declared: None,
+        };
+        let mut frames = WireFrames::new(body, progress, ceilings, BodyTimeouts::default());
+        let error = std::future::poll_fn(|context| frames.poll_next(context))
+            .await
+            .expect_err("body-ceiling-refusal");
+        let response = render(&error, &trace());
+        let preserved = response.extensions().get::<S3Error>().expect("typed-body-ceiling-refusal");
+        assert_eq!(preserved, &error, "ceiling-original-error");
+        assert_eq!(
+            (preserved.code(), preserved.status(), preserved.message(), preserved.connection_intent()),
+            (
+                Some(&ErrorCode::ENTITY_TOO_LARGE),
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some("the declared request body is larger than this service will hold"),
+                ConnectionIntent::Close,
+            ),
+            "ceiling-error-fields"
+        );
+        assert_eq!(
+            response.extensions().get::<ConnectionIntent>(),
+            Some(&ConnectionIntent::Close),
+            "ceiling-connection"
+        );
+    }
+}

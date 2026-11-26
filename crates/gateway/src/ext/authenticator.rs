@@ -567,6 +567,7 @@ impl SigV4Authenticator {
         let sealed = request.sealed();
         let view = sealed.view();
         let location = sealed.marker().location();
+        let service = sealed.expected_service();
         // Once a credential surface is present, parsing failure is still a credential failure.
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
@@ -596,16 +597,14 @@ impl SigV4Authenticator {
                 return Err(error.into());
             }
         }
-        if let Some(refusal) = self.scope_policy.service_refusal(presented.scope()) {
+        if let Some(refusal) = self.scope_policy.service_refusal(presented.scope(), service) {
             let _ = request.legacy_refusal.set(refusal);
             return Err(AuthError::NotImplemented(Unimplemented::ScopeService).into());
         }
 
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
-        let expected = self
-            .scope_policy
-            .apply(ExpectedScope::new(sealed.expected_service(), &self.regions));
+        let expected = self.scope_policy.apply(ExpectedScope::new(service, &self.regions));
         let verified = enforce_scope(presented.scope(), sealed.clock(), &expected).map_err(VerificationFailure::Scope)?;
 
         let resolved = self
@@ -666,7 +665,8 @@ impl SigV4Authenticator {
                         &signed,
                         request.host(),
                         payload.canonical_payload_token(),
-                    );
+                    )
+                    .for_service(service);
                     if location.is_presigned() {
                         spec = spec.presigned();
                     }

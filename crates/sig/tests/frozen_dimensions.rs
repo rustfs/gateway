@@ -144,10 +144,34 @@ fn services_round_trip_through_their_wire_spelling() {
         ("s3express", SigService::S3Express),
         ("s3-object-lambda", SigService::S3ObjectLambda),
         ("s3-outposts", SigService::S3Outposts),
+        ("s3vectors", SigService::S3Vectors),
     ] {
         let parsed = SigService::parse(text).expect("known service");
         assert_eq!(parsed, expected);
         assert_eq!(parsed.as_str(), text);
+    }
+}
+
+/// S3 Vectors has its own credential-scope service.
+#[test]
+fn s3vectors_service_round_trips() {
+    let service = SigService::parse("s3vectors").expect("S3 Vectors has a typed signing service");
+    assert_eq!(service.as_str(), "s3vectors");
+}
+
+/// Service spellings remain case-sensitive.
+#[test]
+fn n_s3vectors_service_rejects_case_variants() {
+    for service in ["S3Vectors", "S3VECTORS", "s3Vectors"] {
+        assert!(SigService::parse(service).is_err(), "case variant {service}");
+    }
+}
+
+/// A service name must be complete and contain no surrounding whitespace.
+#[test]
+fn n_s3vectors_service_rejects_near_matches() {
+    for service in ["s3vector", "s3vectors ", " s3vectors", "s3vectors-extra"] {
+        assert!(SigService::parse(service).is_err(), "near match {service:?}");
     }
 }
 

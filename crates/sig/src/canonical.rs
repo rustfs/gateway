@@ -64,7 +64,7 @@ use crate::codec::{append_hex_lower, encode_hex_lower};
 use crate::mode::CanonicalPayloadToken;
 use crate::parse::{AmzDate, CredentialScope, SCOPE_TERMINATOR};
 use crate::query::{QueryExclusion, RawQuery, percent_decode, percent_encode};
-use crate::scheme::ALGORITHM_SIGV4;
+use crate::scheme::{ALGORITHM_SIGV4, SigService};
 use crate::signed_headers::SignedHeaderSet;
 use crate::signed_headers_legacy;
 use crate::verdict::AuthError;
@@ -337,6 +337,7 @@ pub struct CanonicalRequestSpec<'r> {
     host: &'r RawHost,
     payload_token: CanonicalPayloadToken,
     exclusion: QueryExclusion,
+    service: SigService,
 }
 
 struct CanonicalHost<'a>(&'a str);
@@ -374,6 +375,7 @@ impl<'r> CanonicalRequestSpec<'r> {
             host,
             payload_token,
             exclusion: QueryExclusion::None,
+            service: SigService::S3,
         }
     }
 
@@ -384,6 +386,19 @@ impl<'r> CanonicalRequestSpec<'r> {
     #[must_use]
     pub fn presigned(mut self) -> Self {
         self.exclusion = QueryExclusion::PresignedSignature;
+        self
+    }
+
+    /// Uses the signing service's query-list policy.
+    ///
+    /// Only [`SigService::S3Vectors`] admits repeated decoded `tagKeys` names. All their values
+    /// remain signed, including duplicates; other retained query names remain unique. The default
+    /// is [`RawQuery::canonical`]'s duplicate refusal. A verifier supplies the routed service after
+    /// scope validation; a signer supplies its own signing scope's service. URI path candidates
+    /// and signature-parameter exclusion are unchanged.
+    #[must_use]
+    pub const fn for_service(mut self, service: SigService) -> Self {
+        self.service = service;
         self
     }
 
@@ -398,7 +413,7 @@ impl<'r> CanonicalRequestSpec<'r> {
     /// signed header holds bytes that are not valid UTF-8. [`AuthError::SignatureDoesNotMatch`] if
     /// a header named in the allow-list has vanished from the map between enforcement and here.
     pub fn candidates(&self) -> Result<CanonicalCandidates, AuthError> {
-        let canonical_query = self.query.canonical(self.exclusion)?;
+        let canonical_query = self.query.canonical_for_service(self.exclusion, self.service)?;
 
         let mut tail = String::new();
         tail.push('\n');

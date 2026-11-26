@@ -39,6 +39,7 @@
 //! into an outage or, worse, into a permissive default. A caller reloading configuration keeps the
 //! router it already has.
 
+use rustfs_gateway_sig::SigService;
 use std::sync::Arc;
 
 use crate::codec::OperationCodec;
@@ -57,6 +58,36 @@ use crate::route::{
 /// Why a router refused to be built.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BuildError {
+    /// A dialect is bound to a different service assembly.
+    DialectServiceMismatch {
+        /// The dialect.
+        dialect: &'static str,
+        /// The router's selected service, or the default S3 assembly.
+        expected: Option<SigService>,
+        /// The dialect's declared service binding.
+        actual: Option<SigService>,
+    },
+    /// An operation's signing service differs from its independent router.
+    OperationServiceMismatch {
+        /// The operation.
+        operation: &'static str,
+        /// The router's selected signing service.
+        expected: SigService,
+        /// The operation floor's signing service.
+        actual: SigService,
+    },
+    /// An independent service's operation permits authentication without its SigV4 scope.
+    ServiceRequiresSigV4 {
+        /// The operation.
+        operation: &'static str,
+    },
+    /// A live service update attempts to change the initial routing scope.
+    ServiceScopeChanged {
+        /// The installed service's scope.
+        expected: Option<SigService>,
+        /// The replacement's scope.
+        actual: Option<SigService>,
+    },
     /// One or more registrations were refused. Never empty.
     Registration(Vec<RegistryError>),
     /// A third-party route entry claims an AWS operation name.
@@ -72,7 +103,8 @@ pub enum BuildError {
     ///
     /// Route-only operations without codecs remain useful for core dispatch tests, but the moment
     /// a codec makes a route reachable from public bytes, its exact row must come from
-    /// [`Dialect`].
+    /// [`Dialect`]. An independent signing service also requires every registered handler,
+    /// including one without a codec, to have an explicit matching dialect route.
     UnverifiedCodecRoute {
         /// The operation whose codec would make the unverified row reachable.
         op_name: &'static str,
@@ -88,6 +120,29 @@ pub enum BuildError {
 impl std::fmt::Display for BuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::DialectServiceMismatch {
+                dialect,
+                expected,
+                actual,
+            } => {
+                write!(f, "dialect {dialect} has service scope {actual:?}, but the router requires {expected:?}")
+            }
+            Self::OperationServiceMismatch {
+                operation,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "{operation} uses signing service {}, but the router requires {}",
+                actual.as_str(),
+                expected.as_str()
+            ),
+            Self::ServiceRequiresSigV4 { operation } => {
+                write!(f, "{operation} must require SigV4 under every policy in an independent service")
+            }
+            Self::ServiceScopeChanged { expected, actual } => {
+                write!(f, "a service update cannot change routing scope from {expected:?} to {actual:?}")
+            }
             Self::Registration(errors) => {
                 write!(f, "{} registration(s) refused:", errors.len())?;
                 for error in errors {
@@ -125,6 +180,8 @@ impl From<RouterBuildError> for BuildError {
 #[derive(Debug, Default)]
 pub struct RouterBuilder {
     registry: Registry,
+    signing_service: Option<SigService>,
+    scope_error: Option<BuildError>,
     /// Raw route-only entries. A matching codec makes one a build refusal unless an installed
     /// dialect contains the exact same row.
     entries: Vec<RouteEntry>,
@@ -156,6 +213,38 @@ impl RouterBuilder {
         Self::default()
     }
 
+    /// Builds an independent signing service from explicitly installed, matching dialect routes.
+    ///
+    /// No generated S3 routes are installed. Every handler must have a dialect route, use `service`,
+    /// and require SigV4 under every policy. The ordinary [`Self::new`] behavior is unchanged.
+    #[must_use]
+    pub fn for_service(service: SigService) -> Self {
+        Self {
+            signing_service: Some(service),
+            ..Self::new()
+        }
+    }
+
+    fn check_operation_service<O: Operation>(&mut self) {
+        let Some(expected) = self.signing_service else {
+            return;
+        };
+        let error = if O::floor().service() != expected {
+            Some(BuildError::OperationServiceMismatch {
+                operation: O::NAME,
+                expected,
+                actual: O::floor().service(),
+            })
+        } else if !O::floor().requires_sigv4_under_every_policy() {
+            Some(BuildError::ServiceRequiresSigV4 { operation: O::NAME })
+        } else {
+            None
+        };
+        if self.scope_error.is_none() {
+            self.scope_error = error;
+        }
+    }
+
     /// Chooses among the operations a request outside every claim names by `selection`
     /// ([`Selection::Table`] unless told otherwise).
     #[must_use]
@@ -174,6 +263,7 @@ impl RouterBuilder {
         O: OperationCodec,
         B: Handler<O>,
     {
+        self.check_operation_service::<O>();
         if let Err(error) = self.registry.register_handler::<O, B>(implementation) {
             self.errors.push(error);
         }
@@ -192,6 +282,7 @@ impl RouterBuilder {
         O: Operation,
         B: Handler<O>,
     {
+        self.check_operation_service::<O>();
         if let Err(error) = self.registry.register_handler_without_codec::<O, B>(implementation) {
             self.errors.push(error);
         }
@@ -228,6 +319,13 @@ impl RouterBuilder {
     /// router asks before the S3 table. Their declarations go with them.
     #[must_use]
     pub fn dialect(mut self, dialect: &Dialect) -> Self {
+        if self.signing_service != dialect.signing_service() && self.scope_error.is_none() {
+            self.scope_error = Some(BuildError::DialectServiceMismatch {
+                dialect: dialect.name(),
+                expected: self.signing_service,
+                actual: dialect.signing_service(),
+            });
+        }
         for operation in dialect.operations() {
             self.dialect_entries.push(operation.entry().clone());
             if !operation.shadows().is_empty() {
@@ -284,10 +382,14 @@ impl RouterBuilder {
     /// [`BuildError::Route`] when the table itself refuses — an overlap at one precedence,
     /// undeclared shadowing, or a generated row this crate cannot read.
     pub fn build(self) -> Result<Router, BuildError> {
+        if let Some(error) = self.scope_error {
+            return Err(error);
+        }
         if !self.errors.is_empty() {
             return Err(BuildError::Registration(self.errors));
         }
-        if self.entries.is_empty()
+        if self.signing_service.is_none()
+            && self.entries.is_empty()
             && self.dialect_entries.is_empty()
             && self.shadowing.is_empty()
             && self.claims.is_empty()
@@ -301,11 +403,27 @@ impl RouterBuilder {
             if is_standard_operation_name(entry.op_name) {
                 return Err(BuildError::RouteClaimsStandardName { op_name: entry.op_name });
             }
-            if self.registry.codec(entry.op_name).is_some() && !self.dialect_entries.contains(entry) {
+            if (self.signing_service.is_some() || self.registry.codec(entry.op_name).is_some())
+                && !self.dialect_entries.contains(entry)
+            {
                 return Err(BuildError::UnverifiedCodecRoute { op_name: entry.op_name });
             }
         }
-        let mut entries = generated_entries().map_err(RouterBuildError::from)?;
+        if self.signing_service.is_some() {
+            for name in self.registry.names() {
+                let declared = self.dialect_entries.iter().any(|entry| entry.op_name == name)
+                    || self.claimed_entries.iter().any(|entry| entry.entry().op_name == name)
+                    || self.forms.iter().any(|claim| claim.entry().op_name == name);
+                if !declared {
+                    return Err(BuildError::UnverifiedCodecRoute { op_name: name });
+                }
+            }
+        }
+        let mut entries = if self.signing_service.is_some() {
+            Vec::new()
+        } else {
+            generated_entries().map_err(RouterBuildError::from)?
+        };
         entries.extend(self.dialect_entries.iter().cloned());
         entries.extend(self.entries.into_iter().filter(|entry| !self.dialect_entries.contains(entry)));
         // A path literal inside a claim is a row S3 routing never reaches. Refused before the S3
@@ -323,7 +441,11 @@ impl RouterBuilder {
                 }
             }
         }
-        let mut shadowing: ShadowingDecls = SHADOWING;
+        let mut shadowing = if self.signing_service.is_some() {
+            ShadowingDecls::NONE
+        } else {
+            SHADOWING
+        };
         for group in self.shadowing {
             shadowing = shadowing.and(group);
         }
@@ -332,9 +454,12 @@ impl RouterBuilder {
         for group in self.claimed_shadowing {
             claimed_shadowing = claimed_shadowing.and(group);
         }
-        let claims = ClaimedTable::build(self.claims, self.claimed_entries, &claimed_shadowing)
-            .and_then(|claims| claims.with_forms(self.forms))
-            .map_err(RouterBuildError::from)?;
-        Ok(Router::with_claims(table, claims, self.registry)?.selecting(self.selection))
+        let claims =
+            ClaimedTable::build_scoped(self.claims, self.claimed_entries, &claimed_shadowing, self.signing_service.is_some())
+                .and_then(|claims| claims.with_forms(self.forms))
+                .map_err(RouterBuildError::from)?;
+        Ok(Router::with_claims(table, claims, self.registry)?
+            .with_signing_service(self.signing_service)
+            .selecting(self.selection))
     }
 }

@@ -40,6 +40,7 @@ use core::fmt;
 
 use zeroize::Zeroizing;
 
+use crate::scheme::SigService;
 use crate::secret::SessionToken;
 use crate::signature::ct_bytes_equal;
 use crate::verdict::AuthError;
@@ -224,6 +225,22 @@ impl<'q> RawQuery<'q> {
     ///   the shape of a parameter-smuggling bypass (s3s#176). A notification subscription explicitly
     ///   signs every value of its multi-valued `events` filter; the subscriber reads them all.
     pub fn canonical(&self, exclusion: QueryExclusion) -> Result<String, AuthError> {
+        self.canonical_for_service(exclusion, SigService::S3)
+    }
+
+    /// Rebuilds the canonical query with this signing service's list-valued parameters.
+    ///
+    /// Only [`SigService::S3Vectors`] permits repeated occurrences of the exact percent-decoded
+    /// name `tagKeys`. Every value, including repeated values, remains in the encoded tuple sort.
+    /// An enabled notification event list retains each `events` value in wire order.
+    /// All other retained names must be unique; [`QueryExclusion`] keeps its existing behavior.
+    /// A verifier supplies its routed service after checking the credential scope. This method
+    /// does not authenticate a scope or validate an operation's parameter values.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Self::canonical`], except for the stated `tagKeys` list permission.
+    pub fn canonical_for_service(&self, exclusion: QueryExclusion, service: SigService) -> Result<String, AuthError> {
         if self.raw.is_empty() {
             return Ok(String::new());
         }
@@ -249,15 +266,23 @@ impl<'q> RawQuery<'q> {
                 Some(value) => percent_encode(&percent_decode(value)?),
                 None => String::new(),
             };
-            if !(self.signed_event_list && key == "events") && pairs.iter().any(|(existing, _)| *existing == key) {
+            let list_value = (self.signed_event_list && decoded_key == b"events")
+                || (service == SigService::S3Vectors && decoded_key == b"tagKeys");
+            if !list_value && pairs.iter().any(|(existing, _)| *existing == key) {
                 return Err(AuthError::AuthorizationHeaderMalformed);
             }
             pairs.push((key, value));
         }
 
         if self.signed_event_list {
-            // MinIO Java and RustFS 1.0.5 sort names and keep the wire order within the events list.
-            pairs.sort_by(|left, right| left.0.cmp(&right.0));
+            // Event filters retain wire order; other admitted lists keep encoded value order.
+            pairs.sort_by(|left, right| {
+                if left.0 == "events" && right.0 == "events" {
+                    std::cmp::Ordering::Equal
+                } else {
+                    left.cmp(right)
+                }
+            });
         } else {
             pairs.sort_unstable();
         }
@@ -496,5 +521,61 @@ mod tests {
         assert_eq!(percent_encode(b"arn:aws:lambda"), "arn%3Aaws%3Alambda");
         let once = percent_encode(&percent_decode("arn%3Aaws").expect("valid"));
         assert_eq!(once, "arn%3Aaws");
+    }
+
+    #[test]
+    fn service_lists_keep_their_independent_value_ordering() {
+        let query = "tagKeys=z&events=created&tagKeys=a&events=accessed&tagKeys=a";
+        assert_eq!(
+            RawQuery::new(query)
+                .with_signed_event_list(true)
+                .canonical_for_service(QueryExclusion::None, SigService::S3Vectors),
+            Ok("events=created&events=accessed&tagKeys=a&tagKeys=a&tagKeys=z".into())
+        );
+        assert_eq!(
+            RawQuery::new("events=created&events=accessed")
+                .with_signed_event_list(true)
+                .canonical(QueryExclusion::None),
+            Ok("events=created&events=accessed".into())
+        );
+        assert_eq!(
+            RawQuery::new("tagKeys=z&tagKeys=a&tagKeys=a").canonical_for_service(QueryExclusion::None, SigService::S3Vectors),
+            Ok("tagKeys=a&tagKeys=a&tagKeys=z".into())
+        );
+    }
+
+    #[test]
+    fn list_contexts_reject_unrelated_duplicate_names() {
+        for (query, event_list, service) in [
+            ("events=a&events=b", false, SigService::S3Vectors),
+            ("events=a&events=b", false, SigService::S3),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3),
+            ("prefix=a&prefix=b", true, SigService::S3),
+            ("prefix=a&prefix=b", true, SigService::S3Vectors),
+            ("X-Amz-Date=a&X-Amz-Date=b", true, SigService::S3Vectors),
+        ] {
+            assert_eq!(
+                RawQuery::new(query)
+                    .with_signed_event_list(event_list)
+                    .canonical_for_service(QueryExclusion::None, service),
+                Err(AuthError::AuthorizationHeaderMalformed),
+                "unexpected duplicate permission for {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn event_list_canonicalization_distinguishes_changed_values_and_order() {
+        let original = RawQuery::new("events=created&events=accessed")
+            .with_signed_event_list(true)
+            .canonical_for_service(QueryExclusion::None, SigService::S3Vectors)
+            .expect("the enabled event list");
+        for changed in ["events=created&events=removed", "events=accessed&events=created"] {
+            let changed = RawQuery::new(changed)
+                .with_signed_event_list(true)
+                .canonical_for_service(QueryExclusion::None, SigService::S3Vectors)
+                .expect("the changed event list");
+            assert_ne!(original, changed);
+        }
     }
 }

@@ -36,7 +36,8 @@ use super::legacy_credential::{
 use super::legacy_refusal::LegacyRefusal;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AuthError, CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, SealedAws,
-    ServiceReading, SigLocation, SignedHeaderRules, SignedHeaderSet, UriPathCandidates, X_AMZ_DATE, X_AMZ_DATE_HEADER,
+    ServiceReading, SigLocation, SigService, SignedHeaderRules, SignedHeaderSet, UriPathCandidates, X_AMZ_DATE,
+    X_AMZ_DATE_HEADER,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -130,7 +131,7 @@ impl ScopePolicy {
         } else {
             expected
         };
-        if self.legacy_services {
+        if self.legacy_services && !matches!(expected.service(), SigService::S3Vectors) {
             expected.accepting_services(&LEGACY_RUSTFS_SIGNING_SERVICES)
         } else {
             expected
@@ -139,9 +140,9 @@ impl ScopePolicy {
 
     /// Legacy RustFS's answer to a scope naming a service it verifies on no route, under the legacy
     /// services: `501 NotImplemented`, naming the service and the ones it verifies.
-    pub(super) fn service_refusal(self, scope: &CredentialScope) -> Option<LegacyRefusal> {
+    pub(super) fn service_refusal(self, scope: &CredentialScope, expected: SigService) -> Option<LegacyRefusal> {
         let service = scope.service_name();
-        if !self.legacy_services || LEGACY_RUSTFS_SIGNING_SERVICES.contains(&service) {
+        if !self.legacy_services || expected == SigService::S3Vectors || LEGACY_RUSTFS_SIGNING_SERVICES.contains(&service) {
             return None;
         }
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS echoes the service the request named

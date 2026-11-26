@@ -654,6 +654,14 @@ where
             Box::pin(async move { decision })
         }
 
+        fn authorize_route_result<'a>(
+            &'a self,
+            _context: &'a RequestContext<'a>,
+            request: &'a AuthzRequest<'a>,
+        ) -> BoxFuture<'a, Result<Decision, HandlerError>> {
+            Box::pin(async move { Ok((self.0)(request)) })
+        }
+
         fn authorize_copy_source<'a>(
             &'a self,
             _context: &'a RequestContext<'a>,

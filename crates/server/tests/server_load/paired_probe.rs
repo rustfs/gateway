@@ -19,11 +19,12 @@
 //! Upstream: server load tests; downstream: the test listeners.
 
 use super::{ProbeSet, healthy_probe, p99};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::Instant;
 
 async fn probe(address: SocketAddr, ceiling: Duration) -> (Option<TcpStream>, Duration, bool) {
     let started = Instant::now();
@@ -63,6 +64,16 @@ pub(super) async fn paired(
     count: usize,
     ceiling: Duration,
 ) -> (ProbeSet, ProbeSet, Vec<TcpStream>) {
+    paired_observed(control, loaded, count, ceiling, || {}).await
+}
+
+async fn paired_observed(
+    control: &[SocketAddr],
+    loaded: &[SocketAddr],
+    count: usize,
+    ceiling: Duration,
+    on_complete: impl Fn() + Copy,
+) -> (ProbeSet, ProbeSet, Vec<TcpStream>) {
     assert!(!control.is_empty(), "the probe pool must not be empty");
     assert_eq!(control.len(), loaded.len(), "the paired pools must have equal size");
     assert_eq!(count, control.len(), "each sample needs its own retained connection");
@@ -77,10 +88,17 @@ pub(super) async fn paired(
         .zip(loaded.iter().copied())
         .enumerate()
         .map(|(index, (control, loaded))| async move {
+            let observed_probe = |address| {
+                probe(address, ceiling).inspect(move |result| {
+                    if result.0.is_some() {
+                        on_complete();
+                    }
+                })
+            };
             if index % 2 == 0 {
-                tokio::join!(probe(control, ceiling), probe(loaded, ceiling))
+                tokio::join!(observed_probe(control), observed_probe(loaded))
             } else {
-                let (loaded, control) = tokio::join!(probe(loaded, ceiling), probe(control, ceiling));
+                let (loaded, control) = tokio::join!(observed_probe(loaded), observed_probe(control));
                 (control, loaded)
             }
         });
@@ -163,7 +181,10 @@ pub(super) async fn paired_probe_p99(
 #[cfg(test)]
 mod tests {
     use super::probe;
+    use std::future::{Future, poll_fn};
     use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Poll;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -185,7 +206,9 @@ mod tests {
                     break;
                 }
             }
-            tokio::time::sleep(delay).await;
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             let _ = connection.write_all(answer).await;
         });
         address
@@ -235,6 +258,15 @@ mod tests {
 
     #[tokio::test]
     async fn paired_counts_stalls_and_charges_the_ceiling_on_each_side() {
+        paired_counts_with_scheduling_stall(Duration::ZERO).await;
+    }
+
+    #[tokio::test]
+    async fn paired_counts_survive_a_scheduling_stall() {
+        paired_counts_with_scheduling_stall(Duration::from_millis(30)).await;
+    }
+
+    async fn paired_counts_with_scheduling_stall(stall: Duration) {
         let answer = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
         let control = vec![
             fixture(answer, Duration::ZERO).await,
@@ -245,7 +277,34 @@ mod tests {
             fixture(answer, Duration::ZERO).await,
         ];
         let ceiling = Duration::from_millis(10);
-        let (control, loaded, retained) = super::paired(&control, &loaded, 2, ceiling).await;
+        let completed = AtomicUsize::new(0);
+        let probes = super::paired_observed(&control, &loaded, 2, ceiling, || {
+            completed.fetch_add(1, Ordering::SeqCst);
+        });
+        tokio::pin!(probes);
+        tokio::time::pause();
+        crate::server_runtime::frozen_clock::poll_without_auto_advance(async {
+            poll_fn(|cx| {
+                assert!(probes.as_mut().poll(cx).is_pending(), "the probes start with pending socket I/O");
+                Poll::Ready(())
+            })
+            .await;
+            // A descheduled runtime must not charge its delay to the healthy fixture responses.
+            std::thread::sleep(stall);
+            poll_fn(|cx| {
+                assert!(probes.as_mut().poll(cx).is_pending(), "the delayed probes wait for their deadline");
+                if completed.load(Ordering::SeqCst) == 2 {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            })
+            .await;
+        })
+        .await;
+        tokio::time::advance(ceiling).await;
+        let (control, loaded, retained) = probes.await;
+        tokio::time::resume();
         assert_eq!(retained.len(), 2, "only completed probes keep their connections");
         assert_eq!(control.stalled, 1);
         assert_eq!(loaded.stalled, 1);
