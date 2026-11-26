@@ -39,6 +39,7 @@ Agent entry point for repository automation commands.
 | `src/verify/process/path_isolation_tests.rs` | Unusable-PATH group termination, released only after the tree publishes a complete, live descendant pid. | A PATH-isolation case expires before its tree is observable, or group cleanup starts depending on PATH. |
 | `src/verify/selection.rs` | Crate-local Cargo test and Clippy target selection. | A crate's bounded verification scope is wrong or too slow. |
 | `src/verify/tests.rs` | Verification selection and scheduling unit contracts. | A bounded verification scope or schedule changes. |
+| `src/verify/tests/trybuild_scope.rs` | Workspace-wide AST guard ensuring no crate's fast verification loop runs an unskipped default-feature `trybuild` harness. | A crate adds a `trybuild` test or its fast-loop skips change. |
 | `src/why.rs` | Reverse trace and stable text/JSON rendering. | A `why` namespace or section changes. |
 | `src/why/distance.rs` | Edit-distance ranking for nearby reverse-trace targets. | Unknown-target suggestions drift. |
 | `src/why/error_code.rs` | Error-code status, producer and case reverse tracing. | The `why error-code` answer changes. |

@@ -20,6 +20,8 @@ source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_xtask_codegen_surface)" || exit 1
 for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs xtask/src/verify/loops.rs \
     crates/conformance/Cargo.toml crates/conformance/src/cli.rs scripts/check_case_keys_honoured.sh \
+    crates/core/tests/compile_fail.rs crates/core/tests/operation_spec_semver.rs \
+    crates/sig/tests/compile_fail.rs \
     crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs \
     crates/server/tests/server_load/per_ip.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
@@ -570,6 +572,16 @@ verify_source = (root / "xtask/src/verify.rs").read_text()
 verify_comments, verify_syntax = rust_views(verify_source)
 for relative, test_name in (
     ("crates/conformance/src/cli.rs", "feedback_case_c_object_0001"),
+    ("crates/core/tests/compile_fail.rs", "compile_time_contracts_are_not_openable"),
+    (
+        "crates/core/tests/operation_spec_semver.rs",
+        "c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary",
+    ),
+    ("crates/sig/tests/compile_fail.rs", "p2_01_compile_time_boundaries_are_not_openable"),
+    ("crates/sig/tests/compile_fail.rs", "p2_02_compile_time_boundaries_are_not_openable"),
+    ("crates/sig/tests/compile_fail.rs", "p2_03_compile_time_boundaries_are_not_openable"),
+    ("crates/sig/tests/compile_fail.rs", "p2_04_compile_time_boundaries_are_not_openable"),
+    ("crates/sig/tests/compile_fail.rs", "p2_06_compile_time_boundaries_are_not_openable"),
     ("crates/gateway/tests/cors_runtime.rs", "a_million_unique_keys_keep_rss_within_the_entry_budget"),
     ("crates/gateway/src/ext/governor/allocation_tests.rs", "c_gov_0013_a_million_addresses_do_not_grow_memory"),
     ("crates/server/tests/server_load.rs", "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget"),
@@ -667,6 +679,8 @@ let subject = if package == "rustfs-gateway" {
     )
 } else if package == "rustfs-gateway-core" {
     format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
+} else if package == "rustfs-gateway-sig" {
+    format!("crate {package} runtime scope; compile-time and statistical timing contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-conformance" {
     format!("crate {package} library and allocation scope; ordinary integration contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-server" {
@@ -735,6 +749,8 @@ if package == "rustfs-gateway-core" {
             "--".to_owned(),
             "--skip".to_owned(),
             "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
+            "--skip".to_owned(),
+            "operation_spec_semver::c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary".to_owned(),
         ],
         clippy_step,
     ];
@@ -759,6 +775,16 @@ if package == "rustfs-gateway" {
             "timing::a_match_and_a_mismatch_cost_the_same",
             "--skip",
             "timing::c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latency",
+            "--skip",
+            "compile_fail::p2_01_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_02_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_03_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_04_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_06_compile_time_boundaries_are_not_openable",
             "--exact",
         ]
         .map(str::to_owned),

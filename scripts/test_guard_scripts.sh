@@ -2473,6 +2473,94 @@ expect_fail check_xtask_codegen_surface.sh \
     'the signature fast scope broadening its statistical timing skips' \
     mut_xtask_sig_fast_scope_loses_exact_matching
 
+mut_xtask_core_fast_scope_loses_operation_spec_semver_skip() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify/selection.rs")
+text = path.read_text()
+old = '''                "--skip".to_owned(),
+                "operation_spec_semver::c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary".to_owned(),
+'''
+if text.count(old) != 1:
+    raise SystemExit("core operation-spec semver fast-scope skip is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the core fast scope losing its operation-spec semver trybuild skip' \
+    mut_xtask_core_fast_scope_loses_operation_spec_semver_skip
+
+mut_xtask_sig_fast_scope_loses_compile_fail_skip() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify/selection.rs")
+text = path.read_text()
+old = '''                "--skip",
+                "compile_fail::p2_06_compile_time_boundaries_are_not_openable",
+'''
+if text.count(old) != 1:
+    raise SystemExit("signature compile-fail fast-scope skip is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the signature fast scope losing one of its compile-fail trybuild skips' \
+    mut_xtask_sig_fast_scope_loses_compile_fail_skip
+
+mut_xtask_core_operation_spec_semver_contract_disappears() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/operation_spec_semver.rs")
+text = path.read_text()
+old = "fn c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary() {"
+new = "fn c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary_removed() {"
+if text.count(old) != 1:
+    raise SystemExit("workspace-only core operation-spec semver contract is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace gate dropping the core operation-spec semver contract' \
+    mut_xtask_core_operation_spec_semver_contract_disappears
+
+mut_xtask_sig_compile_fail_contract_disappears() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/sig/tests/compile_fail.rs")
+text = path.read_text()
+old = "fn p2_06_compile_time_boundaries_are_not_openable() {"
+new = "fn p2_06_compile_time_boundaries_are_not_openable_removed() {"
+if text.count(old) != 1:
+    raise SystemExit("workspace-only signature compile-fail contract is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace gate dropping a signature compile-fail contract' \
+    mut_xtask_sig_compile_fail_contract_disappears
+
+mut_xtask_sig_subject_drops_disclosure() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''    } else if package == "rustfs-gateway-sig" {
+        format!("crate {package} runtime scope; compile-time and statistical timing contracts remain in cargo test --workspace")
+'''
+if text.count(old) != 1:
+    raise SystemExit("signature fast-scope subject disclosure is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the signature fast scope dropping its workspace-contract subject disclosure' \
+    mut_xtask_sig_subject_drops_disclosure
+
 mut_xtask_core_fast_scope_renames_compile_fail_skip() {
     python3 - <<'PYEOF'
 from pathlib import Path

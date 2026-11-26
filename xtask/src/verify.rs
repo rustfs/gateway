@@ -105,6 +105,8 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         )
     } else if package == "rustfs-gateway-core" {
         format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
+    } else if package == "rustfs-gateway-sig" {
+        format!("crate {package} runtime scope; compile-time and statistical timing contracts remain in cargo test --workspace")
     } else if package == "rustfs-gateway-conformance" {
         format!("crate {package} library and allocation scope; ordinary integration contracts remain in cargo test --workspace")
     } else if package == "rustfs-gateway-server" {
