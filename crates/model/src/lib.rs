@@ -34,6 +34,7 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 
 pub mod error;
 pub mod ir;

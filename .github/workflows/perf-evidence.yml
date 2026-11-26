@@ -13,6 +13,11 @@ name: Perf evidence
 #     drivers (allocator bytes and resident peak).
 #   - The micro benches (rustfs/backlog#1766 table): allocation ceilings and
 #     the CRC hardware-calculator gate block; every time is a printed record.
+#   - crates/gateway/benches/post_object.rs: POST Object streaming throughput
+#     across frame sizes and ready/pending schedules (record-only).
+#   - crates/difftest/benches/gateway_vs_s3s.rs: head-to-head gateway vs pinned
+#     s3s allocation, latency, and throughput records across GET, PUT,
+#     ListObjectsV2, DeleteObjects, and PostObject (record-only).
 #   - crates/server/tests/server_load/slow_clients.rs: a healthy client's p99
 #     beside a hundred slow clients that keep progressing, against a lock-step
 #     control listener.
@@ -121,6 +126,14 @@ jobs:
             cargo bench -p rustfs-gateway-sig --bench verify
             cargo bench -p rustfs-gateway-types --bench checksum
           } 2>&1 | tee "$RUNNER_TEMP/micro.log"
+      - name: POST Object bench
+        run: |
+          set -euo pipefail
+          cargo bench -p rustfs-gateway --bench post_object 2>&1 | tee "$RUNNER_TEMP/post-object.log"
+      - name: Gateway vs s3s comparison bench
+        run: |
+          set -euo pipefail
+          cargo bench -p rustfs-gateway-difftest --bench gateway_vs_s3s 2>&1 | tee "$RUNNER_TEMP/compare.log"
       - name: Candidate baseline
         if: always()
         run: |
@@ -141,6 +154,8 @@ jobs:
             echo '```'
             cat "$RUNNER_TEMP"/transfers.log "$RUNNER_TEMP"/slow-clients.log "$RUNNER_TEMP"/macro.log 2>/dev/null | grep -oE '(perf-evidence: |SKIP ).*' || echo "no observation was printed"
             grep -E '^(route|parse|xml|encode|chunked|sig|checksum)/' "$RUNNER_TEMP/micro.log" 2>/dev/null || echo "no micro bench line was printed"
+            grep -E '^(POST Object|frame_bytes,|[0-9]+,(ready|pending),)' "$RUNNER_TEMP/post-object.log" 2>/dev/null || echo "no post_object bench line was printed"
+            grep -E '^compare/' "$RUNNER_TEMP/compare.log" 2>/dev/null || echo "no gateway_vs_s3s bench line was printed"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload the logs
@@ -153,5 +168,7 @@ jobs:
             ${{ runner.temp }}/slow-clients.log
             ${{ runner.temp }}/macro.log
             ${{ runner.temp }}/micro.log
+            ${{ runner.temp }}/post-object.log
+            ${{ runner.temp }}/compare.log
             ${{ runner.temp }}/baseline.json
           if-no-files-found: warn

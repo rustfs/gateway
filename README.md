@@ -102,8 +102,8 @@ cargo fmt --all                  # format (settings in rustfmt.toml)
 stay identical.
 
 Optional [external object-data execution](docs/external-object-data.md) and the independent private
-build are documented in [RDMA builds](docs/rdma-build.md). That integration uses Rust 1.98.1; ordinary
-workspace builds retain the toolchain above and require no private source.
+build are documented in [RDMA builds](docs/rdma-build.md). That integration uses the same Rust
+1.97.1 toolchain as the workspace; ordinary workspace builds require no private source.
 
 ## Relationship to s3s
 

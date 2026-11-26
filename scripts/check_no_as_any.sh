@@ -55,9 +55,9 @@ crates = root / "crates"
 if not crates.is_dir():
     print("check_no_as_any: required input is missing: crates", file=sys.stderr)
     raise SystemExit(1)
-# Every workspace member, not `crates/` alone: `spikes/ext-field` is a member too, so an
+# Every workspace member, not `crates/` alone: `xtask` is a member too, so an
 # escape hatch written there is code that compiles under `--workspace` like any other.
-roots = [crates] + [root / "spikes", root / "xtask"]
+roots = [crates, root / "xtask"]
 
 # The payload data plane: the crate that owns `Payload`, and the wire layer that
 # produces and consumes one. Both are exemption-free.

@@ -22,6 +22,7 @@
 
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 
 pub mod base64;
 pub mod case;

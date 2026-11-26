@@ -6356,7 +6356,7 @@ mut_payload_contract_renamed_away() {
 from pathlib import Path
 
 changed = 0
-for directory in (Path("crates"), Path("spikes"), Path("xtask")):
+for directory in (Path("crates"), Path("xtask")):
     if not directory.is_dir():
         continue
     for path in directory.rglob("*.rs"):
@@ -6537,13 +6537,13 @@ expect_fail check_no_spawn_in_stream.sh \
 
 # A workspace member outside `crates/`. It compiles under `--workspace`, so an escape hatch
 # written there is shipped code, and scoping the scan to `crates/` alone would miss it.
-mut_spike_as_any_escape_hatch() {
+mut_xtask_as_any_escape_hatch() {
     printf '\ntrait EscapeHatch { fn as_any(&self) -> &dyn std::any::Any; }\n' \
-        >>spikes/ext-field/src/policy.rs
+        >>xtask/src/main.rs
 }
 expect_fail check_no_as_any.sh \
     'a workspace member outside crates/ exposing an as_any escape hatch' \
-    mut_spike_as_any_escape_hatch
+    mut_xtask_as_any_escape_hatch
 
 # A spawning helper one module away from the impl that calls it. A file-scoped rule reads the
 # impl as clean and the back-pressure is gone all the same.
@@ -22704,28 +22704,6 @@ PYEOF
 }
 expect_fail check_server_test_target_consolidation.sh \
     'an omitted server integration registration' mut_server_registration_omitted
-
-mut_ext_field_autotests_restored() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-path = Path("spikes/ext-field/Cargo.toml")
-text = path.read_text()
-path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
-PYEOF
-}
-expect_fail check_ext_field_test_target_consolidation.sh \
-    'restoring ext-field implicit test discovery' mut_ext_field_autotests_restored
-
-mut_ext_field_registration_omitted() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-path = Path("spikes/ext-field/tests/integration.rs")
-text = path.read_text()
-path.write_text(text.replace('#[path = "security.rs"]\nmod security;\n', '', 1))
-PYEOF
-}
-expect_fail check_ext_field_test_target_consolidation.sh \
-    'an omitted ext-field integration registration' mut_ext_field_registration_omitted
 
 fi
 

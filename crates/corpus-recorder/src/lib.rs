@@ -23,6 +23,7 @@
 
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 
 #[cfg(feature = "corpus-record")]
 mod body;

@@ -35,12 +35,13 @@ The equivalent Cargo command is:
 
 ```sh
 source vendor/rustfs-ucx/scripts/build-env.sh
-cargo +1.98.1 build --manifest-path rdma/Cargo.toml --features rdma --release -j 2
+cargo +1.97.1 build --manifest-path rdma/Cargo.toml --features rdma --release -j 2
 ```
 
 This produces the `rustfs-gateway-rdma` integration library for a host to compose
 with the public gateway. Its implementation source comes from the private
-checkout at the pinned commit. `RUSTFS_RDMA_TOOLCHAIN` selects a compatible installed toolchain and
+checkout at the pinned commit. `RUSTFS_RDMA_TOOLCHAIN` selects a compatible installed toolchain
+(defaulting to `1.97.1`, aligned with the workspace MSRV in `Cargo.toml`) and
 `CARGO_BUILD_JOBS` selects build parallelism. The ordinary gateway toolchain
 configuration remains applicable to its own workspace.
 

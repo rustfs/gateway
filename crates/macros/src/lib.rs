@@ -71,6 +71,7 @@
 
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 
 mod expand;
 mod levenshtein;
