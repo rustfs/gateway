@@ -584,3 +584,63 @@ fn an_exactly_sized_body_keeps_its_delivered_progress() {
         core::task::Poll::Ready(Ok(PayloadRead::Eof { .. }))
     ));
 }
+
+/// Polling `StreamToReader` with an empty destination slice must not advance the inner stream.
+#[test]
+fn n_stream_to_reader_empty_buffer_does_not_advance_inner_stream() {
+    use core::pin::Pin;
+    use core::task::{Context, Poll};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingStream {
+        polls: Arc<AtomicUsize>,
+        inner: MemoryStream,
+    }
+
+    impl crate::stream::PayloadStream for CountingStream {
+        fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<PayloadRead, crate::StreamError>> {
+            self.polls.fetch_add(1, Ordering::Relaxed);
+            Pin::new(&mut self.inner).poll_read(cx)
+        }
+
+        fn caps(&self) -> PayloadCaps {
+            self.inner.caps()
+        }
+
+        fn len_hint(&self) -> Option<u64> {
+            self.inner.len_hint()
+        }
+    }
+
+    let polls = Arc::new(AtomicUsize::new(0));
+    let source = CountingStream {
+        polls: Arc::clone(&polls),
+        inner: MemoryStream::new([Bytes::from_static(b"abc")], TrailingHeaders::empty()),
+    };
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(Box::pin(source)));
+
+    let mut empty = [];
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut empty),
+        Poll::Ready(Ok(ReadProgress::Filled(0)))
+    ));
+    assert_eq!(polls.load(Ordering::Relaxed), 0, "empty buffer must not poll the inner stream");
+    assert_eq!(reader.len_hint(), Some(3));
+
+    let mut buf = [0u8; 3];
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buf),
+        Poll::Ready(Ok(ReadProgress::Filled(3)))
+    ));
+    assert_eq!(&buf, b"abc");
+    assert_eq!(polls.load(Ordering::Relaxed), 1);
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buf),
+        Poll::Ready(Ok(ReadProgress::Eof { .. }))
+    ));
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut empty),
+        Poll::Ready(Err(err)) if matches!(err.kind(), StreamErrorKind::PolledAfterEof)
+    ));
+}

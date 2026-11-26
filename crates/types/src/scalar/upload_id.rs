@@ -151,13 +151,13 @@ impl<'a> ResolvedUploadId<'a> {
 }
 
 fn could_have_been_minted(raw: &str) -> bool {
-    if raw.is_empty() || raw.starts_with('/') {
+    if raw.is_empty() || raw.starts_with(['/', '\\']) {
         return false;
     }
     if raw.bytes().any(|byte| byte < 0x20 || byte == 0x7f) {
         return false;
     }
-    !raw.split('/').any(|segment| segment == "..")
+    !raw.split(['/', '\\']).any(|segment| segment == "..")
 }
 
 /// The shape half of the rule: a claim no backend could have minted never reaches storage.

@@ -264,19 +264,19 @@ impl StreamToReader {
 impl AsyncPayloadRead for StreamToReader {
     fn poll_fill(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<ReadProgress, StreamError>> {
         let this = self.get_mut();
+        if this.ended {
+            return Poll::Ready(Err(StreamError::polled_after_eof().with_bytes_before_error(this.copied)));
+        }
+        if buf.is_empty() {
+            return Poll::Ready(Ok(ReadProgress::Filled(0)));
+        }
         loop {
             if !this.leftover.is_empty() {
-                if buf.is_empty() {
-                    return Poll::Ready(Ok(ReadProgress::Filled(0)));
-                }
                 let n = buf.len().min(this.leftover.len());
                 buf[..n].copy_from_slice(&this.leftover[..n]);
                 this.leftover.advance(n);
                 this.copied = this.copied.saturating_add(n as u64);
                 return Poll::Ready(Ok(ReadProgress::Filled(n)));
-            }
-            if this.ended {
-                return Poll::Ready(Err(StreamError::polled_after_eof().with_bytes_before_error(this.copied)));
             }
             match this.inner.as_mut().poll_read(cx) {
                 Poll::Pending => return Poll::Pending,

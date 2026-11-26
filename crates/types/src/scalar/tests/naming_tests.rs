@@ -445,3 +445,68 @@ fn the_default_policy_is_the_aws_one() {
     assert!(!SlashPolicy::AwsPreserve.rewrites_keys());
     assert!(SlashPolicy::Collapse.rewrites_keys());
 }
+
+#[test]
+fn n_floor_check_bucket_rejects_traversal_segments() {
+    for name in ["..", "../a", "a/../b", "a/..", "a\\..\\b", "..\\a"] {
+        assert_eq!(
+            floor_check_bucket(name),
+            Err(NameRejection::TraversalSegment),
+            "{name:?} must be refused as a traversal segment"
+        );
+    }
+    assert_eq!(floor_check_bucket("ab"), Err(NameRejection::TooShort));
+    assert_eq!(floor_check_bucket("a/b"), Err(NameRejection::PathSeparator));
+    assert!(floor_check_bucket("my..bucket").is_ok());
+}
+
+#[test]
+fn n_half_encoded_dot_dot_traversals_are_refused() {
+    for encoded in [".%252e/x", "%252e./x", "a/.%252E/b", "a/%252E./b", ".%252e", "%252e."] {
+        assert_eq!(
+            ObjectKey::materialize(encoded, &aws()),
+            Err(NameRejection::EncodedSeparator),
+            "{encoded:?} decodes once into a half-encoded traversal"
+        );
+    }
+    assert_eq!(
+        ObjectKey::materialize("v1%252e0", &aws()).map(|k| k.as_str().to_owned()),
+        Ok("v1%2e0".to_owned())
+    );
+}
+
+#[test]
+fn n_materialize_decoded_applies_slash_policy_consistently() {
+    let legacy_slash = NamePolicy::default().with_slash_policy(SlashPolicy::RustfsLegacy);
+
+    // Negative boundaries under each policy match `ObjectKey::materialize`.
+    assert_eq!(ObjectKey::materialize_decoded("/", &collapsing()), Err(NameRejection::Empty));
+    assert_eq!(ObjectKey::materialize_decoded("//", &collapsing()), Err(NameRejection::Empty));
+    assert_eq!(
+        ObjectKey::materialize_decoded("a//../b", &collapsing()),
+        Err(NameRejection::TraversalSegment)
+    );
+    assert_eq!(
+        ObjectKey::materialize_decoded("/../x", &legacy_slash),
+        Err(NameRejection::TraversalSegment)
+    );
+    assert_eq!(ObjectKey::materialize_decoded("//key", &aws()), Err(NameRejection::AbsoluteOrUnc));
+
+    // Positive controls: decoded keys fold identically to path keys under Collapse and RustfsLegacy.
+    assert_eq!(
+        ObjectKey::materialize_decoded("a//b", &collapsing()).map(|k| k.as_str().to_owned()),
+        Ok("a/b".to_owned())
+    );
+    assert_eq!(
+        ObjectKey::materialize_decoded("//key", &collapsing()).map(|k| k.as_str().to_owned()),
+        Ok("key".to_owned())
+    );
+    assert_eq!(
+        ObjectKey::materialize_decoded("//dir////x", &legacy_slash).map(|k| k.as_str().to_owned()),
+        Ok("dir/x".to_owned())
+    );
+    assert_eq!(
+        ObjectKey::materialize_decoded("a//b", &legacy_slash).map(|k| k.as_str().to_owned()),
+        Ok("a//b".to_owned())
+    );
+}
