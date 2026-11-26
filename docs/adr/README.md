@@ -111,6 +111,7 @@ second copy is a second thing to keep in sync.
 | 0053 | The caller's secret only over a signed body | Accepted |
 | 0054 | A host-verified header token claim | Accepted |
 | 0055 | SigV4a ECDSA P-256 verification and streaming | Accepted |
+| 0056 | Seal bearer and header-token verdict and receipt construction | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
