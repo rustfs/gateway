@@ -65,6 +65,12 @@ pub const NO_ROUTE_MESSAGE: &str = "This request does not name any S3 operation.
 /// The message a routed but unhandled operation receives.
 pub const NOT_REGISTERED_MESSAGE: &str = "This operation is defined by S3 but is not handled by this backend.";
 
+/// The message a request to an independent non-S3 service receives when it names no operation.
+pub const NO_SERVICE_ROUTE_MESSAGE: &str = "This request does not name any operation defined by this service.";
+
+/// The message a routed but unhandled operation on an independent non-S3 service receives.
+pub const SERVICE_NOT_REGISTERED_MESSAGE: &str = "This operation is defined by this service but is not handled by this backend.";
+
 /// The message a request inside a dialect's path-prefix claim receives when no claimed row accepts
 /// it (ADR-0024).
 ///
@@ -282,7 +288,7 @@ impl Router {
                 .resolve(request)
                 .and_then(|op| self.table.entries().get(usize::from(op)))
         };
-        if self.selection == Selection::Table {
+        if self.selection == Selection::Table || self.signing_service.is_some() {
             return Ok(from_table());
         }
         match legacy_rustfs_selection(request) {
@@ -294,6 +300,10 @@ impl Router {
                 None => Err(PreAuthError::not_implemented(NOT_REGISTERED_MESSAGE).about(name)),
             },
         }
+    }
+
+    const fn is_non_s3_service(&self) -> bool {
+        matches!(self.signing_service, Some(service) if !matches!(service, SigService::S3))
     }
 
     /// The same answer from the readable S3 table. Kept as the reference implementation.
@@ -309,15 +319,19 @@ impl Router {
     ///
     /// # Errors
     ///
-    /// [`PreAuthError`]: `501` with [`NO_ROUTE_MESSAGE`] when nothing matched, `501` with
-    /// [`NO_CLAIMED_ROUTE_MESSAGE`] when a claim covers the request and no claimed row accepts it,
-    /// `501` with [`NOT_REGISTERED_MESSAGE`] when the operation is not handled here, and otherwise
-    /// the operation's own code for the first missing required parameter.
+    /// [`PreAuthError`]: `501` with [`NO_ROUTE_MESSAGE`] (or [`NO_SERVICE_ROUTE_MESSAGE`] on a
+    /// non-S3 service) when nothing matched, `501` with [`NO_CLAIMED_ROUTE_MESSAGE`] when a claim
+    /// covers the request and no claimed row accepts it, `501` with [`NOT_REGISTERED_MESSAGE`]
+    /// (or [`SERVICE_NOT_REGISTERED_MESSAGE`] on a non-S3 service) when the operation is not
+    /// handled here, and otherwise the operation's own code for the first missing required
+    /// parameter.
     pub fn dispatch(&self, request: &RouteRequestParts<'_>) -> Result<Dispatch<'_>, PreAuthError> {
+        let non_s3 = self.is_non_s3_service();
         let (entry, claimed, form) = match self.claims.lookup(request) {
             ClaimLookup::Outside => {
                 let Some(entry) = self.select(request)? else {
-                    return Err(PreAuthError::not_implemented(NO_ROUTE_MESSAGE));
+                    let message = if non_s3 { NO_SERVICE_ROUTE_MESSAGE } else { NO_ROUTE_MESSAGE };
+                    return Err(PreAuthError::not_implemented(message));
                 };
                 (entry, None, None)
             }
@@ -330,7 +344,12 @@ impl Router {
             ClaimLookup::Form { claim } => (claim.entry(), None, Some(claim)),
         };
         let Some(spec) = self.registry.get(entry.op_name) else {
-            return Err(PreAuthError::not_implemented(NOT_REGISTERED_MESSAGE).about(entry.op_name));
+            let message = if non_s3 {
+                SERVICE_NOT_REGISTERED_MESSAGE
+            } else {
+                NOT_REGISTERED_MESSAGE
+            };
+            return Err(PreAuthError::not_implemented(message).about(entry.op_name));
         };
         check_required(spec, request)?;
         Ok(Dispatch {

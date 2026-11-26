@@ -270,6 +270,9 @@ pub struct ClaimedTable {
     entries: Box<[(usize, ClaimedEntry)]>,
     /// Every form claim, in installation order (ADR-0041).
     forms: Box<[InstalledFormClaim]>,
+    /// Whether this table belongs to an independently assembled non-S3 signing service that has no
+    /// S3 virtual-hosted bucket namespace.
+    independent_service: bool,
 }
 
 impl ClaimedTable {
@@ -364,6 +367,7 @@ impl ClaimedTable {
             claims: claims.into_boxed_slice(),
             entries: owned.into_boxed_slice(),
             forms: Box::default(),
+            independent_service,
         };
         // Declarations first, for the reason `RouteTable::build` gives: a rotted declaration is a
         // more specific diagnostic than the undeclared overlap it fails to cover.
@@ -375,17 +379,18 @@ impl ClaimedTable {
     /// Whether a claim covers the request and, if so, which claimed row accepts it.
     ///
     /// Not `async`, holds nothing, allocates nothing. A form claim is asked first, on every host
-    /// (ADR-0041). Otherwise a virtual-hosted request, a request on a face other than the standard
-    /// endpoint, and a request with an ARN in the bucket position are never inside a claim.
+    /// (ADR-0041). On an S3 assembly, a virtual-hosted request, a request on a face other than the
+    /// standard endpoint, and a request with an ARN in the bucket position are never inside a
+    /// claim. Independently assembled non-S3 services have no S3 bucket namespace, so those S3
+    /// virtual-host exclusions do not reject their claimed routes.
     #[must_use]
     pub fn lookup(&self, request: &RouteRequestParts<'_>) -> ClaimLookup<'_> {
         if let Some(claim) = self.forms.iter().find(|form| form.claim.covers(request)) {
             return ClaimLookup::Form { claim };
         }
         if self.claims.is_empty()
-            || request.host_named_bucket
-            || request.host_class != HostClass::Standard
-            || request.arn_form.is_some()
+            || (!self.independent_service
+                && (request.host_named_bucket || request.host_class != HostClass::Standard || request.arn_form.is_some()))
         {
             return ClaimLookup::Outside;
         }

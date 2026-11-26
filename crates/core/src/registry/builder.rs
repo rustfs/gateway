@@ -225,6 +225,13 @@ impl RouterBuilder {
         }
     }
 
+    /// The independent signing service this builder is scoped to, or `None` for the default S3
+    /// assembly.
+    #[must_use]
+    pub const fn signing_service(&self) -> Option<SigService> {
+        self.signing_service
+    }
+
     fn check_operation_service<O: Operation>(&mut self) {
         let Some(expected) = self.signing_service else {
             return;

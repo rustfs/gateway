@@ -262,3 +262,82 @@ fn a_service_handler_requires_an_explicit_dialect_route() {
         Err(BuildError::UnverifiedCodecRoute { .. })
     ));
 }
+
+#[test]
+fn n_service_router_under_rustfs_legacy_selection_never_falls_into_s3_selection() {
+    let router = RouterBuilder::for_service(SERVICE)
+        .selecting(rustfs_gateway_core::route::Selection::RustfsLegacy)
+        .dialect(&action::<0>(Some(SERVICE)).expect("matching action"))
+        .dialect(&tags(Some(SERVICE)).expect("matching tags"))
+        .handle_without_codec::<TestOperation<0>, _>(Arc::new(Backend))
+        .handle_without_codec::<TestOperation<1>, _>(Arc::new(Backend))
+        .build()
+        .expect("service routes assemble");
+    let post = support::Req::new("POST /PutVectors");
+    assert_eq!(router.dispatch(&post.parts()).expect("declared action routes").spec.name, NAMES[0]);
+    let with_x_id = support::Req::new("POST /PutVectors?x-id=PutObject");
+    assert_eq!(
+        router
+            .dispatch(&with_x_id.parts())
+            .expect("x-id does not hijack service route")
+            .spec
+            .name,
+        NAMES[0]
+    );
+    let unknown_x_id = support::Req::new("GET /bucket/object?x-id=GetObject");
+    let err = router.dispatch(&unknown_x_id.parts()).expect_err("no S3 fallback");
+    assert_eq!(err.code(), &rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED);
+}
+
+#[test]
+fn service_claimed_route_matches_even_when_host_named_bucket_is_set() {
+    let router = RouterBuilder::for_service(SERVICE)
+        .dialect(&tags(Some(SERVICE)).expect("matching tags"))
+        .handle_without_codec::<TestOperation<1>, _>(Arc::new(Backend))
+        .build()
+        .expect("service routes assemble");
+    let request = support::Req::new("GET /tags/arn%3Aaws%3As3vectors%3Aus-east-1%3A%3Abucket%2Fvectors");
+    let mut parts = request.parts();
+    parts.host_named_bucket = true;
+    assert_eq!(router.dispatch(&parts).expect("claimed route matches on vhost").spec.name, NAMES[1]);
+}
+
+#[test]
+fn n_s3_claimed_route_still_returns_outside_when_host_named_bucket_is_set() {
+    use rustfs_gateway_core::route::{ClaimLookup, ClaimedTable, InstalledClaim, ShadowingDecls};
+    let table = ClaimedTable::build(
+        vec![InstalledClaim {
+            dialect: "fixture",
+            claim: PathClaim {
+                prefix: "/_admin/v1",
+                reason: "fixture claim for S3 host-named-bucket control",
+                evidence: EVIDENCE,
+            },
+        }],
+        Vec::new(),
+        &ShadowingDecls::NONE,
+    )
+    .expect("valid S3 claim");
+    let request = support::Req::new("GET /_admin/v1/info");
+    let mut parts = request.parts();
+    parts.host_named_bucket = true;
+    assert!(matches!(table.lookup(&parts), ClaimLookup::Outside));
+}
+
+#[test]
+fn n_non_s3_service_unknown_and_unregistered_routes_omit_s3_prose() {
+    let router = RouterBuilder::for_service(SERVICE)
+        .dialect(&action::<0>(Some(SERVICE)).expect("matching action"))
+        .build()
+        .expect("route-only service");
+
+    let unknown = support::Req::new("POST /UnknownAction");
+    let err = router.dispatch(&unknown.parts()).expect_err("unknown route");
+    assert!(!err.message().contains("S3"), "unexpected S3 prose: {}", err.message());
+    assert!(!err.message().contains("virtual host"), "unexpected vhost prose: {}", err.message());
+    assert!(!err.message().contains("bucket"), "unexpected bucket prose: {}", err.message());
+
+    let unhandled = support::Req::new("POST /PutVectors");
+    let err = router.dispatch(&unhandled.parts()).expect_err("unhandled route");
+    assert!(!err.message().contains("S3"), "unexpected S3 prose: {}", err.message());
+}
