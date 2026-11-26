@@ -99,9 +99,12 @@ static BUCKET_PING_PREDICATES: &[Predicate] = &[
     Predicate::Method(http::Method::POST),
     Predicate::Target(TargetKind::Bucket),
     Predicate::QueryPresent("corsping"),
-    // Disjoint from the standard bucket POST routes: DeleteObjects owns `?delete`, while browser
-    // PostObject owns multipart/form-data. This fixture intentionally models neither protocol.
+    // Disjoint from the standard bucket POST routes: DeleteObjects owns `?delete`,
+    // CreateBucketMetadata* own `?metadataConfiguration` and `?metadataTable`, while browser
+    // PostObject owns multipart/form-data. This fixture intentionally models none of them.
     Predicate::QueryAbsent("delete"),
+    Predicate::QueryAbsent("metadataConfiguration"),
+    Predicate::QueryAbsent("metadataTable"),
     Predicate::HeaderPresent {
         header: "content-type",
         negated: true,
@@ -184,7 +187,7 @@ static BUCKET_PING_OVERLAY: DialectOverlay = DialectOverlay {
     operations: &[OverlayRow {
         name: "example:BucketPing",
         precedence: 52,
-        selector: "Method(POST) ∧ Target(Bucket) ∧ QueryPresent(\"corsping\") ∧ QueryAbsent(\"delete\") ∧ HeaderAbsent(\"content-type\")",
+        selector: "Method(POST) ∧ Target(Bucket) ∧ QueryPresent(\"corsping\") ∧ QueryAbsent(\"delete\") ∧ QueryAbsent(\"metadataConfiguration\") ∧ QueryAbsent(\"metadataTable\") ∧ HeaderAbsent(\"content-type\")",
         action: "example:BucketPing",
         resource: ResourceShape::Bucket,
         success_status: 200,

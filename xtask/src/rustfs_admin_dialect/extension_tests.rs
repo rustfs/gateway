@@ -217,7 +217,7 @@ fn an_extension_row_shadows_its_cell_and_the_later_rows_it_can_be_named_with() {
         .skip(METADATA_ROWS)
         .map(|row| row.shadows.len())
         .collect();
-    assert_eq!(counts, [16, 38, 36, 36, 35, 10, 2, 34]);
+    assert_eq!(counts, [25, 38, 36, 36, 35, 10, 2, 34]);
     let status = shadows("rustfs:GetReplicationResetStatus");
     for standard in [
         "GetBucketReplication",

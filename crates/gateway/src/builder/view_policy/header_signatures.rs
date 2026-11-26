@@ -34,9 +34,10 @@
 //! before it looks the access key up, refuses in this order:
 //!
 //! 1. a value that does not read: `400 InvalidRequest` "invalid header: authorization";
-//! 2. a scope service other than `s3`, `sts`, `s3tables` and `s3vectors`: `501 NotImplemented`,
-//!    naming it (with `s3vectors` left to the authenticator so S3 Vectors routes verify it while S3
-//!    routes still refuse it under the legacy scope policy);
+//! 2. a scope service other than `s3`, `sts`, `s3tables`, `s3vectors` and `s3express`:
+//!    `501 NotImplemented`, naming it (with `s3vectors` and `s3express` left to the authenticator so
+//!    S3 Vectors and S3 Express routes verify them while ordinary S3 routes still refuse them under
+//!    the legacy scope policy);
 //! 3. no `x-amz-date` — a `Date` header does not stand in for it — `400 InvalidRequest`
 //!    "missing header: x-amz-date", and one that is not `YYYYMMDDTHHMMSSZ` digits,
 //!    "invalid header: x-amz-date";
@@ -150,7 +151,7 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
     if credential.algorithm != SIGV4_ALGORITHM || !credential.canonical_signature {
         return None;
     }
-    if !SIGNING_SERVICES.contains(&credential.scope.service) && credential.scope.service != "s3vectors" {
+    if !SIGNING_SERVICES.contains(&credential.scope.service) && !matches!(credential.scope.service, "s3vectors" | "s3express") {
         let service = credential.scope.service;
         let expected = SIGNING_SERVICES.join(", ");
         return Some((

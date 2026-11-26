@@ -31,7 +31,7 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 204
 connection_after = "open"
 
 [[exchanges]]

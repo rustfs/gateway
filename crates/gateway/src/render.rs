@@ -278,7 +278,7 @@ fn redact_sensitive_canonical_values(canonical_request: &str) -> String {
                         Some((name, _))
                             if matches!(
                                 name.to_ascii_lowercase().as_str(),
-                                "x-amz-credential" | "x-amz-security-token" | "x-amz-signature"
+                                "x-amz-credential" | "x-amz-security-token" | "x-amz-s3session-token" | "x-amz-signature"
                             ) =>
                         {
                             format!("{name}=__REDACTED__")
@@ -291,7 +291,7 @@ fn redact_sensitive_canonical_values(canonical_request: &str) -> String {
             let Some((name, _)) = line.split_once(':') else {
                 return line.to_owned();
             };
-            let sensitive = name == "x-amz-security-token"
+            let sensitive = matches!(name, "x-amz-security-token" | "x-amz-s3session-token")
                 || (name.starts_with("x-amz-server-side-encryption-")
                     && (name.contains("customer-key") || name.ends_with("aws-kms-key-id")))
                 || (name.starts_with("x-amz-copy-source-server-side-encryption-") && name.contains("customer-key"));

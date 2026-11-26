@@ -80,6 +80,9 @@ mod error_resolution;
 #[path = "event_stream_frame_replay.rs"]
 mod event_stream_frame_replay;
 
+#[path = "express_and_bucket_ops.rs"]
+mod express_and_bucket_ops;
+
 #[path = "ext_field_policy.rs"]
 mod ext_field_policy;
 

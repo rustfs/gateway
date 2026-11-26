@@ -642,7 +642,7 @@ fn xml_member(
                 let _ = writeln!(out, "{pad}}}");
             }
         }
-        Type::Structure(entry_name) => {
+        Type::Structure(entry_name) | Type::Union(entry_name) => {
             let reader = format!("read_{}", naming::module_name(entry_name));
             let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
             out.push_str(&super::all_unknown::guard(ir, field, rules, entry_name, "child", inner)?);

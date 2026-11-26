@@ -22,31 +22,32 @@
 use super::codegen_tests::{artifacts, body};
 
 #[test]
-fn create_session_emits_only_route_level_artifacts() {
+fn create_session_emits_full_handler_and_codec_artifacts() {
     let artifacts = artifacts();
     let routes = body(&artifacts, "generated/routes.rs");
     let operations = body(&artifacts, "generated/OPERATIONS.json");
     let macro_names = body(&artifacts, "crates/macros/src/op_names.rs");
     let operations_md = body(&artifacts, "OPERATIONS.md");
 
-    assert!(routes.contains("operation: \"CreateSession\",\n        handler_registration: false,"));
-    assert!(operations_md.contains("| CreateSession | `GET /{Bucket}` |"));
-    assert!(!operations.contains("CreateSession"));
-    assert!(!macro_names.contains("CreateSession"));
+    assert!(routes.contains("operation: \"CreateSession\",\n        handler_registration: true,"));
+    assert!(operations_md.contains("| [CreateSession](#createsession) | GET | `/{Bucket}` | `session` |"));
+    assert!(!operations_md.contains("| CreateSession | `GET /{Bucket}` |"));
+    assert!(operations.contains("CreateSession"));
+    assert!(macro_names.contains("\"CreateSession\""));
 
-    let forbidden_paths = [
+    let required_paths = [
         "spec/operations/CreateSession.toml",
         "generated/ir/CreateSession.json",
         "generated/dto/ops/create_session.rs",
         "generated/codec/ops/create_session.rs",
     ];
-    for suffix in forbidden_paths {
+    for suffix in required_paths {
         assert!(
             artifacts
                 .files
                 .iter()
-                .all(|(path, _)| !path.to_string_lossy().ends_with(suffix)),
-            "route-only generation must not emit {suffix}"
+                .any(|(path, _)| path.to_string_lossy().ends_with(suffix)),
+            "promoted CreateSession must emit {suffix}"
         );
     }
 }

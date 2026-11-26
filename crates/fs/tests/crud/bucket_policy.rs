@@ -80,7 +80,7 @@ async fn a_policy_is_stored_verbatim_read_back_and_deleted() {
     assert!(text(&absent).contains("<Code>NoSuchBucketPolicy</Code>"), "{}", text(&absent));
 
     let written = put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await;
-    assert_eq!(written.status(), 200, "{}", text(&written));
+    assert_eq!(written.status(), 204, "{}", text(&written));
     let read = get(&service, "/pol?policy").await;
     assert_eq!(read.status(), 200, "{}", text(&read));
     assert_eq!(text(&read), PUBLIC_READ, "the document is stored verbatim");
@@ -106,11 +106,11 @@ async fn the_policy_status_is_public_only_for_anonymous_listing_or_writing() {
     assert_eq!(none.status(), 200, "{}", text(&none));
     assert_eq!(element(none.body(), "IsPublic").as_deref(), Some("false"));
 
-    assert_eq!(put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
     let read_only = get(&service, "/pol?policyStatus").await;
     assert_eq!(element(read_only.body(), "IsPublic").as_deref(), Some("false"), "{}", text(&read_only));
 
-    assert_eq!(put(&service, "/pol?policy", PUBLIC_LIST, PUBLIC_LIST_MD5).await.status(), 200);
+    assert_eq!(put(&service, "/pol?policy", PUBLIC_LIST, PUBLIC_LIST_MD5).await.status(), 204);
     let listable = get(&service, "/pol?policyStatus").await;
     assert_eq!(element(listable.body(), "IsPublic").as_deref(), Some("true"), "{}", text(&listable));
 }
@@ -150,11 +150,11 @@ async fn n_the_public_access_block_refuses_a_public_policy() {
     assert!(text(&refused).contains("<Code>AccessDenied</Code>"), "{}", text(&refused));
     assert_eq!(get(&service, "/pol?policy").await.status(), 404, "nothing was stored");
     let named = put(&service, "/pol?policy", NAMED_READ, NAMED_READ_MD5).await;
-    assert_eq!(named.status(), 200, "a named principal is not the public: {}", text(&named));
+    assert_eq!(named.status(), 204, "a named principal is not the public: {}", text(&named));
 
     let unblocked = delete(&service, "/pol?publicAccessBlock").await;
     assert_eq!(unblocked.status(), 204, "{}", text(&unblocked));
-    assert_eq!(put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
 }
 
 /// Positive — the block stores the four switches, the omitted ones read back `false`, and an absent
@@ -186,7 +186,7 @@ async fn the_public_access_block_stores_every_switch_and_omitted_ones_are_false(
     assert_eq!(element(read.body(), "RestrictPublicBuckets").as_deref(), Some("true"));
     assert_eq!(
         put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(),
-        200,
+        204,
         "only BlockPublicPolicy refuses a public policy"
     );
 }
@@ -207,7 +207,7 @@ async fn n_the_records_belong_to_the_bucket() {
     assert_eq!(put(&service, "/missing?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 404);
 
     create_bucket(&service, "pol").await;
-    assert_eq!(put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put(&service, "/pol?policy", PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
     assert_eq!(
         put(&service, "/pol?publicAccessBlock", RESTRICT_ONLY, RESTRICT_ONLY_MD5)
             .await

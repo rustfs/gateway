@@ -315,7 +315,8 @@ mod tests {
             .collect();
         assert_eq!(mapped, modeled);
         assert_eq!(handler_surface, routed);
-        assert!(route_only.contains("CreateSession"));
+        assert!(routed.contains("CreateSession"));
+        assert!(route_only.is_empty());
         assert!(mapped.is_disjoint(&route_only));
         assert!(manual.is_disjoint(&route_only));
     }

@@ -369,8 +369,8 @@ for path in sorted(ops_dir.glob("*.rs")):
         fail(f"standard operation name is duplicated: {name}")
     operations.add(name)
 
-if len(operations) != 93:
-    fail(f"standard operation census is {len(operations)}, expected 93")
+if len(operations) != 112:
+    fail(f"standard operation census is {len(operations)}, expected 112")
 missing = sorted(operations - declared.keys())
 extra = sorted(declared.keys() - operations)
 if missing or extra:
@@ -505,14 +505,14 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # crates/gateway/tests/authz_contract/route_result.rs states Standard for its Full-codec probe.
 # explicit=55: the S3 Vectors service-routing fixtures in crates/core/tests/service_routes.rs
 # and crates/gateway/tests/service_routes.rs each declare Standard on their custom operation spec.
-if central_builders != 102 or explicit_builders != 55:
+if central_builders != 122 or explicit_builders != 54:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=55"
+        f"central={central_builders} explicit={explicit_builders}, expected central=122 explicit=54"
     )
 
 print(
-    "check_handler_deadline_class: 162 repository builder sites are inventoried "
-    "(157 classified: 102 central standard, 55 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 181 repository builder sites are inventoried "
+    "(176 classified: 122 central standard, 54 explicit; 5 authority tests)"
 )
 PY

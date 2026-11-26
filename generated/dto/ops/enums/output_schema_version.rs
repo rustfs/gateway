@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `OutputSchemaVersion` string enumeration. Bound by: GetBucketAnalyticsConfiguration, ListBucketAnalyticsConfigurations.
+/// The `OutputSchemaVersion` string enumeration. Bound by: GetBucketAnalyticsConfiguration, ListBucketAnalyticsConfigurations, PutBucketAnalyticsConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`OutputSchemaVersion::custom`]. Adding a constant is a minor version

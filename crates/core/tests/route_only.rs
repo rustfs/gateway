@@ -60,19 +60,31 @@ fn create_session_does_not_claim_neighbouring_request_shapes() {
     assert_ne!(routed(&table, &Req::new("HEAD /bucket?session")), Some("CreateSession"));
 }
 
-/// Route-only operations are protocol-known but intentionally cannot be registered without a
-/// truthful generated DTO and codec surface.
+/// An unregistered `CreateSession` still refuses by name instead of falling through to
+/// `ListObjects`, and registering its spec allows dispatch.
 #[test]
 fn create_session_is_an_operation_specific_protocol_refusal() {
+    use rustfs_gateway_core::op::Operation;
+
     let mut registry = Registry::new();
     registry.register(&LIST_OBJECTS).expect("the fallback listing is registrable");
     let router = Router::from_generated(registry).expect("the generated table is valid");
 
     let error = router
         .dispatch(&Req::new("GET /bucket?session").parts())
-        .expect_err("route-only CreateSession has no handler registration surface");
+        .expect_err("unregistered CreateSession must refuse by name");
     assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
     assert_eq!(error.status(), StatusCode::NOT_IMPLEMENTED);
     assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
     assert_eq!(error.operation(), Some("CreateSession"));
+
+    let mut registered = Registry::new();
+    registered
+        .register(rustfs_gateway_types::dto::CreateSession::spec())
+        .expect("CreateSession spec is registrable");
+    let router = Router::from_generated(registered).expect("the generated table is valid");
+    let dispatch = router
+        .dispatch(&Req::new("GET /bucket?session").parts())
+        .expect("registered CreateSession dispatches");
+    assert_eq!(dispatch.entry.op_name, "CreateSession");
 }

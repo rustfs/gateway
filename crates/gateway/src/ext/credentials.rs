@@ -15,7 +15,7 @@
 //! The credentials an access key id resolves to, and where they are looked up.
 //!
 //! Responsible for: [`Credentials`] — an access key id, its secret, and either nothing else or a
-//! whole STS session ([`SessionBinding`] plus its token) — [`CredentialProvider`], the lookup an
+//! whole temporary session ([`SessionBinding`] plus its token and wire surface) — [`CredentialProvider`], the lookup an
 //! authenticator performs, [`fn_credential_provider`], the closure form of it, and
 //! [`StaticCredentials`], the in-memory provider a test fixture and the conformance suite use.
 //! NOT responsible for: comparing anything (`rustfs-gateway-sig` owns every comparison), deriving
@@ -44,8 +44,8 @@
 //! combinations are wrong and only one of them is loud: a token with no lifetime is a session that
 //! never expires, which is the defect GHSA-ccrv-v8v9-ch9q describes — a token accepted with no
 //! `exp` at all. So the two travel inside one private [`Session`], and
-//! [`Credentials::with_session`] is the only way to build one. "Temporary credentials with no
-//! expiry" is not a state this type can be put into.
+//! [`Credentials::with_session`] / [`Credentials::with_s3_express_session`] are the only ways to
+//! build one. "Temporary credentials with no expiry" is not a state this type can be put into.
 //!
 //! # What the framework enforces about a session, and what it refuses to
 //!
@@ -58,21 +58,36 @@
 //!   not. Signature coverage prevents in-flight replacement; the value comparison prevents a
 //!   caller that knows one key pair from substituting another issuance's token.
 
-use std::collections::BTreeMap;
-
-use rustfs_gateway_core::BoxFuture;
-use rustfs_gateway_sig::{Identity, RawQuery, RequestNow, SecretBytes, SessionToken, SigParseError, X_AMZ_SECURITY_TOKEN};
+use rustfs_gateway_sig::{Identity, RawQuery, RequestNow, SecretBytes, SessionToken};
 
 pub use rustfs_gateway_sig::{SessionBinding, SessionBindingError};
 
+pub use super::credential_provider::{
+    CredentialLookup, CredentialProvider, CredentialsError, StaticCredentials, fn_credential_provider,
+};
 use super::session_answer::PendingSessionRefusal;
 
-/// An STS session: the token and the lifetime, which are never apart.
+/// Which session-token wire surface a temporary credential is bound to.
+///
+/// STS sessions travel in `x-amz-security-token` / `X-Amz-Security-Token` (and POST policy forms);
+/// S3 Express sessions travel exclusively in `x-amz-s3session-token` / `X-Amz-S3session-Token`.
+/// Keeping the two surfaces disjoint prevents an S3 Express session from presenting its token in
+/// `x-amz-security-token` to bypass `CreateSession`'s `DisableS3ExpressSessionAuth` or to
+/// authenticate against ordinary `s3`-scoped endpoints, and prevents STS tokens from authenticating
+/// on the `s3express` session surface.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionSurface {
+    Sts,
+    S3Express,
+}
+
+/// A temporary session: the token, its lifetime, and its wire surface, which are never apart.
 ///
 /// Private, and holds a [`SessionToken`], so it has no `Debug` and cannot acquire one.
 struct Session {
     token: SessionToken,
     binding: SessionBinding,
+    surface: SessionSurface,
 }
 
 impl Session {
@@ -191,8 +206,41 @@ impl Credentials {
         self.session = Some(Session {
             token: SessionToken::new(token).map_err(CredentialsError::Malformed)?,
             binding,
+            surface: SessionSurface::Sts,
         });
         Ok(self)
+    }
+
+    /// Turns these into S3 Express temporary session credentials: the token carried in
+    /// `x-amz-s3session-token` / `X-Amz-S3session-Token`, and the lifetime it is bound to.
+    ///
+    /// Bound exclusively to the S3 Express token surface so the credential cannot authenticate via
+    /// `x-amz-security-token` (or POST forms) and cannot bypass `CreateSession`'s
+    /// `DisableS3ExpressSessionAuth`.
+    ///
+    /// # Errors
+    ///
+    /// [`CredentialsError::Malformed`] when the token is empty.
+    pub fn with_s3_express_session(mut self, token: &str, binding: SessionBinding) -> Result<Self, CredentialsError> {
+        self.identity = self.identity.clone().with_session_binding(binding.clone());
+        self.session = Some(Session {
+            token: SessionToken::new(token).map_err(CredentialsError::Malformed)?,
+            binding,
+            surface: SessionSurface::S3Express,
+        });
+        Ok(self)
+    }
+
+    /// Whether these credentials hold an S3 Express session bound to `x-amz-s3session-token`.
+    #[must_use]
+    pub const fn is_s3_express_session(&self) -> bool {
+        matches!(
+            self.session,
+            Some(Session {
+                surface: SessionSurface::S3Express,
+                ..
+            })
+        )
     }
 
     /// Marks the principal as switched off.
@@ -249,18 +297,29 @@ impl Credentials {
     /// then the lifetime. Only [`CredentialRefusal::SessionExpired`] is ever named on the wire,
     /// and only after the signature verified.
     pub fn admit(&self, token: Option<&[u8]>, now: RequestNow) -> Result<(), CredentialRefusal> {
+        self.admit_surface(token, SessionSurface::Sts, now)
+    }
+
+    /// Applies session admission rules while enforcing that any presented token arrived on the
+    /// same wire surface ([`SessionSurface::Sts`] vs [`SessionSurface::S3Express`]) that the
+    /// stored session was issued for.
+    pub(crate) fn admit_surface(
+        &self,
+        token: Option<&[u8]>,
+        surface: SessionSurface,
+        now: RequestNow,
+    ) -> Result<(), CredentialRefusal> {
         if self.disabled {
             return Err(CredentialRefusal::Disabled);
         }
         match (&self.session, token) {
-            // The token before the lifetime, so `SessionExpired` implies the issued token was
-            // presented: it is the one refusal the authenticator may name (rustfs/gateway#1575).
+            // The token and surface before the lifetime, so `SessionExpired` implies the issued
+            // token arrived on its own wire surface (rustfs/gateway#1575).
             (Some(session), Some(presented)) => {
-                session
-                    .token
-                    .ct_verify(presented)
-                    .map(|_| ())
-                    .map_err(|_| CredentialRefusal::SessionTokenMismatch)?;
+                let matched = session.token.ct_verify(presented).is_ok();
+                if !matched || session.surface != surface {
+                    return Err(CredentialRefusal::SessionTokenMismatch);
+                }
                 session.within_lifetime(now)
             }
             (Some(_), None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
@@ -270,29 +329,54 @@ impl Credentials {
     }
 
     /// Applies the same session rules to a token carried by a presigned query.
+    #[cfg(test)]
     pub(crate) fn admit_query(&self, query: RawQuery<'_>, now: RequestNow) -> Result<(), CredentialRefusal> {
+        self.admit_query_param(query, rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN, SessionSurface::Sts, now)
+    }
+
+    /// Applies the same session rules to a named query parameter carrying a session token on
+    /// `surface`.
+    pub(crate) fn admit_query_param(
+        &self,
+        query: RawQuery<'_>,
+        param: &str,
+        surface: SessionSurface,
+        now: RequestNow,
+    ) -> Result<(), CredentialRefusal> {
         if self.disabled {
             return Err(CredentialRefusal::Disabled);
         }
-        match &self.session {
-            Some(session) => match query.session_token_matches(X_AMZ_SECURITY_TOKEN, &session.token) {
-                Ok(Some(true)) => session.within_lifetime(now),
-                Ok(Some(false)) | Err(_) => Err(CredentialRefusal::SessionTokenMismatch),
-                Ok(None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
-            },
-            None => Err(CredentialRefusal::TokenWithoutSessionCredential),
+        let Some(session) = &self.session else {
+            return Err(CredentialRefusal::TokenWithoutSessionCredential);
+        };
+        match query.session_token_matches(param, &session.token) {
+            Ok(Some(true)) if session.surface == surface => session.within_lifetime(now),
+            Ok(Some(_)) | Err(_) => Err(CredentialRefusal::SessionTokenMismatch),
+            Ok(None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
         }
     }
 
-    /// [`Credentials::admit`], held as a [`PendingSessionRefusal`] for a verifier to answer after
-    /// its comparison.
-    pub(crate) fn admit_pending(&self, token: Option<&[u8]>, now: RequestNow) -> Option<PendingSessionRefusal> {
-        self.admit(token, now).err().map(pending)
+    /// [`Credentials::admit_surface`], held as a [`PendingSessionRefusal`] for a verifier to
+    /// answer after comparison.
+    pub(crate) fn admit_surface_pending(
+        &self,
+        token: Option<&[u8]>,
+        surface: SessionSurface,
+        now: RequestNow,
+    ) -> Option<PendingSessionRefusal> {
+        self.admit_surface(token, surface, now).err().map(pending)
     }
 
-    /// The presigned-query spelling of [`Credentials::admit_pending`].
-    pub(crate) fn admit_query_pending(&self, query: RawQuery<'_>, now: RequestNow) -> Option<PendingSessionRefusal> {
-        self.admit_query(query, now).err().map(pending)
+    /// The presigned-query spelling of [`Credentials::admit_surface_pending`], naming the query
+    /// parameter and wire surface.
+    pub(crate) fn admit_query_param_pending(
+        &self,
+        query: RawQuery<'_>,
+        param: &str,
+        surface: SessionSurface,
+        now: RequestNow,
+    ) -> Option<PendingSessionRefusal> {
+        self.admit_query_param(query, param, surface, now).err().map(pending)
     }
 
     /// A deep copy, secret included.
@@ -314,6 +398,7 @@ impl Credentials {
             session: self.session.as_ref().map(|session| Session {
                 token: session.token.clone_secret(),
                 binding: session.binding.clone(),
+                surface: session.surface,
             }),
             disabled: self.disabled,
         }
@@ -335,17 +420,6 @@ impl core::fmt::Debug for Credentials {
             .field("disabled", &self.disabled)
             .finish()
     }
-}
-
-/// A lookup's normal business result.
-///
-/// `NotFound` is deliberately not an error: it is eligible for the framework's negative cache,
-/// while a provider fault is not.
-pub enum CredentialLookup {
-    /// The access key resolves to this credential.
-    Found(Credentials),
-    /// The access key is not registered.
-    NotFound,
 }
 
 /// A provider fault. Carries no request-derived text or credential material.
@@ -375,165 +449,6 @@ impl core::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-/// Why a credential value could not be constructed.
-#[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CredentialsError {
-    /// A value this crate refuses to hold at all.
-    Malformed(SigParseError),
-    /// The secret is empty, or only NUL bytes that HMAC pads to the same key: either would make
-    /// the signing key public (rustfs/gateway#1573).
-    EmptySecret,
-}
-
-impl core::fmt::Display for CredentialsError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Malformed(error) => write!(f, "{error}"),
-            Self::EmptySecret => f.write_str("the secret access key is empty"),
-        }
-    }
-}
-
-impl std::error::Error for CredentialsError {}
-
-/// A stored record this crate refuses to hold is the store's fault, not a missing key.
-///
-/// So a provider that builds its answer with `Credentials::new(id, &stored)?` reports a provider
-/// fault: counted in [`crate::ProviderMetrics::backend_errors`], never put in the negative cache,
-/// and answered exactly as an unknown key. Mapping it to [`CredentialLookup::NotFound`] instead
-/// would cache the key as absent and hide a broken record from the operator.
-impl From<CredentialsError> for ProviderError {
-    fn from(_: CredentialsError) -> Self {
-        Self::Backend
-    }
-}
-
-/// Where an access key id is resolved to a secret.
-///
-/// Held as `Arc<dyn CredentialProvider>`, so the async method is a hand-written [`BoxFuture`]
-/// (ADR-0002). A real deployment awaits an IAM store here; [`crate::GuardedCredentialProvider`] adds the
-/// mandatory deadline and negative cache without caching a secret.
-///
-/// Return an expired STS session as `Found`, with its token and its real expiry in the
-/// [`SessionBinding`]. The framework judges the lifetime itself and answers `ExpiredToken` to a
-/// caller that signed correctly with the issued token, which is what an SDK refreshes on; a
-/// provider that answers `NotFound` for it makes the session indistinguishable from an unknown key.
-pub trait CredentialProvider: Send + Sync + 'static {
-    /// Resolves one access key id.
-    ///
-    /// The identifier arrives exactly as the request spelled it. An implementation must compare it
-    /// byte for byte: the access key id is part of the string that was signed, so a
-    /// case-insensitive match would accept a signature computed over different bytes.
-    fn lookup<'a>(&'a self, access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>>;
-}
-
-impl<T: CredentialProvider + ?Sized> CredentialProvider for std::sync::Arc<T> {
-    fn lookup<'a>(&'a self, access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
-        (**self).lookup(access_key_id)
-    }
-}
-
-/// Builds a [`CredentialProvider`] from a closure, for a deployment whose lookup is one function.
-///
-/// The closure returns the same hand-written [`BoxFuture`] the trait does (ADR-0002), which is
-/// what lets it borrow the access key id for the life of the lookup rather than allocating a
-/// `String` per request on the unauthenticated path.
-///
-/// It buys convenience and nothing else: a closure cannot answer anything a hand-written
-/// implementation cannot, and in particular it cannot produce a `Verdict`. Deciding whether the
-/// signature matched is not something a credential source is asked.
-///
-/// ```
-/// # use rustfs_gateway::{CredentialLookup, Credentials, ProviderError, fn_credential_provider};
-/// let provider = fn_credential_provider(|access_key_id: &str| {
-///     let found = match access_key_id {
-///         "AKIDEXAMPLE" => CredentialLookup::Found(
-///             Credentials::new("AKIDEXAMPLE", b"wJalrXUtnFEMI").expect("static fixture")
-///         ),
-///         // Never a blanket secret for an unrecognised key. An empty one cannot be built at
-///         // all: `Credentials::new` refuses it, because the empty HMAC key is public.
-///         _ => CredentialLookup::NotFound,
-///     };
-///     Box::pin(async move { Ok::<_, ProviderError>(found) })
-/// });
-/// let _: std::sync::Arc<dyn rustfs_gateway::CredentialProvider> = std::sync::Arc::new(provider);
-/// ```
-pub fn fn_credential_provider<F>(lookup: F) -> impl CredentialProvider
-where
-    F: for<'a> Fn(&'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> + Send + Sync + 'static,
-{
-    struct FnProvider<F>(F);
-
-    impl<F> CredentialProvider for FnProvider<F>
-    where
-        F: for<'a> Fn(&'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> + Send + Sync + 'static,
-    {
-        fn lookup<'a>(&'a self, access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
-            (self.0)(access_key_id)
-        }
-    }
-
-    FnProvider(lookup)
-}
-
-/// An in-memory credential set, fixed at assembly time.
-///
-/// What a test fixture and the conformance suite use. It is not a deployment tool: rotating a key
-/// means rebuilding the service, and there is deliberately no interior mutability to make that
-/// look easy.
-///
-/// # Security
-///
-/// The default set is empty, so every signed credential lookup is rejected as unknown. It never
-/// supplies a fallback key or identity.
-#[derive(Debug, Default)]
-pub struct StaticCredentials {
-    entries: BTreeMap<String, Credentials>,
-}
-
-impl StaticCredentials {
-    /// An empty set. Every lookup answers [`CredentialLookup::NotFound`].
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Adds one principal.
-    ///
-    /// A later insertion under the same access key id replaces the earlier one, which is the only
-    /// sensible answer for a builder that is read once at assembly time.
-    #[must_use]
-    pub fn with(mut self, credentials: Credentials) -> Self {
-        self.entries
-            .insert(credentials.identity().access_key_id().to_owned(), credentials);
-        self
-    }
-
-    /// How many principals are registered.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Whether no principal is registered.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-impl CredentialProvider for StaticCredentials {
-    fn lookup<'a>(&'a self, access_key_id: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
-        let found = self
-            .entries
-            .get(access_key_id)
-            .map(Credentials::clone_credentials)
-            .map_or(CredentialLookup::NotFound, CredentialLookup::Found);
-        Box::pin(async move { Ok(found) })
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
@@ -550,6 +465,13 @@ mod tests {
         Credentials::new("AKIDEXAMPLE", b"wJalrXUtnFEMI")
             .expect("a valid access key id")
             .with_session("session-token-value", binding(expires_at))
+            .expect("a valid token")
+    }
+
+    fn express_temporary(expires_at: i64) -> Credentials {
+        Credentials::new("AKIDEXPRESS", b"wJalrXUtnFEMI")
+            .expect("a valid access key id")
+            .with_s3_express_session("express-token-value", binding(expires_at))
             .expect("a valid token")
     }
 
@@ -585,9 +507,76 @@ mod tests {
         assert_eq!(credentials.admit(Some(b"session-token-value"), NOW), Ok(()));
     }
 
+    /// Negative — STS and S3 Express session tokens are bound to their own token surface:
+    /// presenting an S3 Express session token on the STS surface (`x-amz-security-token` /
+    /// `X-Amz-Security-Token`) or an STS token on the S3 Express surface (`x-amz-s3session-token`
+    /// / `X-Amz-S3session-Token`) fails closed with `SessionTokenMismatch`, even when expired.
+    #[test]
+    fn n_sts_and_s3_express_session_surfaces_are_mutually_exclusive() {
+        let sts_live = temporary(LIVE);
+        let sts_expired = temporary(LIVE - 1_500);
+        let express_live = express_temporary(LIVE);
+        let express_expired = express_temporary(LIVE - 1_500);
+
+        assert!(!sts_live.is_s3_express_session());
+        assert!(express_live.is_s3_express_session());
+        assert!(express_live.clone_credentials().is_s3_express_session());
+
+        assert_eq!(
+            express_live.admit(Some(b"express-token-value"), NOW),
+            Err(CredentialRefusal::SessionTokenMismatch)
+        );
+        assert_eq!(
+            express_expired.admit(Some(b"express-token-value"), NOW),
+            Err(CredentialRefusal::SessionTokenMismatch)
+        );
+        assert_eq!(
+            express_live.admit_surface(Some(b"express-token-value"), SessionSurface::S3Express, NOW),
+            Ok(())
+        );
+        assert_eq!(
+            express_expired.admit_surface(Some(b"express-token-value"), SessionSurface::S3Express, NOW),
+            Err(CredentialRefusal::SessionExpired)
+        );
+        assert_eq!(
+            sts_live.admit_surface(Some(b"session-token-value"), SessionSurface::S3Express, NOW),
+            Err(CredentialRefusal::SessionTokenMismatch)
+        );
+        assert_eq!(
+            sts_expired.admit_surface(Some(b"session-token-value"), SessionSurface::S3Express, NOW),
+            Err(CredentialRefusal::SessionTokenMismatch)
+        );
+
+        assert_eq!(
+            express_live.admit_query_param(
+                RawQuery::new("X-Amz-Security-Token=express-token-value"),
+                rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN,
+                SessionSurface::Sts,
+                NOW,
+            ),
+            Err(CredentialRefusal::SessionTokenMismatch)
+        );
+        assert_eq!(
+            sts_live.admit_query_param(
+                RawQuery::new("X-Amz-S3session-Token=session-token-value"),
+                rustfs_gateway_sig::X_AMZ_S3SESSION_TOKEN,
+                SessionSurface::S3Express,
+                NOW,
+            ),
+            Err(CredentialRefusal::SessionTokenMismatch)
+        );
+        assert_eq!(
+            express_live.admit_query_param(
+                RawQuery::new("X-Amz-S3session-Token=express-token-value"),
+                rustfs_gateway_sig::X_AMZ_S3SESSION_TOKEN,
+                SessionSurface::S3Express,
+                NOW,
+            ),
+            Ok(())
+        );
+    }
+
     /// Negative — a lifetime that has passed refuses, and the boundary second does not.
-    ///
-    /// Driven by moving the snapshot, never by sleeping: the instant is an argument.
     #[test]
     fn an_expired_session_is_refused_and_its_final_second_is_not() {
         let credentials = temporary(LIVE);
@@ -595,7 +584,6 @@ mod tests {
             credentials.admit(Some(b"session-token-value"), RequestNow::from_unix_seconds(LIVE - 1)),
             Ok(())
         );
-        // Usable up to and including the final second, which is the rule a presigned URL gets.
         assert_eq!(
             credentials.admit(Some(b"session-token-value"), RequestNow::from_unix_seconds(LIVE)),
             Ok(())
@@ -691,6 +679,10 @@ mod tests {
             .expect("valid")
             .with_session("", binding(LIVE));
         assert!(matches!(refused, Err(CredentialsError::Malformed(_))));
+        let refused_express = Credentials::new("AKIDEXAMPLE", b"secret")
+            .expect("valid")
+            .with_s3_express_session("", binding(LIVE));
+        assert!(matches!(refused_express, Err(CredentialsError::Malformed(_))));
     }
 
     /// Positive — a copy carries the whole session, not just the secret.
@@ -704,87 +696,7 @@ mod tests {
             copy.session_token().map(SessionToken::len),
             original.session_token().map(SessionToken::len)
         );
+        assert_eq!(copy.is_s3_express_session(), original.is_s3_express_session());
         assert!(copy.is_disabled());
-    }
-
-    /// Positive — the closure adapter resolves the same key the hand-written provider does, and
-    /// answers `NotFound` for everything else.
-    #[tokio::test]
-    async fn the_closure_adapter_matches_a_hand_written_provider() {
-        let provider = fn_credential_provider(|access_key_id: &str| {
-            let found = if access_key_id == "AKIDEXAMPLE" {
-                CredentialLookup::Found(Credentials::new("AKIDEXAMPLE", b"secret").expect("static fixture"))
-            } else {
-                CredentialLookup::NotFound
-            };
-            Box::pin(async move { Ok(found) })
-        });
-        let CredentialLookup::Found(found) = provider.lookup("AKIDEXAMPLE").await.expect("lookup succeeded") else {
-            panic!("registered credential was not found");
-        };
-        assert_eq!(found.secret().expose(), b"secret");
-        assert!(matches!(provider.lookup("AKIDOTHER").await, Ok(CredentialLookup::NotFound)));
-        let _: std::sync::Arc<dyn CredentialProvider> = std::sync::Arc::new(provider);
-    }
-
-    /// Negative — an access key id the log line could not carry safely is refused where it is
-    /// written, not where it is printed.
-    #[test]
-    fn a_control_character_in_an_access_key_id_is_refused() {
-        assert!(matches!(
-            Credentials::new("AKID\r\nEXAMPLE", b"secret"),
-            Err(CredentialsError::Malformed(_))
-        ));
-        assert!(matches!(Credentials::new("", b"secret"), Err(CredentialsError::Malformed(_))));
-    }
-
-    /// Negative — an empty secret cannot be held, long-term or as the base of a session: the empty
-    /// HMAC key is public, so a credential carrying one would authenticate anybody.
-    #[test]
-    fn an_empty_secret_is_refused() {
-        assert_eq!(Credentials::new("AKIDEXAMPLE", b"").err(), Some(CredentialsError::EmptySecret));
-        // HMAC zero-pads a short key, so NUL bytes derive what the empty key derives.
-        for nul in [&[0_u8][..], &[0_u8; 60][..], &[0_u8; 200][..]] {
-            assert_eq!(Credentials::new("AKIDEXAMPLE", nul).err(), Some(CredentialsError::EmptySecret));
-        }
-        // The access key id is still judged first, so a doubly broken record names the id.
-        assert!(matches!(Credentials::new("", b""), Err(CredentialsError::Malformed(_))));
-    }
-
-    /// Negative — every construction refusal becomes the counted, uncached provider fault, never
-    /// an answer that could be mistaken for a missing key.
-    #[test]
-    fn a_refused_construction_is_a_backend_fault() {
-        for error in [
-            Credentials::new("AKIDEXAMPLE", b"").err(),
-            Credentials::new("AKID\r\nEXAMPLE", b"secret").err(),
-        ] {
-            assert_eq!(error.map(ProviderError::from), Some(ProviderError::Backend));
-        }
-    }
-
-    /// Negative — an unknown key is `NotFound` and never a silently empty secret.
-    #[tokio::test]
-    async fn an_unknown_key_is_reported_as_unknown() {
-        let provider = StaticCredentials::new();
-        assert!(matches!(provider.lookup("AKIDEXAMPLE").await, Ok(CredentialLookup::NotFound)));
-    }
-
-    /// Negative — the lookup is byte-exact, because the access key id is signed material.
-    #[tokio::test]
-    async fn the_lookup_is_case_sensitive() {
-        let provider = StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid"));
-        assert!(matches!(provider.lookup("akidexample").await, Ok(CredentialLookup::NotFound)));
-        assert!(matches!(provider.lookup("AKIDEXAMPLE").await, Ok(CredentialLookup::Found(_))));
-    }
-
-    /// Positive — a resolved pair carries the secret through to the one caller that needs it.
-    #[tokio::test]
-    async fn a_known_key_resolves_to_its_secret() {
-        let provider = StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid"));
-        let CredentialLookup::Found(found) = provider.lookup("AKIDEXAMPLE").await.expect("lookup succeeded") else {
-            panic!("registered credential was not found");
-        };
-        assert_eq!(found.secret().expose(), b"secret");
     }
 }

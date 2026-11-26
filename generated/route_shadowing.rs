@@ -6593,7 +6593,7 @@ pub const SHADOWING: &[ShadowingDecl] = &[
     ShadowingDecl {
         winner: "CreateSession",
         shadowed: "ListObjects",
-        reason: "ListObjects pins no query key, so a session request satisfies it too. The route-only session refusal wins at 279 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract.",
+        reason: "ListObjects pins no query key, so a session request satisfies it too. CreateSession wins at 279 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract.",
         evidence: &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession.html — CreateSession is selected by GET on a directory bucket carrying the session query subresource.",
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html — ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key.",
@@ -7018,6 +7018,2283 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         shadowed: "PostObject",
         reason: "PostObject is the bucket POST fallback for multipart form bodies, while DeleteObjects additionally names the delete subresource. DeleteObjects wins at 650 before the form fallback at 700 so a multipart-encoded multi-delete request cannot become an object upload.",
         evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html — PostObject uploads one object through a multipart form POST to its bucket, with the object key and policy material carried in form fields.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAccelerateConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAccelerateConfiguration.html — PutBucketAccelerateConfiguration is selected by the ?accelerate subresource on a bucket PUT and replaces the stored acceleration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketLogging",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html — PutBucketLogging is selected by the ?logging subresource on a bucket PUT and replaces the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketNotificationConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketNotificationConfiguration.html — PutBucketNotificationConfiguration is selected by the ?notification subresource on a bucket PUT and replaces the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketPolicy",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketPolicy.html — PutBucketPolicy is selected by the ?policy subresource on a bucket PUT and replaces the stored policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutPublicAccessBlock",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html — PutPublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket PUT and replaces the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketRequestPayment",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketRequestPayment.html — PutBucketRequestPayment is selected by the ?requestPayment subresource on a bucket PUT and replaces the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketVersioning",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html — PutBucketVersioning is selected by the ?versioning subresource on a bucket PUT and replaces the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketWebsite",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html — PutBucketWebsite is selected by the ?website subresource on a bucket PUT and replaces the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "PutBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAcl",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAcl.html — PutBucketAcl is selected by the ?acl subresource on a bucket PUT and replaces the access control policy, from the body or from the ACL headers.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "UpdateBucketMetadataAnnotationTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "UpdateBucketMetadataInventoryTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "UpdateBucketMetadataJournalTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketOwnershipControls",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketOwnershipControls.html — PutBucketOwnershipControls is a bucket PUT carrying ?ownershipControls and replaces the bucket's object ownership rules.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAbac",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAbac.html — PutBucketAbac is a bucket PUT carrying ?abac and updates attribute-based access control status.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketIntelligentTieringConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketIntelligentTieringConfiguration.html — PutBucketIntelligentTieringConfiguration is a bucket PUT carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketAnalyticsConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html — PutBucketAnalyticsConfiguration is a bucket PUT carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketInventoryConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketInventoryConfiguration.html — PutBucketInventoryConfiguration is a bucket PUT carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutBucketMetricsConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketMetricsConfiguration.html — PutBucketMetricsConfiguration is a bucket PUT carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataAnnotationTableConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataAnnotationTableConfiguration.html — UpdateBucketMetadataAnnotationTableConfiguration is a bucket PUT carrying ?metadataAnnotationTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataInventoryTableConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataInventoryTableConfiguration.html — UpdateBucketMetadataInventoryTableConfiguration is a bucket PUT carrying ?metadataInventoryTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataJournalTableConfiguration",
+        shadowed: "PutBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketCors.html — a CORS configuration write is a PUT on the bucket carrying the ?cors subresource, and its body is the configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataJournalTableConfiguration",
+        shadowed: "PutBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketTagging.html — a bucket tag-set write is a PUT on the bucket carrying the ?tagging subresource, and its body is the tagging document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataJournalTableConfiguration",
+        shadowed: "PutBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html — PutBucketLifecycleConfiguration is selected by the ?lifecycle subresource on a bucket PUT and replaces the stored lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataJournalTableConfiguration",
+        shadowed: "PutBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketEncryption.html — PutBucketEncryption is selected by the ?encryption subresource on a bucket PUT and replaces the stored encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataJournalTableConfiguration",
+        shadowed: "PutBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html — PutBucketReplication is selected by the ?replication subresource on a bucket PUT and replaces the stored replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateBucketMetadataJournalTableConfiguration",
+        shadowed: "PutObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateBucketMetadataJournalTableConfiguration.html — UpdateBucketMetadataJournalTableConfiguration is a bucket PUT carrying ?metadataJournalTable.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html — the lock-configuration write is a PUT on the bucket carrying the ?object-lock subresource, and its body is the lock document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketPolicy",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketPolicy.html — DeleteBucketPolicy is selected by the ?policy subresource on a bucket DELETE and removes only the policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeletePublicAccessBlock",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeletePublicAccessBlock.html — DeletePublicAccessBlock is selected by the ?publicAccessBlock subresource on a bucket DELETE and removes only those switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketOwnershipControls",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketWebsite",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketWebsite.html — DeleteBucketWebsite is selected by the ?website subresource on a bucket DELETE and removes only the website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketIntelligentTieringConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketAnalyticsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketInventoryConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketMetadataConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataConfiguration",
+        shadowed: "DeleteBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketOwnershipControls",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketOwnershipControls.html — DeleteBucketOwnershipControls is a bucket DELETE carrying ?ownershipControls and removes the ownership rules without deleting the bucket.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketIntelligentTieringConfiguration",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketIntelligentTieringConfiguration.html — DeleteBucketIntelligentTieringConfiguration is a bucket DELETE carrying ?intelligent-tiering and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketAnalyticsConfiguration",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketAnalyticsConfiguration.html — DeleteBucketAnalyticsConfiguration is a bucket DELETE carrying ?analytics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketInventoryConfiguration",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketInventoryConfiguration.html — DeleteBucketInventoryConfiguration is a bucket DELETE carrying ?inventory and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetricsConfiguration",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetricsConfiguration.html — DeleteBucketMetricsConfiguration is a bucket DELETE carrying ?metrics and a required id.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataConfiguration",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataConfiguration",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataConfiguration",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataConfiguration",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataConfiguration",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataConfiguration.html — DeleteBucketMetadataConfiguration is a bucket DELETE carrying ?metadataConfiguration to remove V2 metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataTableConfiguration",
+        shadowed: "DeleteBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html — a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataTableConfiguration",
+        shadowed: "DeleteBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketTagging.html — a bucket tag-set removal is a DELETE on the bucket carrying the ?tagging subresource, and it leaves the bucket in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataTableConfiguration",
+        shadowed: "DeleteBucketLifecycle",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketLifecycle.html — DeleteBucketLifecycle is selected by the ?lifecycle subresource on a bucket DELETE and removes only the lifecycle document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataTableConfiguration",
+        shadowed: "DeleteBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketEncryption.html — DeleteBucketEncryption is selected by the ?encryption subresource on a bucket DELETE and removes only the encryption document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteBucketMetadataTableConfiguration",
+        shadowed: "DeleteBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketMetadataTableConfiguration.html — DeleteBucketMetadataTableConfiguration is a bucket DELETE carrying ?metadataTable to remove V1 metadata table configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketReplication.html — DeleteBucketReplication is selected by the ?replication subresource on a bucket DELETE and removes only the replication document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateBucketMetadataConfiguration",
+        shadowed: "CreateBucketMetadataTableConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataConfiguration.html — CreateBucketMetadataConfiguration is a bucket POST carrying ?metadataConfiguration to create a V2 S3 Metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataTableConfiguration.html — CreateBucketMetadataTableConfiguration is a bucket POST carrying ?metadataTable to create a V1 metadata table configuration.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateBucketMetadataConfiguration",
+        shadowed: "DeleteObjects",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataConfiguration.html — CreateBucketMetadataConfiguration is a bucket POST carrying ?metadataConfiguration to create a V2 S3 Metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html — DeleteObjects is a bucket POST carrying the ?delete subresource and a Delete XML payload.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateBucketMetadataTableConfiguration",
+        shadowed: "DeleteObjects",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataTableConfiguration.html — CreateBucketMetadataTableConfiguration is a bucket POST carrying ?metadataTable to create a V1 metadata table configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html — DeleteObjects is a bucket POST carrying the ?delete subresource and a Delete XML payload.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateBucketMetadataConfiguration",
+        shadowed: "PostObject",
+        reason: "PostObject is the bucket POST fallback for multipart form bodies, while CreateBucketMetadataConfiguration additionally names ?metadataConfiguration. The metadata subresource wins at 285 before the form fallback at 700 so a metadata creation request cannot become an object upload.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataConfiguration.html — CreateBucketMetadataConfiguration is a bucket POST carrying ?metadataConfiguration to create a V2 S3 Metadata configuration.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html — PostObject uploads one object through a multipart form POST to its bucket, with the object key and policy material carried in form fields.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateBucketMetadataTableConfiguration",
+        shadowed: "PostObject",
+        reason: "PostObject is the bucket POST fallback for multipart form bodies, while CreateBucketMetadataTableConfiguration additionally names ?metadataTable. The metadata subresource wins at 286 before the form fallback at 700 so a metadata table creation request cannot become an object upload.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateBucketMetadataTableConfiguration.html — CreateBucketMetadataTableConfiguration is a bucket POST carrying ?metadataTable to create a V1 metadata table configuration.",
             "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html — PostObject uploads one object through a multipart form POST to its bucket, with the object key and policy material carried in form fields.",
         ],
     },

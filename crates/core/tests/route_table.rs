@@ -609,45 +609,18 @@ fn the_bucket_lifecycle_rows_route_their_three_methods() {
 #[test]
 fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
     let table = generated_table();
-    // `acl` and the nine configuration-band keys are deliberately absent: they stopped being
-    // deferred when those two families landed, so they belong in the served list below, where
-    // the assertion is the stronger one. `PUT /bucket?acl` is asserted separately by
-    // `the_bucket_acl_subresource_routes_to_the_acl_operations`.
-    let deferred_put = [
-        "abac",
-        "analytics",
-        "intelligent-tiering",
-        "inventory",
-        "metadataAnnotationTable",
-        "metadataInventoryTable",
-        "metadataJournalTable",
-        "metrics",
-        "ownershipControls",
-    ];
-    for key in deferred_put {
-        let line = format!("PUT /bucket?{key}");
-        assert_eq!(routed(&table, &Req::new(&line)), None, "{line} must not be a bucket creation");
-    }
-    let deferred_delete = [
-        "analytics",
-        "intelligent-tiering",
-        "inventory",
-        "metadataConfiguration",
-        "metadataTable",
-        "metrics",
-        "ownershipControls",
-    ];
-    for key in deferred_delete {
-        let line = format!("DELETE /bucket?{key}");
-        assert_eq!(routed(&table, &Req::new(&line)), None, "{line} must not be a bucket deletion");
-    }
-    // The served subresources are the same rule with a different observable: the request reaches
-    // the subresource's own row, never the lifecycle one. `?object-lock` moved from the deferred
-    // list above to this one when its pair landed at 397/398, `?acl` moved with the ACL band at
-    // 250/260, and the eleven bucket-configuration keys moved with the 200-249 band — the
-    // assertion each of them carries is the stronger one, because "reaches its own operation"
-    // implies "is not a bucket creation" and not the reverse.
+    // Every bucket subresource key routes to its own operation rather than falling through to
+    // `CreateBucket` or `DeleteBucket`.
     for (line, expected) in [
+        ("PUT /bucket?abac", "PutBucketAbac"),
+        ("PUT /bucket?analytics", "PutBucketAnalyticsConfiguration"),
+        ("PUT /bucket?intelligent-tiering", "PutBucketIntelligentTieringConfiguration"),
+        ("PUT /bucket?inventory", "PutBucketInventoryConfiguration"),
+        ("PUT /bucket?metadataAnnotationTable", "UpdateBucketMetadataAnnotationTableConfiguration"),
+        ("PUT /bucket?metadataInventoryTable", "UpdateBucketMetadataInventoryTableConfiguration"),
+        ("PUT /bucket?metadataJournalTable", "UpdateBucketMetadataJournalTableConfiguration"),
+        ("PUT /bucket?metrics", "PutBucketMetricsConfiguration"),
+        ("PUT /bucket?ownershipControls", "PutBucketOwnershipControls"),
         ("PUT /bucket?cors", "PutBucketCors"),
         ("PUT /bucket?tagging", "PutBucketTagging"),
         ("PUT /bucket?object-lock", "PutObjectLockConfiguration"),
@@ -660,6 +633,13 @@ fn n_a_bucket_subresource_request_is_never_claimed_by_the_lifecycle_band() {
         ("PUT /bucket?requestPayment", "PutBucketRequestPayment"),
         ("PUT /bucket?versioning", "PutBucketVersioning"),
         ("PUT /bucket?website", "PutBucketWebsite"),
+        ("DELETE /bucket?analytics", "DeleteBucketAnalyticsConfiguration"),
+        ("DELETE /bucket?intelligent-tiering", "DeleteBucketIntelligentTieringConfiguration"),
+        ("DELETE /bucket?inventory", "DeleteBucketInventoryConfiguration"),
+        ("DELETE /bucket?metadataConfiguration", "DeleteBucketMetadataConfiguration"),
+        ("DELETE /bucket?metadataTable", "DeleteBucketMetadataTableConfiguration"),
+        ("DELETE /bucket?metrics", "DeleteBucketMetricsConfiguration"),
+        ("DELETE /bucket?ownershipControls", "DeleteBucketOwnershipControls"),
         ("DELETE /bucket?cors", "DeleteBucketCors"),
         ("DELETE /bucket?tagging", "DeleteBucketTagging"),
         ("DELETE /bucket?policy", "DeleteBucketPolicy"),
@@ -2706,7 +2686,10 @@ fn n_bucket_metadata_reads_do_not_claim_neighbour_controls() {
         ),
         (Req::new("GET /bucket?metadataTablex").target(TargetKind::Bucket), Some("ListObjects")),
         (Req::new("GET /bucket?metadataTable").target(TargetKind::Object), Some("GetObject")),
-        (Req::new("DELETE /bucket?metadataTable").target(TargetKind::Bucket), None),
+        (
+            Req::new("DELETE /bucket?metadataTable").target(TargetKind::Bucket),
+            Some("DeleteBucketMetadataTableConfiguration"),
+        ),
     ] {
         assert_eq!(routed(&table, &request), expected);
     }

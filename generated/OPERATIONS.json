@@ -99,6 +99,34 @@
                                                    ],
                                     "precedence": 710
                                   },
+                  "CreateBucketMetadataConfiguration": {
+                                                         "method": "POST",
+                                                         "path_shape": "/{Bucket}",
+                                                         "query_keys": ["metadataConfiguration"],
+                                                         "key_headers": [],
+                                                         "host_classes": [],
+                                                         "error_codes": [
+                                                                          "NoSuchBucket",
+                                                                          "AccessDenied",
+                                                                          "MalformedXML",
+                                                                          "InvalidArgument"
+                                                                        ],
+                                                         "precedence": 285
+                                                       },
+                  "CreateBucketMetadataTableConfiguration": {
+                                                              "method": "POST",
+                                                              "path_shape": "/{Bucket}",
+                                                              "query_keys": ["metadataTable"],
+                                                              "key_headers": [],
+                                                              "host_classes": [],
+                                                              "error_codes": [
+                                                                               "NoSuchBucket",
+                                                                               "AccessDenied",
+                                                                               "MalformedXML",
+                                                                               "InvalidArgument"
+                                                                             ],
+                                                              "precedence": 286
+                                                            },
                   "CreateMultipartUpload": {
                                              "method": "POST",
                                              "path_shape": "/{Bucket}/{Key+}",
@@ -114,6 +142,15 @@
                                                             ],
                                              "precedence": 450
                                            },
+                  "CreateSession": {
+                                     "method": "GET",
+                                     "path_shape": "/{Bucket}",
+                                     "query_keys": ["session"],
+                                     "key_headers": [],
+                                     "host_classes": [],
+                                     "error_codes": ["NoSuchBucket", "AccessDenied", "InvalidArgument"],
+                                     "precedence": 279
+                                   },
                   "DeleteBucket": {
                                     "method": "DELETE",
                                     "path_shape": "/{Bucket}",
@@ -144,6 +181,15 @@
                                                    ],
                                     "precedence": 720
                                   },
+                  "DeleteBucketAnalyticsConfiguration": {
+                                                          "method": "DELETE",
+                                                          "path_shape": "/{Bucket}",
+                                                          "query_keys": ["analytics", "id"],
+                                                          "key_headers": [],
+                                                          "host_classes": [],
+                                                          "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                          "precedence": 267
+                                                        },
                   "DeleteBucketCors": {
                                         "method": "DELETE",
                                         "path_shape": "/{Bucket}",
@@ -162,6 +208,24 @@
                                               "error_codes": ["NoSuchBucket", "AccessDenied"],
                                               "precedence": 393
                                             },
+                  "DeleteBucketIntelligentTieringConfiguration": {
+                                                                   "method": "DELETE",
+                                                                   "path_shape": "/{Bucket}",
+                                                                   "query_keys": ["id", "intelligent-tiering"],
+                                                                   "key_headers": [],
+                                                                   "host_classes": [],
+                                                                   "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                                   "precedence": 265
+                                                                 },
+                  "DeleteBucketInventoryConfiguration": {
+                                                          "method": "DELETE",
+                                                          "path_shape": "/{Bucket}",
+                                                          "query_keys": ["id", "inventory"],
+                                                          "key_headers": [],
+                                                          "host_classes": [],
+                                                          "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                          "precedence": 269
+                                                        },
                   "DeleteBucketLifecycle": {
                                              "method": "DELETE",
                                              "path_shape": "/{Bucket}",
@@ -171,6 +235,42 @@
                                              "error_codes": ["NoSuchBucket", "AccessDenied"],
                                              "precedence": 390
                                            },
+                  "DeleteBucketMetadataConfiguration": {
+                                                         "method": "DELETE",
+                                                         "path_shape": "/{Bucket}",
+                                                         "query_keys": ["metadataConfiguration"],
+                                                         "key_headers": [],
+                                                         "host_classes": [],
+                                                         "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                         "precedence": 287
+                                                       },
+                  "DeleteBucketMetadataTableConfiguration": {
+                                                              "method": "DELETE",
+                                                              "path_shape": "/{Bucket}",
+                                                              "query_keys": ["metadataTable"],
+                                                              "key_headers": [],
+                                                              "host_classes": [],
+                                                              "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                              "precedence": 288
+                                                            },
+                  "DeleteBucketMetricsConfiguration": {
+                                                        "method": "DELETE",
+                                                        "path_shape": "/{Bucket}",
+                                                        "query_keys": ["id", "metrics"],
+                                                        "key_headers": [],
+                                                        "host_classes": [],
+                                                        "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                        "precedence": 284
+                                                      },
+                  "DeleteBucketOwnershipControls": {
+                                                     "method": "DELETE",
+                                                     "path_shape": "/{Bucket}",
+                                                     "query_keys": ["ownershipControls"],
+                                                     "key_headers": [],
+                                                     "host_classes": [],
+                                                     "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                     "precedence": 262
+                                                   },
                   "DeleteBucketPolicy": {
                                           "method": "DELETE",
                                           "path_shape": "/{Bucket}",
@@ -848,6 +948,15 @@
                                  "error_codes": ["NoSuchBucket", "NoSuchUpload", "AccessDenied", "InvalidArgument"],
                                  "precedence": 440
                                },
+                  "PutBucketAbac": {
+                                     "method": "PUT",
+                                     "path_shape": "/{Bucket}",
+                                     "query_keys": ["abac"],
+                                     "key_headers": [],
+                                     "host_classes": [],
+                                     "error_codes": ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"],
+                                     "precedence": 263
+                                   },
                   "PutBucketAccelerateConfiguration": {
                                                         "method": "PUT",
                                                         "path_shape": "/{Bucket}",
@@ -878,6 +987,20 @@
                                                    ],
                                     "precedence": 260
                                   },
+                  "PutBucketAnalyticsConfiguration": {
+                                                       "method": "PUT",
+                                                       "path_shape": "/{Bucket}",
+                                                       "query_keys": ["analytics", "id"],
+                                                       "key_headers": [],
+                                                       "host_classes": [],
+                                                       "error_codes": [
+                                                                        "NoSuchBucket",
+                                                                        "AccessDenied",
+                                                                        "MalformedXML",
+                                                                        "InvalidArgument"
+                                                                      ],
+                                                       "precedence": 266
+                                                     },
                   "PutBucketCors": {
                                      "method": "PUT",
                                      "path_shape": "/{Bucket}",
@@ -910,6 +1033,34 @@
                                                           ],
                                            "precedence": 392
                                          },
+                  "PutBucketIntelligentTieringConfiguration": {
+                                                                "method": "PUT",
+                                                                "path_shape": "/{Bucket}",
+                                                                "query_keys": ["id", "intelligent-tiering"],
+                                                                "key_headers": [],
+                                                                "host_classes": [],
+                                                                "error_codes": [
+                                                                                 "NoSuchBucket",
+                                                                                 "AccessDenied",
+                                                                                 "MalformedXML",
+                                                                                 "InvalidArgument"
+                                                                               ],
+                                                                "precedence": 264
+                                                              },
+                  "PutBucketInventoryConfiguration": {
+                                                       "method": "PUT",
+                                                       "path_shape": "/{Bucket}",
+                                                       "query_keys": ["id", "inventory"],
+                                                       "key_headers": [],
+                                                       "host_classes": [],
+                                                       "error_codes": [
+                                                                        "NoSuchBucket",
+                                                                        "AccessDenied",
+                                                                        "MalformedXML",
+                                                                        "InvalidArgument"
+                                                                      ],
+                                                       "precedence": 268
+                                                     },
                   "PutBucketLifecycleConfiguration": {
                                                        "method": "PUT",
                                                        "path_shape": "/{Bucket}",
@@ -941,6 +1092,20 @@
                                                        ],
                                         "precedence": 206
                                       },
+                  "PutBucketMetricsConfiguration": {
+                                                     "method": "PUT",
+                                                     "path_shape": "/{Bucket}",
+                                                     "query_keys": ["id", "metrics"],
+                                                     "key_headers": [],
+                                                     "host_classes": [],
+                                                     "error_codes": [
+                                                                      "NoSuchBucket",
+                                                                      "AccessDenied",
+                                                                      "MalformedXML",
+                                                                      "InvalidArgument"
+                                                                    ],
+                                                     "precedence": 271
+                                                   },
                   "PutBucketNotificationConfiguration": {
                                                           "method": "PUT",
                                                           "path_shape": "/{Bucket}",
@@ -955,6 +1120,20 @@
                                                                          ],
                                                           "precedence": 211
                                                         },
+                  "PutBucketOwnershipControls": {
+                                                  "method": "PUT",
+                                                  "path_shape": "/{Bucket}",
+                                                  "query_keys": ["ownershipControls"],
+                                                  "key_headers": [],
+                                                  "host_classes": [],
+                                                  "error_codes": [
+                                                                   "NoSuchBucket",
+                                                                   "AccessDenied",
+                                                                   "MalformedXML",
+                                                                   "InvalidArgument"
+                                                                 ],
+                                                  "precedence": 261
+                                                },
                   "PutBucketPolicy": {
                                        "method": "PUT",
                                        "path_shape": "/{Bucket}",
@@ -1253,6 +1432,48 @@
                                                           ],
                                            "precedence": 580
                                          },
+                  "UpdateBucketMetadataAnnotationTableConfiguration": {
+                                                                        "method": "PUT",
+                                                                        "path_shape": "/{Bucket}",
+                                                                        "query_keys": ["metadataAnnotationTable"],
+                                                                        "key_headers": [],
+                                                                        "host_classes": [],
+                                                                        "error_codes": [
+                                                                                         "NoSuchBucket",
+                                                                                         "AccessDenied",
+                                                                                         "MalformedXML",
+                                                                                         "InvalidArgument"
+                                                                                       ],
+                                                                        "precedence": 289
+                                                                      },
+                  "UpdateBucketMetadataInventoryTableConfiguration": {
+                                                                       "method": "PUT",
+                                                                       "path_shape": "/{Bucket}",
+                                                                       "query_keys": ["metadataInventoryTable"],
+                                                                       "key_headers": [],
+                                                                       "host_classes": [],
+                                                                       "error_codes": [
+                                                                                        "NoSuchBucket",
+                                                                                        "AccessDenied",
+                                                                                        "MalformedXML",
+                                                                                        "InvalidArgument"
+                                                                                      ],
+                                                                       "precedence": 290
+                                                                     },
+                  "UpdateBucketMetadataJournalTableConfiguration": {
+                                                                     "method": "PUT",
+                                                                     "path_shape": "/{Bucket}",
+                                                                     "query_keys": ["metadataJournalTable"],
+                                                                     "key_headers": [],
+                                                                     "host_classes": [],
+                                                                     "error_codes": [
+                                                                                      "NoSuchBucket",
+                                                                                      "AccessDenied",
+                                                                                      "MalformedXML",
+                                                                                      "InvalidArgument"
+                                                                                    ],
+                                                                     "precedence": 291
+                                                                   },
                   "UpdateObjectEncryption": {
                                               "method": "PUT",
                                               "path_shape": "/{Bucket}/{Key+}",
@@ -1314,9 +1535,16 @@
                  "DELETE": [
                              "AbortMultipartUpload",
                              "DeleteBucket",
+                             "DeleteBucketAnalyticsConfiguration",
                              "DeleteBucketCors",
                              "DeleteBucketEncryption",
+                             "DeleteBucketIntelligentTieringConfiguration",
+                             "DeleteBucketInventoryConfiguration",
                              "DeleteBucketLifecycle",
+                             "DeleteBucketMetadataConfiguration",
+                             "DeleteBucketMetadataTableConfiguration",
+                             "DeleteBucketMetricsConfiguration",
+                             "DeleteBucketOwnershipControls",
                              "DeleteBucketPolicy",
                              "DeleteBucketReplication",
                              "DeleteBucketTagging",
@@ -1327,6 +1555,7 @@
                              "DeletePublicAccessBlock"
                            ],
                  "GET": [
+                          "CreateSession",
                           "GetBucketAbac",
                           "GetBucketAccelerateConfiguration",
                           "GetBucketAcl",
@@ -1376,6 +1605,8 @@
                  "HEAD": ["HeadBucket", "HeadObject"],
                  "POST": [
                            "CompleteMultipartUpload",
+                           "CreateBucketMetadataConfiguration",
+                           "CreateBucketMetadataTableConfiguration",
                            "CreateMultipartUpload",
                            "DeleteObjects",
                            "RestoreObject",
@@ -1384,13 +1615,19 @@
                  "PUT": [
                           "CopyObject",
                           "CreateBucket",
+                          "PutBucketAbac",
                           "PutBucketAccelerateConfiguration",
                           "PutBucketAcl",
+                          "PutBucketAnalyticsConfiguration",
                           "PutBucketCors",
                           "PutBucketEncryption",
+                          "PutBucketIntelligentTieringConfiguration",
+                          "PutBucketInventoryConfiguration",
                           "PutBucketLifecycleConfiguration",
                           "PutBucketLogging",
+                          "PutBucketMetricsConfiguration",
                           "PutBucketNotificationConfiguration",
+                          "PutBucketOwnershipControls",
                           "PutBucketPolicy",
                           "PutBucketReplication",
                           "PutBucketRequestPayment",
@@ -1406,6 +1643,9 @@
                           "PutObjectTagging",
                           "PutPublicAccessBlock",
                           "RenameObject",
+                          "UpdateBucketMetadataAnnotationTableConfiguration",
+                          "UpdateBucketMetadataInventoryTableConfiguration",
+                          "UpdateBucketMetadataJournalTableConfiguration",
                           "UpdateObjectEncryption",
                           "UploadPart",
                           "UploadPartCopy"
@@ -1415,10 +1655,20 @@
                      "/": ["ListBuckets", "ListDirectoryBuckets"],
                      "/{Bucket}": [
                                     "CreateBucket",
+                                    "CreateBucketMetadataConfiguration",
+                                    "CreateBucketMetadataTableConfiguration",
+                                    "CreateSession",
                                     "DeleteBucket",
+                                    "DeleteBucketAnalyticsConfiguration",
                                     "DeleteBucketCors",
                                     "DeleteBucketEncryption",
+                                    "DeleteBucketIntelligentTieringConfiguration",
+                                    "DeleteBucketInventoryConfiguration",
                                     "DeleteBucketLifecycle",
+                                    "DeleteBucketMetadataConfiguration",
+                                    "DeleteBucketMetadataTableConfiguration",
+                                    "DeleteBucketMetricsConfiguration",
+                                    "DeleteBucketOwnershipControls",
                                     "DeleteBucketPolicy",
                                     "DeleteBucketReplication",
                                     "DeleteBucketTagging",
@@ -1459,13 +1709,19 @@
                                     "ListObjectVersions",
                                     "ListObjects",
                                     "ListObjectsV2",
+                                    "PutBucketAbac",
                                     "PutBucketAccelerateConfiguration",
                                     "PutBucketAcl",
+                                    "PutBucketAnalyticsConfiguration",
                                     "PutBucketCors",
                                     "PutBucketEncryption",
+                                    "PutBucketIntelligentTieringConfiguration",
+                                    "PutBucketInventoryConfiguration",
                                     "PutBucketLifecycleConfiguration",
                                     "PutBucketLogging",
+                                    "PutBucketMetricsConfiguration",
                                     "PutBucketNotificationConfiguration",
+                                    "PutBucketOwnershipControls",
                                     "PutBucketPolicy",
                                     "PutBucketReplication",
                                     "PutBucketRequestPayment",
@@ -1473,7 +1729,10 @@
                                     "PutBucketVersioning",
                                     "PutBucketWebsite",
                                     "PutObjectLockConfiguration",
-                                    "PutPublicAccessBlock"
+                                    "PutPublicAccessBlock",
+                                    "UpdateBucketMetadataAnnotationTableConfiguration",
+                                    "UpdateBucketMetadataInventoryTableConfiguration",
+                                    "UpdateBucketMetadataJournalTableConfiguration"
                                   ],
                      "/{Bucket}/{Key+}": [
                                            "AbortMultipartUpload",
@@ -1509,7 +1768,7 @@
                                          ]
                    },
   "by_query_key": {
-                    "abac": ["CreateBucket", "GetBucketAbac"],
+                    "abac": ["CreateBucket", "GetBucketAbac", "PutBucketAbac"],
                     "accelerate": [
                                     "CreateBucket",
                                     "GetBucketAccelerateConfiguration",
@@ -1529,8 +1788,10 @@
                     "analytics": [
                                    "CreateBucket",
                                    "DeleteBucket",
+                                   "DeleteBucketAnalyticsConfiguration",
                                    "GetBucketAnalyticsConfiguration",
-                                   "ListBucketAnalyticsConfigurations"
+                                   "ListBucketAnalyticsConfigurations",
+                                   "PutBucketAnalyticsConfiguration"
                                  ],
                     "annotation": [
                                     "DeleteObjectAnnotation",
@@ -1579,22 +1840,34 @@
                                   ],
                     "fetch-owner": ["ListObjectsV2"],
                     "id": [
+                            "DeleteBucketAnalyticsConfiguration",
+                            "DeleteBucketIntelligentTieringConfiguration",
+                            "DeleteBucketInventoryConfiguration",
+                            "DeleteBucketMetricsConfiguration",
                             "GetBucketAnalyticsConfiguration",
                             "GetBucketIntelligentTieringConfiguration",
                             "GetBucketInventoryConfiguration",
-                            "GetBucketMetricsConfiguration"
+                            "GetBucketMetricsConfiguration",
+                            "PutBucketAnalyticsConfiguration",
+                            "PutBucketIntelligentTieringConfiguration",
+                            "PutBucketInventoryConfiguration",
+                            "PutBucketMetricsConfiguration"
                           ],
                     "intelligent-tiering": [
                                              "CreateBucket",
                                              "DeleteBucket",
+                                             "DeleteBucketIntelligentTieringConfiguration",
                                              "GetBucketIntelligentTieringConfiguration",
-                                             "ListBucketIntelligentTieringConfigurations"
+                                             "ListBucketIntelligentTieringConfigurations",
+                                             "PutBucketIntelligentTieringConfiguration"
                                            ],
                     "inventory": [
                                    "CreateBucket",
                                    "DeleteBucket",
+                                   "DeleteBucketInventoryConfiguration",
                                    "GetBucketInventoryConfiguration",
-                                   "ListBucketInventoryConfigurations"
+                                   "ListBucketInventoryConfigurations",
+                                   "PutBucketInventoryConfiguration"
                                  ],
                     "key-marker": ["ListMultipartUploads", "ListObjectVersions"],
                     "legal-hold": [
@@ -1622,16 +1895,28 @@
                     "max-keys": ["ListObjectVersions", "ListObjects", "ListObjectsV2"],
                     "max-parts": ["ListParts"],
                     "max-uploads": ["ListMultipartUploads"],
-                    "metadataAnnotationTable": ["CreateBucket"],
-                    "metadataConfiguration": ["DeleteBucket", "GetBucketMetadataConfiguration"],
-                    "metadataInventoryTable": ["CreateBucket"],
-                    "metadataJournalTable": ["CreateBucket"],
-                    "metadataTable": ["DeleteBucket", "GetBucketMetadataTableConfiguration"],
+                    "metadataAnnotationTable": ["CreateBucket", "UpdateBucketMetadataAnnotationTableConfiguration"],
+                    "metadataConfiguration": [
+                                               "CreateBucketMetadataConfiguration",
+                                               "DeleteBucket",
+                                               "DeleteBucketMetadataConfiguration",
+                                               "GetBucketMetadataConfiguration"
+                                             ],
+                    "metadataInventoryTable": ["CreateBucket", "UpdateBucketMetadataInventoryTableConfiguration"],
+                    "metadataJournalTable": ["CreateBucket", "UpdateBucketMetadataJournalTableConfiguration"],
+                    "metadataTable": [
+                                       "CreateBucketMetadataTableConfiguration",
+                                       "DeleteBucket",
+                                       "DeleteBucketMetadataTableConfiguration",
+                                       "GetBucketMetadataTableConfiguration"
+                                     ],
                     "metrics": [
                                  "CreateBucket",
                                  "DeleteBucket",
+                                 "DeleteBucketMetricsConfiguration",
                                  "GetBucketMetricsConfiguration",
-                                 "ListBucketMetricsConfigurations"
+                                 "ListBucketMetricsConfigurations",
+                                 "PutBucketMetricsConfiguration"
                                ],
                     "notification": [
                                       "CreateBucket",
@@ -1639,7 +1924,13 @@
                                       "PutBucketNotificationConfiguration"
                                     ],
                     "object-lock": ["CreateBucket", "GetObjectLockConfiguration", "PutObjectLockConfiguration"],
-                    "ownershipControls": ["CreateBucket", "DeleteBucket", "GetBucketOwnershipControls"],
+                    "ownershipControls": [
+                                           "CreateBucket",
+                                           "DeleteBucket",
+                                           "DeleteBucketOwnershipControls",
+                                           "GetBucketOwnershipControls",
+                                           "PutBucketOwnershipControls"
+                                         ],
                     "part-number-marker": ["ListParts"],
                     "partNumber": ["GetObject", "HeadObject", "UploadPart", "UploadPartCopy"],
                     "policy": [
@@ -1690,6 +1981,7 @@
                                  ],
                     "select": ["SelectObjectContent"],
                     "select-type": ["SelectObjectContent"],
+                    "session": ["CreateSession"],
                     "start-after": ["ListObjectsV2"],
                     "tagging": [
                                  "CreateBucket",
@@ -1768,11 +2060,21 @@
                                        "CompleteMultipartUpload",
                                        "CopyObject",
                                        "CreateBucket",
+                                       "CreateBucketMetadataConfiguration",
+                                       "CreateBucketMetadataTableConfiguration",
                                        "CreateMultipartUpload",
+                                       "CreateSession",
                                        "DeleteBucket",
+                                       "DeleteBucketAnalyticsConfiguration",
                                        "DeleteBucketCors",
                                        "DeleteBucketEncryption",
+                                       "DeleteBucketIntelligentTieringConfiguration",
+                                       "DeleteBucketInventoryConfiguration",
                                        "DeleteBucketLifecycle",
+                                       "DeleteBucketMetadataConfiguration",
+                                       "DeleteBucketMetadataTableConfiguration",
+                                       "DeleteBucketMetricsConfiguration",
+                                       "DeleteBucketOwnershipControls",
                                        "DeleteBucketPolicy",
                                        "DeleteBucketReplication",
                                        "DeleteBucketTagging",
@@ -1826,13 +2128,19 @@
                                        "ListObjects",
                                        "ListObjectsV2",
                                        "ListParts",
+                                       "PutBucketAbac",
                                        "PutBucketAccelerateConfiguration",
                                        "PutBucketAcl",
+                                       "PutBucketAnalyticsConfiguration",
                                        "PutBucketCors",
                                        "PutBucketEncryption",
+                                       "PutBucketIntelligentTieringConfiguration",
+                                       "PutBucketInventoryConfiguration",
                                        "PutBucketLifecycleConfiguration",
                                        "PutBucketLogging",
+                                       "PutBucketMetricsConfiguration",
                                        "PutBucketNotificationConfiguration",
+                                       "PutBucketOwnershipControls",
                                        "PutBucketPolicy",
                                        "PutBucketReplication",
                                        "PutBucketRequestPayment",
@@ -1849,6 +2157,9 @@
                                        "RenameObject",
                                        "RestoreObject",
                                        "SelectObjectContent",
+                                       "UpdateBucketMetadataAnnotationTableConfiguration",
+                                       "UpdateBucketMetadataInventoryTableConfiguration",
+                                       "UpdateBucketMetadataJournalTableConfiguration",
                                        "UpdateObjectEncryption",
                                        "UploadPart",
                                        "UploadPartCopy"
@@ -1892,7 +2203,10 @@
                                           "CompleteMultipartUpload",
                                           "CopyObject",
                                           "CreateBucket",
+                                          "CreateBucketMetadataConfiguration",
+                                          "CreateBucketMetadataTableConfiguration",
                                           "CreateMultipartUpload",
+                                          "CreateSession",
                                           "DeleteBucketTagging",
                                           "DeleteObject",
                                           "DeleteObjectTagging",
@@ -1906,13 +2220,19 @@
                                           "ListObjects",
                                           "ListObjectsV2",
                                           "ListParts",
+                                          "PutBucketAbac",
                                           "PutBucketAccelerateConfiguration",
                                           "PutBucketAcl",
+                                          "PutBucketAnalyticsConfiguration",
                                           "PutBucketCors",
                                           "PutBucketEncryption",
+                                          "PutBucketIntelligentTieringConfiguration",
+                                          "PutBucketInventoryConfiguration",
                                           "PutBucketLifecycleConfiguration",
                                           "PutBucketLogging",
+                                          "PutBucketMetricsConfiguration",
                                           "PutBucketNotificationConfiguration",
+                                          "PutBucketOwnershipControls",
                                           "PutBucketReplication",
                                           "PutBucketRequestPayment",
                                           "PutBucketTagging",
@@ -1927,6 +2247,9 @@
                                           "PutPublicAccessBlock",
                                           "RestoreObject",
                                           "SelectObjectContent",
+                                          "UpdateBucketMetadataAnnotationTableConfiguration",
+                                          "UpdateBucketMetadataInventoryTableConfiguration",
+                                          "UpdateBucketMetadataJournalTableConfiguration",
                                           "UpdateObjectEncryption",
                                           "UploadPart",
                                           "UploadPartCopy"
@@ -1976,14 +2299,22 @@
                      "MalformedXML": [
                                        "CompleteMultipartUpload",
                                        "CreateBucket",
+                                       "CreateBucketMetadataConfiguration",
+                                       "CreateBucketMetadataTableConfiguration",
                                        "DeleteObjects",
+                                       "PutBucketAbac",
                                        "PutBucketAccelerateConfiguration",
                                        "PutBucketAcl",
+                                       "PutBucketAnalyticsConfiguration",
                                        "PutBucketCors",
                                        "PutBucketEncryption",
+                                       "PutBucketIntelligentTieringConfiguration",
+                                       "PutBucketInventoryConfiguration",
                                        "PutBucketLifecycleConfiguration",
                                        "PutBucketLogging",
+                                       "PutBucketMetricsConfiguration",
                                        "PutBucketNotificationConfiguration",
+                                       "PutBucketOwnershipControls",
                                        "PutBucketReplication",
                                        "PutBucketRequestPayment",
                                        "PutBucketTagging",
@@ -1997,6 +2328,9 @@
                                        "PutPublicAccessBlock",
                                        "RestoreObject",
                                        "SelectObjectContent",
+                                       "UpdateBucketMetadataAnnotationTableConfiguration",
+                                       "UpdateBucketMetadataInventoryTableConfiguration",
+                                       "UpdateBucketMetadataJournalTableConfiguration",
                                        "UpdateObjectEncryption"
                                      ],
                      "MethodNotAllowed": [
@@ -2012,11 +2346,21 @@
                                        "AbortMultipartUpload",
                                        "CompleteMultipartUpload",
                                        "CopyObject",
+                                       "CreateBucketMetadataConfiguration",
+                                       "CreateBucketMetadataTableConfiguration",
                                        "CreateMultipartUpload",
+                                       "CreateSession",
                                        "DeleteBucket",
+                                       "DeleteBucketAnalyticsConfiguration",
                                        "DeleteBucketCors",
                                        "DeleteBucketEncryption",
+                                       "DeleteBucketIntelligentTieringConfiguration",
+                                       "DeleteBucketInventoryConfiguration",
                                        "DeleteBucketLifecycle",
+                                       "DeleteBucketMetadataConfiguration",
+                                       "DeleteBucketMetadataTableConfiguration",
+                                       "DeleteBucketMetricsConfiguration",
+                                       "DeleteBucketOwnershipControls",
                                        "DeleteBucketPolicy",
                                        "DeleteBucketReplication",
                                        "DeleteBucketTagging",
@@ -2071,13 +2415,19 @@
                                        "ListObjects",
                                        "ListObjectsV2",
                                        "ListParts",
+                                       "PutBucketAbac",
                                        "PutBucketAccelerateConfiguration",
                                        "PutBucketAcl",
+                                       "PutBucketAnalyticsConfiguration",
                                        "PutBucketCors",
                                        "PutBucketEncryption",
+                                       "PutBucketIntelligentTieringConfiguration",
+                                       "PutBucketInventoryConfiguration",
                                        "PutBucketLifecycleConfiguration",
                                        "PutBucketLogging",
+                                       "PutBucketMetricsConfiguration",
                                        "PutBucketNotificationConfiguration",
+                                       "PutBucketOwnershipControls",
                                        "PutBucketPolicy",
                                        "PutBucketReplication",
                                        "PutBucketRequestPayment",
@@ -2094,6 +2444,9 @@
                                        "PutPublicAccessBlock",
                                        "RestoreObject",
                                        "SelectObjectContent",
+                                       "UpdateBucketMetadataAnnotationTableConfiguration",
+                                       "UpdateBucketMetadataInventoryTableConfiguration",
+                                       "UpdateBucketMetadataJournalTableConfiguration",
                                        "UpdateObjectEncryption",
                                        "UploadPart",
                                        "UploadPartCopy"
@@ -2196,7 +2549,17 @@
                      "242": ["DeleteBucketWebsite"],
                      "250": ["GetBucketAcl"],
                      "260": ["PutBucketAcl"],
+                     "261": ["PutBucketOwnershipControls"],
+                     "262": ["DeleteBucketOwnershipControls"],
+                     "263": ["PutBucketAbac"],
+                     "264": ["PutBucketIntelligentTieringConfiguration"],
+                     "265": ["DeleteBucketIntelligentTieringConfiguration"],
+                     "266": ["PutBucketAnalyticsConfiguration"],
+                     "267": ["DeleteBucketAnalyticsConfiguration"],
+                     "268": ["PutBucketInventoryConfiguration"],
+                     "269": ["DeleteBucketInventoryConfiguration"],
                      "270": ["GetBucketOwnershipControls"],
+                     "271": ["PutBucketMetricsConfiguration"],
                      "272": ["GetBucketIntelligentTieringConfiguration"],
                      "273": ["ListBucketIntelligentTieringConfigurations"],
                      "274": ["GetBucketAnalyticsConfiguration"],
@@ -2204,10 +2567,19 @@
                      "276": ["GetBucketAbac"],
                      "277": ["GetBucketInventoryConfiguration"],
                      "278": ["ListBucketInventoryConfigurations"],
+                     "279": ["CreateSession"],
                      "280": ["GetBucketMetadataConfiguration"],
                      "281": ["GetBucketMetadataTableConfiguration"],
                      "282": ["GetBucketMetricsConfiguration"],
                      "283": ["ListBucketMetricsConfigurations"],
+                     "284": ["DeleteBucketMetricsConfiguration"],
+                     "285": ["CreateBucketMetadataConfiguration"],
+                     "286": ["CreateBucketMetadataTableConfiguration"],
+                     "287": ["DeleteBucketMetadataConfiguration"],
+                     "288": ["DeleteBucketMetadataTableConfiguration"],
+                     "289": ["UpdateBucketMetadataAnnotationTableConfiguration"],
+                     "290": ["UpdateBucketMetadataInventoryTableConfiguration"],
+                     "291": ["UpdateBucketMetadataJournalTableConfiguration"],
                      "300": ["GetBucketLocation"],
                      "310": ["GetBucketCors"],
                      "320": ["PutBucketCors"],

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Format` string enumeration. Bound by: GetBucketAnalyticsConfiguration, GetBucketInventoryConfiguration, ListBucketAnalyticsConfigurations, ListBucketInventoryConfigurations.
+/// The `Format` string enumeration. Bound by: GetBucketAnalyticsConfiguration, GetBucketInventoryConfiguration, ListBucketAnalyticsConfigurations, ListBucketInventoryConfigurations, PutBucketAnalyticsConfiguration, PutBucketInventoryConfiguration.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Format::custom`]. Adding a constant is a minor version

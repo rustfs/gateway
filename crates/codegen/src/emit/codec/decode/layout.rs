@@ -29,7 +29,7 @@ pub(super) fn for_header(indent: usize, receiver: &str, links: &[String]) -> Str
     let pad = " ".repeat(indent);
     let chain: String = links.iter().map(|link| format!(".{link}")).collect();
     let single = format!("{pad}for item in {receiver}{chain} {{\n");
-    if single.len().saturating_sub(1) <= MAX_WIDTH && chain.len() <= CHAIN_WIDTH {
+    if single.len().saturating_sub(1) <= MAX_WIDTH && receiver.len() + chain.len() <= CHAIN_WIDTH {
         return single;
     }
     let continuation = " ".repeat(indent.saturating_add(4));
