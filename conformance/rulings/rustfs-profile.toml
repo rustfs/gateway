@@ -56,7 +56,7 @@ issue = "rustfs/backlog#2684"
 approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0034"
 verdict = "legacy-identical"
@@ -64,7 +64,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0035"
 verdict = "legacy-identical"
@@ -72,7 +72,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0036"
 verdict = "legacy-identical"
@@ -80,7 +80,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0043"
 verdict = "legacy-identical"
@@ -88,7 +88,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0058"
 verdict = "legacy-identical"
@@ -128,7 +128,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0013"
 verdict = "legacy-identical"
@@ -136,7 +136,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0016"
 verdict = "legacy-identical"
@@ -152,7 +152,7 @@ issue = "rustfs/backlog#2684"
 approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0021"
 verdict = "legacy-identical"
@@ -160,7 +160,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0026"
 verdict = "legacy-identical"
