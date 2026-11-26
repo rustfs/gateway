@@ -92,9 +92,17 @@ fn keys_legacy_rustfs_refuses_in_its_storage_reach_the_handler_to_be_refused_the
 #[test]
 fn a_body_key_is_held_to_the_same_rule() {
     // `DeleteObjects` names these in its body; legacy RustFS answers each with a per-key error
-    // and deletes the rest, so none of them may refuse the whole request.
-    for key in ["a/../b", "//x", "/", "a\u{1}b", "C:\\x"] {
-        assert_eq!(body_key(key), Ok(key.to_owned()), "{key:?}");
+    // and deletes the rest, so none of them may refuse the whole request, while `SlashPolicy`
+    // folds rooted slashes consistently with path writes (`//x` -> `x`).
+    for (input, expected) in [
+        ("a/../b", "a/../b"),
+        ("//x", "x"),
+        ("a//b", "a//b"),
+        ("/", "/"),
+        ("a\u{1}b", "a\u{1}b"),
+        ("C:\\x", "C:\\x"),
+    ] {
+        assert_eq!(body_key(input), Ok(expected.to_owned()), "{input:?}");
     }
 }
 

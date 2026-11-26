@@ -18,8 +18,10 @@
 //! NOT responsible for: document structure or resource proof.
 //! Upstream: generated DeleteObjects codec. Downstream: typed request and response DTOs.
 
-use rustfs_gateway_types::NamePolicy;
+use std::borrow::Cow;
+
 use rustfs_gateway_types::dto::{DeleteKeyEcho, DeleteObjectETag, DeleteObjectKey};
+use rustfs_gateway_types::{NamePolicy, SlashPolicy};
 
 use super::document::DocumentReading;
 use super::error::CodecError;
@@ -31,9 +33,16 @@ pub(crate) fn delete_object_key(
     names: &NamePolicy,
     reading: DocumentReading,
 ) -> Result<DeleteObjectKey, CodecError> {
+    // `SlashPolicy::RustfsLegacy` models legacy RustFS's HTTP request-path parser and never
+    // rewrites XML `<Delete><Object><Key>` entries; `SlashPolicy::Collapse` still applies.
+    let effective = if names.slash_policy() == SlashPolicy::RustfsLegacy {
+        Cow::Owned(names.clone().with_slash_policy(SlashPolicy::AwsPreserve))
+    } else {
+        Cow::Borrowed(names)
+    };
     match reading {
-        DocumentReading::Tree => object_key(value, member, names).map(Into::into),
-        DocumentReading::RustFs => DeleteObjectKey::materialize_rustfs_decoded(value, names).map_err(|_| unusable(member)),
+        DocumentReading::Tree => object_key(value, member, &effective).map(Into::into),
+        DocumentReading::RustFs => DeleteObjectKey::materialize_rustfs_decoded(value, &effective).map_err(|_| unusable(member)),
     }
 }
 

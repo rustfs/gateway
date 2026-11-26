@@ -428,3 +428,54 @@ fn a_request_with_no_body_to_describe_owes_nothing_and_still_refuses_a_contradic
         "a request that contradicts itself does so on every method"
     );
 }
+
+#[test]
+fn n_repeated_sdk_algorithm_and_checksum_type_headers_are_refused() {
+    assert!(rustfs_gateway_http::SINGLE_VALUED_HEADERS.contains(&"x-amz-sdk-checksum-algorithm"));
+    assert!(rustfs_gateway_http::SINGLE_VALUED_HEADERS.contains(&"x-amz-checksum-type"));
+
+    for pairs in [
+        &[
+            ("x-amz-trailer", "x-amz-checksum-crc32"),
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-sdk-checksum-algorithm", "SHA256"),
+        ][..],
+        &[
+            ("x-amz-trailer", "x-amz-checksum-crc32"),
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-sdk-checksum-algorithm", "BOGUS"),
+        ][..],
+        &[
+            ("x-amz-trailer", "x-amz-checksum-crc32"),
+            ("x-amz-checksum-type", "FULL_OBJECT"),
+            ("x-amz-checksum-type", "COMPOSITE"),
+        ][..],
+        &[
+            ("x-amz-checksum-crc32", CRC32),
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+        ][..],
+        &[
+            ("x-amz-checksum-crc32", CRC32),
+            ("x-amz-checksum-type", "FULL_OBJECT"),
+            ("x-amz-checksum-type", "FULL_OBJECT"),
+        ][..],
+    ] {
+        assert_eq!(resolve(pairs), Err(ChecksumReject::MultipleChecksumHeaders), "{pairs:?} must be refused");
+    }
+
+    // Even when unknown algorithms are ignored, a duplicate SDK algorithm header stays refused.
+    let map = headers(&[
+        ("x-amz-checksum-crc32", CRC32),
+        ("x-amz-sdk-checksum-algorithm", "BLAKE3"),
+        ("x-amz-sdk-checksum-algorithm", "CRC32"),
+    ]);
+    assert_eq!(
+        BodyIntegrity::resolve_with(
+            &HeaderView::new(&map),
+            ChecksumSubject::RequestBody,
+            rustfs_gateway_http::UnknownChecksumAlgorithms::Ignored,
+        ),
+        Err(ChecksumReject::MultipleChecksumHeaders)
+    );
+}

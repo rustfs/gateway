@@ -175,7 +175,7 @@ fn required_text_guard_is_the_tree_readings_alone() {
     }
 }
 
-/// Only readers reaching conditional text or Tag members take the reading; all others omit it.
+/// Only readers reaching conditional text, Tag, or tree-bounded members take the reading; all others omit it.
 #[test]
 fn only_readers_with_conditional_members_take_the_reading() {
     let artifacts = artifacts();
@@ -184,7 +184,7 @@ fn only_readers_with_conditional_members_take_the_reading() {
             "PutBucketLifecycleConfiguration" | "RestoreObject" => 5,
             "PutBucketReplication" => 13,
             "PutBucketAnalyticsConfiguration" | "PutBucketIntelligentTieringConfiguration" | "PutBucketMetricsConfiguration" => 4,
-            "PutBucketTagging" | "PutObjectTagging" => 2,
+            "CompleteMultipartUpload" | "PutBucketTagging" | "PutObjectTagging" => 2,
             _ => 0,
         };
         let rendered = operation_for_test(op, &artifacts.codec_rules, &artifacts.error_codes).expect("renders");

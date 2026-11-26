@@ -24,7 +24,7 @@
 use crate::support::{accept, accept_with, raw_value};
 use http::{HeaderName, Request, header::CONTENT_TYPE, header::HOST};
 use rustfs_gateway_http::{
-    CanonicalHeadersError, LimitKind, Limits, MetadataReject, SignedHeaderList, SignedHeadersError, WireReject,
+    CanonicalHeadersError, LimitKind, Limits, MetadataReject, QueryIndex, SignedHeaderList, SignedHeadersError, WireReject,
     decode_metadata_value, encode_metadata_value, is_significant_header, validate_metadata_key, validate_metadata_value,
 };
 
@@ -722,4 +722,16 @@ fn a_stored_value_with_a_control_character_is_encoded_not_refused() {
         assert!(http::HeaderValue::from_str(&encoded).is_ok());
     }
     assert_eq!(encode_metadata_value("plain").as_deref(), Ok("plain"));
+}
+
+#[test]
+fn n_raw_htab_in_query_string_is_rejected() {
+    for raw in ["a=1\tb", "prefix=\t", "\ta=1", "key\t=val"] {
+        assert_eq!(
+            QueryIndex::parse(raw, &Limits::default()),
+            Err(WireReject::MalformedQuery),
+            "raw HTAB in query {raw:?} must be refused"
+        );
+    }
+    assert!(QueryIndex::parse("a=1%09b", &Limits::default()).is_ok());
 }

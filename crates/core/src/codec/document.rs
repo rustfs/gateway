@@ -77,6 +77,24 @@ pub fn request_document(request: &MetaView<'_>, body: &[u8], document: &'static 
     read_document(request, body, document, false)
 }
 
+/// Refuses an XML request body whose root element declares or uses an XML namespace.
+///
+/// Inspects only the document's root start tag through
+/// [`rustfs_gateway_xml::root_declares_namespace`], so `xmlns=` text inside SQL expressions,
+/// comments, CDATA sections, or descendant elements is never mistaken for a root namespace
+/// declaration.
+///
+/// # Errors
+///
+/// [`CodecError::malformed_xml`] when the root element declares a namespace, carries a namespace
+/// prefix, or fails XML prolog and root start-tag validation.
+pub fn reject_qualified_root_namespace(request: &MetaView<'_>, body: &[u8]) -> Result<(), CodecError> {
+    match rustfs_gateway_xml::root_declares_namespace(body, request.document_limits()) {
+        Ok(false) => Ok(()),
+        Ok(true) | Err(_) => Err(CodecError::malformed_xml("the request body has the wrong root namespace")),
+    }
+}
+
 /// DeleteObjects has a single entity-tag slot, the entry's ETag. Codegen verifies that slot
 /// before selecting this reader.
 pub(crate) fn delete_objects_document(

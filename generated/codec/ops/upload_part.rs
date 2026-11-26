@@ -64,14 +64,14 @@ impl OperationCodec for dto::UploadPart {
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // PartNumber — query `partNumber`, percent-decoded once.
-        if let Some(raw) = request.query("partNumber") {
+        if let Some(raw) = value::query(request, "partNumber", "PartNumber")? {
             let raw = raw.as_ref();
             input.part_number = value::integer_in_range(raw, "PartNumber", 1, 10000)?;
         } else {
             return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "PartNumber"));
         }
         // UploadId — query `uploadId`, percent-decoded once.
-        if let Some(raw) = request.query("uploadId") {
+        if let Some(raw) = value::query(request, "uploadId", "UploadId")? {
             let raw = raw.as_ref();
             input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);
         } else {

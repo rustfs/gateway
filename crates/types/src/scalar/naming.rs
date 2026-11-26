@@ -553,7 +553,7 @@ fn has_encoded_separator(decoded: &str) -> bool {
         return false;
     }
     let lower = decoded.to_ascii_lowercase();
-    lower.contains("%2f") || lower.contains("%5c") || lower.contains("%2e%2e")
+    lower.contains("%2f") || lower.contains("%5c") || lower.contains("%2e%2e") || lower.contains(".%2e") || lower.contains("%2e.")
 }
 
 /// The unconditional safety floor for an object key, applied to an already-decoded value.
@@ -624,20 +624,20 @@ pub fn floor_check_bucket(name: &str) -> Result<(), NameRejection> {
     if name.is_empty() {
         return Err(NameRejection::Empty);
     }
+    if name.contains('\0') {
+        return Err(NameRejection::Nul);
+    }
+    if name.split(['/', '\\']).any(|segment| segment == "..") {
+        return Err(NameRejection::TraversalSegment);
+    }
+    if name.contains(['/', '\\']) {
+        return Err(NameRejection::PathSeparator);
+    }
     if name.len() < MIN_BUCKET_BYTES {
         return Err(NameRejection::TooShort);
     }
     if name.len() > MAX_BUCKET_BYTES {
         return Err(NameRejection::TooLong);
-    }
-    if name.contains('\0') {
-        return Err(NameRejection::Nul);
-    }
-    if name.contains(['/', '\\']) {
-        return Err(NameRejection::PathSeparator);
-    }
-    if name.split(['/', '\\', '.']).any(|segment| segment == "..") {
-        return Err(NameRejection::TraversalSegment);
     }
     // A bucket label is never percent-decoded — the naming rules admit only characters that need
     // no escaping — so a `%` here is a spelling no client produces and a decode nobody performs.
@@ -725,6 +725,16 @@ pub(crate) fn normalize_key(encoded: &str, policy: &NamePolicy) -> Result<String
     if policy.key_floor().refuses_residual_escapes() && has_encoded_separator(&decoded) {
         return Err(NameRejection::EncodedSeparator);
     }
+    normalize_decoded_key_owned(decoded, policy)
+}
+
+/// Applies [`SlashPolicy`], the floor, and the validator to an already-decoded key without a
+/// second percent-decode.
+pub(crate) fn normalize_decoded_key(decoded: &str, policy: &NamePolicy) -> Result<String, NameRejection> {
+    normalize_decoded_key_owned(decoded.to_owned(), policy)
+}
+
+fn normalize_decoded_key_owned(decoded: String, policy: &NamePolicy) -> Result<String, NameRejection> {
     let slashes = match policy.slash_policy() {
         SlashPolicy::AwsPreserve => decoded,
         SlashPolicy::Collapse => collapse_slashes(&decoded),
@@ -742,19 +752,6 @@ pub(crate) fn normalize_key(encoded: &str, policy: &NamePolicy) -> Result<String
     // value the floor already refused, because the floor returned before it was consulted.
     check_key_policy(&normalised, policy)?;
     Ok(normalised)
-}
-
-/// The same, for a value some other reader already decoded — a body element or a query parameter.
-///
-/// No decode happens here: a second decode of an already-decoded value is the double-decode bug
-/// this module exists to prevent, so the caller's decode is the only one and this applies the
-/// floor to its result.
-///
-/// # Errors
-///
-/// The [`NameRejection`] naming the rule that refused it.
-pub(crate) fn check_decoded_key(decoded: &str, policy: &NamePolicy) -> Result<(), NameRejection> {
-    check_key_policy(decoded, policy)
 }
 
 /// The single normalisation for a bucket label: floor, then validator.

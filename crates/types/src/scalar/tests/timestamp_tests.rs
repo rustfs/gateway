@@ -268,3 +268,90 @@ fn a_non_ascii_value_is_refused_in_every_format_without_panicking() {
         assert!(matches!(outcome, Ok(Err(_))), "{value:?} as {format:?} must be refused, not {outcome:?}");
     }
 }
+
+#[test]
+fn n_iso8601_utc_offset_outside_four_digit_year_range_is_refused() {
+    for value in [
+        "9999-12-31T23:59:59-23:59",
+        "9999-12-31T23:59:59-00:01",
+        "0000-01-01T00:00:00+23:59",
+        "0000-01-01T00:00:00+00:01",
+    ] {
+        assert!(
+            Timestamp::parse(value, TimestampFormat::Iso8601).is_err(),
+            "{value:?} pushes UTC outside 0000..=9999 and must not parse"
+        );
+    }
+    for value in [
+        "9999-12-31T23:59:59+00:00",
+        "0000-01-01T00:00:00-00:00",
+        "9999-12-31T23:00:00+01:00",
+    ] {
+        let ts = Timestamp::parse(value, TimestampFormat::Iso8601).expect("in-range UTC instant must parse");
+        assert!(ts.render(TimestampFormat::Iso8601).is_ok(), "{value:?} must round-trip render");
+    }
+}
+
+#[test]
+fn n_iso8601_empty_fraction_is_refused() {
+    for value in [
+        "2026-01-02T03:04:05.Z",
+        "2026-01-02T03:04:05.z",
+        "2026-01-02T03:04:05.+00:00",
+        "2026-01-02T03:04:05.-05:00",
+    ] {
+        assert!(
+            Timestamp::parse(value, TimestampFormat::Iso8601).is_err(),
+            "{value:?} has a dot with no fractional digits"
+        );
+    }
+    assert!(Timestamp::parse("2026-01-02T03:04:05.0Z", TimestampFormat::Iso8601).is_ok());
+}
+
+#[test]
+fn n_http_date_invalid_separator_bytes_are_refused() {
+    for value in [
+        "Tue, 15XNov 1994 08:12:31 GMT",
+        "Tue, 15 NovX1994 08:12:31 GMT",
+        "Tue, 15 Nov 1994X08:12:31 GMT",
+        "Tue, 15 Nov 1994  8:12:31 GMT",
+        "Sunday, 06XNov-94 08:49:37 GMT",
+        "Sunday, 06-NovX94 08:49:37 GMT",
+        "Sunday, 06-Nov-94X08:49:37 GMT",
+        "SunXNov  6 08:49:37 1994",
+        "Sun NovX 6 08:49:37 1994",
+        "Sun Nov \t6 08:49:37 1994",
+        "Sun Nov  6X08:49:37 1994",
+        "Sun Nov  6 08:49:37X1994",
+    ] {
+        assert!(
+            Timestamp::parse(value, TimestampFormat::HttpDate).is_err(),
+            "{value:?} has malformed HTTP-date separator bytes"
+        );
+    }
+    for value in [
+        "Tue, 15 Nov 1994 08:12:31 GMT",
+        "Sunday, 06-Nov-94 08:49:37 GMT",
+        "Sun Nov  6 08:49:37 1994",
+        "Sun Nov 16 08:49:37 1994",
+    ] {
+        assert!(
+            Timestamp::parse(value, TimestampFormat::HttpDate).is_ok(),
+            "{value:?} is a valid HTTP-date"
+        );
+    }
+}
+
+#[test]
+fn n_epoch_seconds_i64_min_does_not_collide_with_wire_placeholder() {
+    use crate::WirePlaceholder as _;
+
+    for raw in ["-9223372036854775808", "-9223372036854775808.0", "-9223372036854775807.5"] {
+        let parsed = Timestamp::parse(raw, TimestampFormat::EpochSeconds).expect("valid i64::MIN epoch instant");
+        assert!(!parsed.is_wire_placeholder(), "{raw} must not collide with WirePlaceholder");
+        assert_ne!(parsed, Timestamp::default(), "{raw} must not equal Timestamp::default()");
+        assert!(parsed.render(TimestampFormat::EpochSeconds).is_ok(), "{raw} must render");
+    }
+    assert!(Timestamp::default().is_wire_placeholder());
+    assert!(Timestamp::default().render(TimestampFormat::EpochSeconds).is_err());
+}

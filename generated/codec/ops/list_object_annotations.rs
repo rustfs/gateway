@@ -43,22 +43,22 @@ impl OperationCodec for dto::ListObjectAnnotations {
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // VersionId — query `versionId`, percent-decoded once.
-        if let Some(raw) = request.query("versionId") {
+        if let Some(raw) = value::query(request, "versionId", "VersionId")? {
             let raw = raw.as_ref();
             input.version_id = Some(raw.to_owned());
         }
         // MaxAnnotationResults — query `max-annotation-results`, percent-decoded once.
-        if let Some(raw) = request.query("max-annotation-results") {
+        if let Some(raw) = value::query(request, "max-annotation-results", "MaxAnnotationResults")? {
             let raw = raw.as_ref();
             input.max_annotation_results = Some(value::integer(raw, "MaxAnnotationResults")?);
         }
         // AnnotationPrefix — query `annotation-prefix`, percent-decoded once.
-        if let Some(raw) = request.query("annotation-prefix") {
+        if let Some(raw) = value::query(request, "annotation-prefix", "AnnotationPrefix")? {
             let raw = raw.as_ref();
             input.annotation_prefix = Some(raw.to_owned());
         }
         // ContinuationToken — query `continuation-token`, percent-decoded once.
-        if let Some(raw) = request.query("continuation-token") {
+        if let Some(raw) = value::query(request, "continuation-token", "ContinuationToken")? {
             let raw = raw.as_ref();
             input.continuation_token = Some(value::opaque(raw));
         }
@@ -119,10 +119,10 @@ impl OperationCodec for dto::ListObjectAnnotations {
             writer.element("AnnotationCount", &v.to_string());
         }
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element("ContinuationToken", v.as_str());
+            writer.element("ContinuationToken", value::xml_cursor_text(v.as_str(), "ContinuationToken")?);
         }
         if let Some(v) = output.next_continuation_token.as_ref() {
-            writer.element("NextContinuationToken", v.as_str());
+            writer.element("NextContinuationToken", value::xml_cursor_text(v.as_str(), "NextContinuationToken")?);
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());

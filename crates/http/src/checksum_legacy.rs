@@ -51,6 +51,9 @@ impl BodyIntegrity {
         empty: EmptyIntegrityHeaders,
         reads_algorithm_header: bool,
     ) -> Result<Self, ChecksumReject> {
+        if headers.is_multi(&CHECKSUM_TYPE) || headers.is_multi(&X_AMZ_TRAILER) {
+            return Err(ChecksumReject::MultipleChecksumHeaders);
+        }
         let absent = |name: &HeaderName, value: &str| {
             empty == EmptyIntegrityHeaders::Absent && value.is_empty() && !headers.is_multi(name)
         };

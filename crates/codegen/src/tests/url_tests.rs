@@ -86,7 +86,7 @@ fn the_generated_encoder_reads_the_decision_once_and_passes_it_down() {
         "the response-wide decision must set and clear the URL echo authoritatively:\n{body}"
     );
     assert!(
-        body.contains("write_object(&mut writer, item, url_encoding)?"),
+        body.contains("write_object(&mut writer, item, url_encoding, request)?"),
         "the entry writer receives the same decision the root used:\n{body}"
     );
     assert!(
@@ -183,7 +183,7 @@ fn every_encoded_member_narrows_the_decision_to_its_own_path() {
         );
     }
     assert!(
-        body.contains("value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);"),
+        body.contains("value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type)?;"),
         "the RustFS profile's echo follows the model echo:\n{body}"
     );
 }

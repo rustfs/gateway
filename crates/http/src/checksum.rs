@@ -372,6 +372,9 @@ impl BodyIntegrity {
         unknown: UnknownChecksumAlgorithms,
         empty: EmptyIntegrityHeaders,
     ) -> Result<Self, ChecksumReject> {
+        if headers.is_multi(&SDK_CHECKSUM_ALGORITHM) || headers.is_multi(&CHECKSUM_TYPE) || headers.is_multi(&X_AMZ_TRAILER) {
+            return Err(ChecksumReject::MultipleChecksumHeaders);
+        }
         // An empty `x-amz-sdk-checksum-algorithm` names no algorithm at all rather than an unknown
         // one: under `Read` it stays refused, under `Absent` it is no header (#1087).
         let ignored = |name: &str, value: &str| {

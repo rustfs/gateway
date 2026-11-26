@@ -80,6 +80,7 @@ pub enum TimestampFormat {
 pub struct Timestamp {
     secs: i64,
     subsec_nanos: u32,
+    placeholder: bool,
 }
 
 /// Smallest year this type renders, matching the four-digit wire formats.
@@ -98,12 +99,17 @@ impl Timestamp {
     pub const UNIX_EPOCH: Self = Self {
         secs: 0,
         subsec_nanos: 0,
+        placeholder: false,
     };
 
     /// Builds an instant from whole seconds since the Unix epoch.
     #[must_use]
     pub const fn from_secs(secs: i64) -> Self {
-        Self { secs, subsec_nanos: 0 }
+        Self {
+            secs,
+            subsec_nanos: 0,
+            placeholder: false,
+        }
     }
 
     /// Builds an instant from seconds plus a nanosecond remainder.
@@ -119,7 +125,11 @@ impl Timestamp {
                 "the nanosecond remainder must be below one second",
             ));
         }
-        Ok(Self { secs, subsec_nanos })
+        Ok(Self {
+            secs,
+            subsec_nanos,
+            placeholder: false,
+        })
     }
 
     /// Whole seconds since the Unix epoch; negative before 1970.
@@ -175,6 +185,13 @@ impl Timestamp {
     /// Returns a [`ParseError`] when the instant falls outside the four-digit year range the wire
     /// formats can express. [`TimestampFormat::EpochSeconds`] never fails.
     pub fn render(&self, format: TimestampFormat) -> Result<String, ParseError> {
+        if self.placeholder {
+            return Err(ParseError::new(
+                "Timestamp",
+                rules::ISO8601,
+                "the placeholder instant cannot be rendered on the wire",
+            ));
+        }
         if format == TimestampFormat::EpochSeconds {
             return Ok(render_epoch_seconds(self));
         }
@@ -237,6 +254,7 @@ impl Default for Timestamp {
         Self {
             secs: PLACEHOLDER_SECS,
             subsec_nanos: 0,
+            placeholder: true,
         }
     }
 }
@@ -246,7 +264,7 @@ const PLACEHOLDER_SECS: i64 = i64::MIN;
 
 impl WirePlaceholder for Timestamp {
     fn is_wire_placeholder(&self) -> bool {
-        self.secs == PLACEHOLDER_SECS
+        self.placeholder
     }
 }
 
@@ -394,19 +412,16 @@ fn parse_iso8601(value: &str) -> Result<Timestamp, ParseError> {
     let second = digits(&value[17..19]).ok_or_else(|| err("the second is not two digits"))?;
 
     let rest = &value[19..];
-    let (fraction, zone) = match rest.strip_prefix('.') {
+    let (nanos, zone) = match rest.strip_prefix('.') {
         Some(after_dot) => {
             let split = after_dot
                 .find(|c: char| !c.is_ascii_digit())
                 .ok_or_else(|| err("the fractional second has no zone suffix"))?;
-            (&after_dot[..split], &after_dot[split..])
+            let fraction = &after_dot[..split];
+            let nanos = parse_fraction(fraction).ok_or_else(|| err("the fractional second is not numeric"))?;
+            (nanos, &after_dot[split..])
         }
-        None => ("", rest),
-    };
-    let nanos = if fraction.is_empty() {
-        0
-    } else {
-        parse_fraction(fraction).ok_or_else(|| err("the fractional second is not numeric"))?
+        None => (0, rest),
     };
 
     let offset_secs = parse_zone(zone)?;
@@ -415,7 +430,9 @@ fn parse_iso8601(value: &str) -> Result<Timestamp, ParseError> {
         .secs()
         .checked_sub(offset_secs)
         .ok_or_else(|| err("applying the UTC offset overflows the representable range"))?;
-    Timestamp::from_secs_nanos(secs, nanos)
+    let instant = Timestamp::from_secs_nanos(secs, nanos)?;
+    let _ = CivilTime::from_timestamp(&instant)?;
+    Ok(instant)
 }
 
 /// Parses `Z`, `+hh:mm`, `-hh:mm`, `+hhmm` or `-hhmm` into an offset in seconds east of UTC.
@@ -518,7 +535,8 @@ fn parse_http_date(value: &str) -> Result<Timestamp, ParseError> {
 
 /// `15 Nov 1994 08:12:31 GMT`
 fn parse_imf_fixdate(rest: &str) -> Result<Timestamp, ParseError> {
-    if rest.len() != 24 || &rest[20..] != " GMT" {
+    let bytes = rest.as_bytes();
+    if bytes.len() != 24 || &rest[20..] != " GMT" || bytes[2] != b' ' || bytes[6] != b' ' || bytes[11] != b' ' {
         return Err(http_err("expected an IMF-fixdate ending in GMT"));
     }
     let day = digits(&rest[0..2]).ok_or_else(|| http_err("the day is not two digits"))?;
@@ -530,7 +548,8 @@ fn parse_imf_fixdate(rest: &str) -> Result<Timestamp, ParseError> {
 
 /// `06-Nov-94 08:49:37 GMT`
 fn parse_rfc850(rest: &str) -> Result<Timestamp, ParseError> {
-    if rest.len() != 22 || &rest[18..] != " GMT" {
+    let bytes = rest.as_bytes();
+    if bytes.len() != 22 || &rest[18..] != " GMT" || bytes[2] != b'-' || bytes[6] != b'-' || bytes[9] != b' ' {
         return Err(http_err("expected an RFC 850 date ending in GMT"));
     }
     let day = digits(&rest[0..2]).ok_or_else(|| http_err("the day is not two digits"))?;
@@ -549,23 +568,23 @@ fn parse_rfc850(rest: &str) -> Result<Timestamp, ParseError> {
 
 /// `Sun Nov  6 08:49:37 1994`
 fn parse_asctime(value: &str) -> Result<Timestamp, ParseError> {
-    if value.len() != 24 {
+    let bytes = value.as_bytes();
+    if bytes.len() != 24 || bytes[3] != b' ' || bytes[7] != b' ' || bytes[10] != b' ' || bytes[19] != b' ' {
         return Err(http_err("expected an asctime date of exactly 24 characters"));
     }
     if !DAY_NAMES.contains(&&value[0..3]) {
         return Err(http_err("the day name is not a valid abbreviation"));
     }
     let month = month_index(&value[4..7]).ok_or_else(|| http_err("the month name is not valid"))?;
-    let day_field = value[8..10].trim_start();
+    let day_field = if bytes[8] == b' ' { &value[9..10] } else { &value[8..10] };
     let day = digits(day_field).ok_or_else(|| http_err("the day is not numeric"))?;
     let (hour, minute, second) = parse_clock(&value[11..19])?;
     let year = digits(&value[20..24]).ok_or_else(|| http_err("the year is not four digits"))?;
     from_civil(i64::from(year), month, day, hour, minute, second, 0)
 }
 
-/// Parses ` hh:mm:ss` or `hh:mm:ss`.
+/// Parses `hh:mm:ss`.
 fn parse_clock(field: &str) -> Result<(u32, u32, u32), ParseError> {
-    let field = field.trim_start();
     if field.len() != 8 || field.as_bytes()[2] != b':' || field.as_bytes()[5] != b':' {
         return Err(http_err("the time of day is not hh:mm:ss"));
     }

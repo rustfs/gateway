@@ -132,7 +132,7 @@ impl OperationCodec for dto::PutObject {
         // WriteOffsetBytes — header `x-amz-write-offset-bytes`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-write-offset-bytes") {
             let raw = raw.as_ref();
-            input.write_offset_bytes = Some(value::long(raw, "WriteOffsetBytes")?);
+            input.write_offset_bytes = Some(value::long_in_range(raw, "WriteOffsetBytes", 0, 9223372036854775807)?);
         }
         // Metadata — every header under `x-amz-meta-`.
         input.metadata = value::metadata_map(request, "x-amz-meta-", "Metadata")?;

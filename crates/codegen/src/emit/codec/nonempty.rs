@@ -87,6 +87,7 @@ fn type_needs_reading(
                     // A binding no reader can enforce still threads the reading; `guard` then
                     // refuses to render it, so the error names the member rather than a caller.
                     crate::emit::dto::presence::carries_tag_presence(name, field)
+                        || super::bounds::uses_tree_reading(&ir.operation, field)
                         || rejects_empty(field, rules).unwrap_or(true)
                         || carriers.get(name, &field.name).is_some()
                         || type_needs_reading(ir, &field.ty, rules, carriers, visiting)

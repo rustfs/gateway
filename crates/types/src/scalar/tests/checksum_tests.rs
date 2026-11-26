@@ -441,3 +441,51 @@ fn a_near_miss_spelling_of_an_added_algorithm_is_not_an_algorithm() {
         assert_eq!(ChecksumAlgorithm::from_wire_name(wire), None, "{wire}");
     }
 }
+
+/// Negative — repeated `x-amz-sdk-checksum-algorithm` or `x-amz-checksum-type` headers are
+/// refused rather than resolved last-wins.
+#[test]
+fn n_repeated_sdk_algorithm_or_checksum_type_headers_are_refused() {
+    for headers in [
+        &[
+            ("x-amz-sdk-checksum-algorithm", "SHA256"),
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-checksum-crc32", "mnG7TA=="),
+        ][..],
+        &[
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-checksum-crc32", "mnG7TA=="),
+        ][..],
+        &[
+            ("x-amz-sdk-checksum-algorithm", "CRC32"),
+            ("x-amz-sdk-checksum-algorithm", "BOGUS"),
+            ("x-amz-checksum-crc32", "mnG7TA=="),
+        ][..],
+        &[
+            ("x-amz-checksum-type", "COMPOSITE"),
+            ("x-amz-checksum-type", "FULL_OBJECT"),
+            ("x-amz-checksum-crc32", "mnG7TA=="),
+        ][..],
+        &[("x-amz-checksum-type", "FULL_OBJECT"), ("x-amz-checksum-type", "FULL_OBJECT")][..],
+    ] {
+        assert!(parse_request_checksum(headers.iter().copied()).is_err(), "{headers:?} must be refused");
+    }
+}
+
+/// Negative — composite part counts reject leading signs, and `composite_of` rejects parts that
+/// are already composite.
+#[test]
+fn n_composite_part_count_rejects_leading_plus_and_composite_of_rejects_composite_parts() {
+    for raw in ["mnG7TA==-+1", "mnG7TA==-+10", "mnG7TA==--1"] {
+        assert_eq!(
+            ChecksumSpec::parse_header("x-amz-checksum-crc32", raw),
+            Err(ChecksumError::InvalidChecksumValue),
+            "{raw:?} must be refused"
+        );
+    }
+    let full = ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &digest_of(ChecksumAlgorithm::Crc32, b"a")).expect("valid");
+    let composite = ChecksumSpec::composite_of(&[full]).expect("full-object parts compose");
+    assert_eq!(ChecksumSpec::composite_of(&[composite]), Err(ChecksumError::NotCombinable));
+    assert_eq!(ChecksumSpec::composite_of(&[full, composite]), Err(ChecksumError::NotCombinable));
+}

@@ -318,6 +318,7 @@ impl ChunkDecoder {
             [b'\r', b'\n', ..] => {
                 self.cursor = self.cursor.saturating_add(2);
                 self.overhead_bytes = self.overhead_bytes.saturating_add(2);
+                self.check_overhead_ratio()?;
                 self.state = if terminal { State::Done } else { State::Meta };
                 Ok(DecodeEvent::ChunkEnd { signature })
             }
@@ -330,7 +331,7 @@ impl ChunkDecoder {
 
     /// Refuses a body whose framing has outgrown its share of the payload.
     fn check_overhead_ratio(&self) -> Result<(), ChunkReject> {
-        if self.overhead_bytes <= self.limits.overhead_ratio_floor_bytes() {
+        if self.decoded_bytes == 0 || self.overhead_bytes <= self.limits.overhead_ratio_floor_bytes() {
             return Ok(());
         }
         let permitted = u128::from(self.decoded_bytes).saturating_mul(u128::from(self.limits.max_overhead_permille()));

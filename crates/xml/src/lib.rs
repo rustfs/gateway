@@ -49,7 +49,7 @@ pub use crate::chars::{UNREPRESENTABLE, is_xml_char, is_xml_name, is_xml_represe
 pub use crate::error::XmlError;
 pub use crate::read::{
     MAX_ATTRIBUTE_BYTES, MAX_ATTRIBUTES_PER_ELEMENT, MAX_BODY_BYTES, MAX_DEPTH, MAX_ELEMENTS, XmlAttribute, XmlLimits, XmlNode,
-    parse, parse_legacy_persistence_with_limits, parse_with_limits,
+    parse, parse_legacy_persistence_with_limits, parse_with_limits, root_declares_namespace,
 };
 pub use crate::write::{
     COMPACT_DECLARATION, DECLARATION, S3_XMLNS, XmlWriter, escape_attribute, escape_text, strip_compact_declaration,

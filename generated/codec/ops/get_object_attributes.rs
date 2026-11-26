@@ -44,7 +44,7 @@ impl OperationCodec for dto::GetObjectAttributes {
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // VersionId — query `versionId`, percent-decoded once.
-        if let Some(raw) = request.query("versionId") {
+        if let Some(raw) = value::query(request, "versionId", "VersionId")? {
             let raw = raw.as_ref();
             input.version_id = Some(raw.to_owned());
         }

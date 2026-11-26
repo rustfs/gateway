@@ -192,10 +192,10 @@ impl Operation for HeadPing {
 
 impl OperationCodec for HeadPing {
     fn decode(request: &MetaView<'_>, _body: RequestBody) -> Result<HeadPingInput, CodecError> {
-        if request.query("refuse").is_some() {
+        if request.query("refuse")?.is_some() {
             return Ok(HeadPingInput::Refuse);
         }
-        if request.query("not-modified").is_some() {
+        if request.query("not-modified")?.is_some() {
             return Ok(HeadPingInput::NotModified);
         }
         Ok(HeadPingInput::Content)

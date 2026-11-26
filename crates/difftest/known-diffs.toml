@@ -240,6 +240,36 @@ reason = "A part number outside 1..=10000 is refused by the gateway codec; s3s h
 expires = "2026-12-31"
 
 [[diff]]
+id = "kd-decode-0113"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "400 InvalidPartNumber: the request carries a value this member cannot hold"
+s3s = "handled"
+reason = "A GetObject partNumber outside 1..=10000 is refused at decode with 400 InvalidPartNumber (c-range-0007); s3s 0.17.0 does not range-check partNumber and forwards it to the handler."
+expires = "2027-06-30"
+
+[[diff]]
+id = "kd-decode-0114"
+kind = "decode"
+operation = "ListObjects"
+item = "outcome"
+gateway = "400 InvalidArgument: the request carries a value this member cannot hold"
+s3s = "handled"
+reason = "A ListObjects max-keys outside 0..=1000 is refused at decode with 400 InvalidArgument; s3s 0.17.0 does not range-check max-keys and forwards negative values to the handler."
+expires = "2027-06-30"
+
+[[diff]]
+id = "kd-decode-0115"
+kind = "decode"
+operation = "ListBuckets"
+item = "outcome"
+gateway = "400 InvalidArgument: the request carries a value this member cannot hold"
+s3s = "handled"
+reason = "A ListBuckets max-buckets outside 1..=10000 is refused at decode with 400 InvalidArgument; s3s 0.17.0 does not range-check max-buckets and forwards zero to the handler."
+expires = "2027-06-30"
+
+[[diff]]
 id = "kd-decode-0081"
 kind = "decode"
 operation = "GetObject"

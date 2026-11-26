@@ -178,10 +178,14 @@ fn an_empty_fixed_name_obeys_the_selected_policy() {
     }
 }
 
-/// Joining retains order and an empty first line even under the empty-header policy.
+/// Joining retains order and an empty first line even under the empty-header policy, while
+/// single-valued fixed headers (`content-md5`, `x-amz-sdk-checksum-algorithm`) reject repetition.
 #[test]
 fn repeated_fixed_names_keep_both_lines() {
-    for &name in NAMES.iter().filter(|name| **name != "content-md5") {
+    for &name in NAMES
+        .iter()
+        .filter(|name| !matches!(**name, "content-md5" | "x-amz-sdk-checksum-algorithm"))
+    {
         let request = http::Request::builder()
             .uri("/bucket/key")
             .header("host", "localhost")
@@ -196,5 +200,15 @@ fn repeated_fixed_names_keep_both_lines() {
             .with_empty_headers_absent();
         assert_eq!(view.header(name).as_deref(), Some(", second"));
         assert!(view.has_header(name));
+    }
+    for name in ["content-md5", "x-amz-sdk-checksum-algorithm"] {
+        let request = http::Request::builder()
+            .uri("/bucket/key")
+            .header("host", "localhost")
+            .header(name, "")
+            .header(name, "second")
+            .body(())
+            .expect("a static head");
+        assert!(WireRequest::accept(request, &Limits::default()).is_err(), "{name} must reject duplicates");
     }
 }

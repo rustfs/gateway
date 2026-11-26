@@ -86,6 +86,10 @@ pub fn etag_render(render: ETagRender) -> &'static str {
 /// a parameter rather than something read from the type because the IR's `Integer` carries no
 /// range — see that module for why the two numbers cannot live in the IR today.
 ///
+#[allow(
+    clippy::too_many_arguments,
+    reason = "explicit wire-context parameters keep generated calls flat"
+)]
 pub fn from_wire(
     ty: &Type,
     member: &str,
@@ -94,6 +98,7 @@ pub fn from_wire(
     bound: Option<Bound>,
     boolean_spelling: Option<BooleanSpelling>,
     name_policy: &str,
+    reading: &str,
 ) -> Result<String, String> {
     Ok(match ty {
         Type::String if crate::emit::dto::registry::is_secret_string_member(member) => {
@@ -102,10 +107,27 @@ pub fn from_wire(
         Type::String => "raw.to_owned()".to_owned(),
         Type::OpaqueString => "value::opaque(raw)".to_owned(),
         Type::Integer => match bound {
-            Some(Bound { min, max }) => format!("value::integer_in_range(raw, \"{member}\", {min}, {max})?"),
+            Some(Bound::Int {
+                min,
+                max,
+                code: Some(code),
+            }) => format!("value::integer_in_range_as(raw, \"{member}\", {min}, {max}, ErrorCode::{code})?"),
+            Some(Bound::Int { min, max, code: None }) => format!("value::integer_in_range(raw, \"{member}\", {min}, {max})?"),
+            Some(Bound::TreeInt { min, max }) => {
+                format!("value::tree_integer_in_range(raw, \"{member}\", {min}, {max}, {reading})?")
+            }
+            Some(Bound::Long { .. }) => {
+                return Err(unsupported(operation, member, "an integer member cannot carry a 64-bit range"));
+            }
             None => format!("value::integer(raw, \"{member}\")?"),
         },
-        Type::Long => format!("value::long(raw, \"{member}\")?"),
+        Type::Long => match bound {
+            Some(Bound::Long { min, max }) => format!("value::long_in_range(raw, \"{member}\", {min}, {max})?"),
+            Some(Bound::Int { .. } | Bound::TreeInt { .. }) => {
+                return Err(unsupported(operation, member, "a long member cannot carry a 32-bit range"));
+            }
+            None => format!("value::long(raw, \"{member}\")?"),
+        },
         Type::Boolean => match boolean_spelling.unwrap_or(BooleanSpelling::AsciiCaseInsensitive) {
             BooleanSpelling::AsciiCaseInsensitive => format!("value::boolean(raw, \"{member}\")?"),
             BooleanSpelling::LowercaseOnly => format!("value::boolean_lowercase(raw, \"{member}\")?"),

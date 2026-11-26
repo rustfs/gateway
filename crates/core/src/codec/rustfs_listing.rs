@@ -49,6 +49,7 @@ use std::borrow::Cow;
 
 use rustfs_gateway_types::{dto, is_xml_representable};
 
+use crate::codec::error::CodecError;
 use crate::codec::value::{ENCODING_TYPE, ENCODING_TYPE_URL, UrlEncoding, UrlEncodingValue, needs_url_encoding};
 use crate::codec::view::MetaView;
 
@@ -108,7 +109,7 @@ impl UrlEncoding {
 /// listing rule.
 pub(crate) fn rustfs_decision(request: &MetaView<'_>) -> Option<UrlEncoding> {
     let listing = request.rustfs_listing_encoding()?;
-    let requested = request.query(ENCODING_TYPE).as_deref() == Some(ENCODING_TYPE_URL);
+    let requested = request.query(ENCODING_TYPE).ok().flatten().as_deref() == Some(ENCODING_TYPE_URL);
     Some(UrlEncoding::RustFs { requested, listing })
 }
 
@@ -149,9 +150,18 @@ pub(crate) fn slash_preserving(value: &str) -> Cow<'_, str> {
 ///
 /// Generated into the `encode` of every listing that has an `EncodingType` member, right after the
 /// AWS-model echo, so the default is untouched.
-pub fn rustfs_listing_echo(request: &MetaView<'_>, encoding: UrlEncoding, echo: &mut Option<dto::EncodingType>) {
+///
+/// # Errors
+///
+/// [`CodecError::invalid_argument`] when the echoed `encoding-type` carries invalid UTF-8 or a
+/// character XML 1.0 cannot represent (which would otherwise corrupt to `U+FFFD`).
+pub fn rustfs_listing_echo(
+    request: &MetaView<'_>,
+    encoding: UrlEncoding,
+    echo: &mut Option<dto::EncodingType>,
+) -> Result<(), CodecError> {
     let UrlEncoding::RustFs { listing, .. } = encoding else {
-        return;
+        return Ok(());
     };
     // Legacy-compat (rustfs/backlog#2684): legacy RustFS echoes whatever `encoding-type` the request
     // carried, `URL` or `foo` included, while it only encodes for exactly `url`, and it encodes
@@ -159,10 +169,40 @@ pub fn rustfs_listing_echo(request: &MetaView<'_>, encoding: UrlEncoding, echo: 
     // mis-reads a raw `Prefix` holding `%` or `+`. The intended future behaviour is the core default:
     // every AWS member encoded and a canonical echo.
     *echo = if listing.echoes {
-        request
-            .query(ENCODING_TYPE)
-            .map(|value| dto::EncodingType::custom(value.into_owned()))
+        match request.query(ENCODING_TYPE).map_err(|error| error.about("EncodingType"))? {
+            Some(value) if !is_xml_representable(&value) => {
+                return Err(
+                    CodecError::invalid_argument("the request carries an encoding-type value XML 1.0 cannot represent")
+                        .about("EncodingType"),
+                );
+            }
+            Some(value) => Some(dto::EncodingType::custom(value.into_owned())),
+            None => None,
+        }
     } else {
         None
     };
+    Ok(())
+}
+
+/// Reads a query parameter as strict UTF-8, attributing a refusal to `member`.
+///
+/// # Errors
+///
+/// [`CodecError::invalid_argument`] naming `member` when the decoded bytes are not valid UTF-8.
+pub fn query<'a>(request: &'a MetaView<'a>, key: &str, member: &'static str) -> Result<Option<Cow<'a, str>>, CodecError> {
+    request.query(key).map_err(|error| error.about(member))
+}
+
+/// Verifies that a non-URL-encoded echoed listing cursor carries only XML 1.0 representable
+/// characters, refusing forbidden C0 controls instead of silently substituting `U+FFFD`.
+///
+/// # Errors
+///
+/// [`CodecError::invalid_argument`] naming `member` when `value` carries an unrepresentable char.
+pub fn xml_cursor_text<'a>(value: &'a str, member: &'static str) -> Result<&'a str, CodecError> {
+    if !is_xml_representable(value) {
+        return Err(CodecError::invalid_argument("a listing cursor carries a character XML 1.0 cannot represent").about(member));
+    }
+    Ok(value)
 }

@@ -104,7 +104,12 @@ fn n_unfilled_and_invalid_claims_are_refused_before_lookup() {
         ("unfilled", UploadIdClaim::default()),
         ("empty", UploadIdClaim::from_wire("")),
         ("absolute", UploadIdClaim::from_wire("/upload-0001")),
+        ("backslash root", UploadIdClaim::from_wire("\\upload-0001")),
         ("parent segment", UploadIdClaim::from_wire("a/../b")),
+        ("backslash parent segment", UploadIdClaim::from_wire("a\\..\\b")),
+        ("leading backslash parent", UploadIdClaim::from_wire("..\\b")),
+        ("trailing backslash parent", UploadIdClaim::from_wire("a\\..")),
+        ("mixed separator parent", UploadIdClaim::from_wire("a/..\\b")),
     ] {
         let calls = Cell::new(0);
         let outcome = resolve_upload(&claim, &bucket(), &key(), |_| {
