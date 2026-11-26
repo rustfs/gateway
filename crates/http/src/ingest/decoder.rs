@@ -39,6 +39,7 @@
 
 use crate::ingest::reject::ChunkReject;
 use crate::ingest::signer::parse_chunk_signature;
+use crate::ingest::signer_ecdsa::EcdsaDerFrame;
 use crate::limits::ChunkLimits;
 
 /// The shortest a chunk-size line can be: one hex digit and a CRLF.
@@ -50,8 +51,16 @@ const MAX_CHUNK_SIZE_DIGITS: usize = 16;
 /// The one chunk extension signed framing permits.
 const CHUNK_SIGNATURE_PREFIX: &[u8] = b"chunk-signature=";
 
+/// Parsed per-chunk authentication tag carried in `;chunk-signature=...`.
+///
+/// No `Debug` and no `PartialEq`: holds wire signature bytes.
+#[derive(Clone, Copy)]
+pub(crate) enum ChunkAuth {
+    Hmac([u8; 32]),
+    Ecdsa(EcdsaDerFrame),
+}
+
 /// What the decoder wants next, or what it has just produced.
-#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum DecodeEvent {
     /// The buffer holds no complete unit; the caller must read more bytes.
     NeedMore,
@@ -71,33 +80,30 @@ pub(crate) enum DecodeEvent {
     /// A chunk has ended; its signature, when the mode has one, is ready to be verified.
     ChunkEnd {
         /// The signature announced in this chunk's extension, for signed framing.
-        signature: Option<[u8; 32]>,
-        /// Whether this was the terminal, zero-sized chunk.
-        terminal: bool,
+        signature: Option<ChunkAuth>,
     },
     /// The terminal chunk and its closing CRLF have both been consumed.
     Done,
 }
 
 /// Where in an `aws-chunked` body the decoder currently is.
-#[derive(Debug)]
 enum State {
     /// Reading a chunk-size line.
     Meta,
     /// Reading chunk data.
-    Data { remaining: u64, signature: Option<[u8; 32]> },
+    Data { remaining: u64, signature: Option<ChunkAuth> },
     /// Reading the CRLF that closes a chunk's data.
-    DataCrlf { signature: Option<[u8; 32]>, terminal: bool },
+    DataCrlf { signature: Option<ChunkAuth>, terminal: bool },
     /// The terminal chunk has been consumed.
     Done,
 }
 
 /// The `aws-chunked` framing state machine.
-#[derive(Debug)]
 pub(crate) struct ChunkDecoder {
     state: State,
     cursor: usize,
     signed: bool,
+    ecdsa: bool,
     trailers: bool,
     declared: u64,
     decoded_bytes: u64,
@@ -109,11 +115,12 @@ pub(crate) struct ChunkDecoder {
 
 impl ChunkDecoder {
     /// Builds a decoder for a body that declared `declared` decoded bytes.
-    pub(crate) fn new(signed: bool, trailers: bool, declared: u64, limits: ChunkLimits) -> Self {
+    pub(crate) fn new(signed: bool, ecdsa: bool, trailers: bool, declared: u64, limits: ChunkLimits) -> Self {
         Self {
             state: State::Meta,
             cursor: 0,
             signed,
+            ecdsa,
             trailers,
             declared,
             decoded_bytes: 0,
@@ -200,10 +207,7 @@ impl ChunkDecoder {
                 // A last-chunk ends with its size-line CRLF. In trailer framing the first field
                 // follows immediately; only an empty trailer section starts with another CRLF.
                 self.state = State::Done;
-                return Ok(DecodeEvent::ChunkEnd {
-                    signature,
-                    terminal: true,
-                });
+                return Ok(DecodeEvent::ChunkEnd { signature });
             }
             self.state = State::DataCrlf {
                 signature,
@@ -233,7 +237,7 @@ impl ChunkDecoder {
     }
 
     /// Splits a chunk-size line into its size and its single permitted extension.
-    fn parse_meta_line(&self, line: &[u8]) -> Result<(u64, Option<[u8; 32]>), ChunkReject> {
+    fn parse_meta_line(&self, line: &[u8]) -> Result<(u64, Option<ChunkAuth>), ChunkReject> {
         let (digits, extension) = match line.iter().position(|byte| *byte == b';') {
             Some(at) => {
                 let digits = line.get(..at).ok_or(ChunkReject::MalformedChunkSize)?;
@@ -249,12 +253,11 @@ impl ChunkDecoder {
     }
 
     /// Applies the extension whitelist for the framing mode.
-    fn parse_extension(&self, extension: Option<&[u8]>) -> Result<Option<[u8; 32]>, ChunkReject> {
+    fn parse_extension(&self, extension: Option<&[u8]>) -> Result<Option<ChunkAuth>, ChunkReject> {
         match (self.signed, extension) {
-            // Signed framing: exactly one extension, exactly this name, exactly 64 lowercase hex.
-            // A second extension, a quoted value or uppercase hex is refused rather than
-            // tolerated: a chunk extension one party parses and another ignores is the desync
-            // primitive behind chunk-extension request smuggling.
+            // Signed framing: exactly one extension, exactly this name, and either 64 lowercase
+            // hex chars (SigV4 HMAC) or lowercase hex ASN.1 DER (unpadded or 144-char `*`-padded
+            // for SigV4a ECDSA). A second extension, quoted value, or uppercase hex is refused.
             (true, Some(extension)) => {
                 if extension.contains(&b';') {
                     return Err(ChunkReject::UnexpectedExtension);
@@ -262,7 +265,17 @@ impl ChunkDecoder {
                 let value = extension
                     .strip_prefix(CHUNK_SIGNATURE_PREFIX)
                     .ok_or(ChunkReject::UnexpectedExtension)?;
-                parse_chunk_signature(value).map(Some).ok_or(ChunkReject::UnexpectedExtension)
+                if self.ecdsa {
+                    EcdsaDerFrame::parse_wire_hex(value)
+                        .map(ChunkAuth::Ecdsa)
+                        .map(Some)
+                        .ok_or(ChunkReject::UnexpectedExtension)
+                } else {
+                    parse_chunk_signature(value)
+                        .map(ChunkAuth::Hmac)
+                        .map(Some)
+                        .ok_or(ChunkReject::UnexpectedExtension)
+                }
             }
             (true, None) => Err(ChunkReject::UnexpectedExtension),
             (false, None) => Ok(None),
@@ -272,7 +285,7 @@ impl ChunkDecoder {
     }
 
     /// Hands out as much chunk data as the buffer currently holds.
-    fn step_data(&mut self, input: &[u8], remaining: u64, signature: Option<[u8; 32]>) -> DecodeEvent {
+    fn step_data(&mut self, input: &[u8], remaining: u64, signature: Option<ChunkAuth>) -> DecodeEvent {
         let available = input.len().saturating_sub(self.cursor);
         if available == 0 {
             return DecodeEvent::NeedMore;
@@ -299,14 +312,14 @@ impl ChunkDecoder {
     }
 
     /// Consumes the CRLF that closes a chunk and reports the chunk as ended.
-    fn step_data_crlf(&mut self, input: &[u8], signature: Option<[u8; 32]>, terminal: bool) -> Result<DecodeEvent, ChunkReject> {
+    fn step_data_crlf(&mut self, input: &[u8], signature: Option<ChunkAuth>, terminal: bool) -> Result<DecodeEvent, ChunkReject> {
         let rest = input.get(self.cursor..).unwrap_or(&[]);
         match rest {
             [b'\r', b'\n', ..] => {
                 self.cursor = self.cursor.saturating_add(2);
                 self.overhead_bytes = self.overhead_bytes.saturating_add(2);
                 self.state = if terminal { State::Done } else { State::Meta };
-                Ok(DecodeEvent::ChunkEnd { signature, terminal })
+                Ok(DecodeEvent::ChunkEnd { signature })
             }
             // Exactly CRLF. A bare `\n`, a lone `\r` or a doubled CRLF are each accepted by some
             // parser somewhere, which is the whole problem.

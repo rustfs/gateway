@@ -56,6 +56,8 @@ mod sig_v2_admission;
 mod signer_roundtrip;
 #[path = "sigv2_refused_floor.rs"]
 mod sigv2_refused_floor;
+#[path = "sigv4a.rs"]
+mod sigv4a;
 #[path = "timing.rs"]
 mod timing;
 #[path = "verification_proof.rs"]

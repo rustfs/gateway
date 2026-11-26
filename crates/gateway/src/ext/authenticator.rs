@@ -181,110 +181,9 @@ impl AuthenticationOutcome {
     }
 }
 
-/// The material a `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` body's per-chunk signatures are checked
-/// against.
-///
-/// # Why this exists at all
-///
-/// The `aws-chunked` chunk chain is seeded by the *request* signature and verified with the *same*
-/// `k_signing` the request signature was computed from. Neither value survives
-/// [`Verdict`]: `Verdict::Authenticated` carries an identity, a scheme, the verified scope and a
-/// zero-sized [`SignatureMatch`], which is exactly the right shape for "who is this" and exactly
-/// the wrong shape for "keep verifying" — the scope names the key, it does not hold it. `Verdict` is `rustfs-gateway-sig`'s and `#[non_exhaustive]`, so it
-/// cannot grow a variant from here.
-///
-/// So the material travels beside the verdict, through a sink the pipeline owns and the
-/// authenticator may fill. That keeps the change additive — an existing [`Authenticator`]
-/// implementation compiles untouched and simply never fills it — and keeps the ordering honest:
-/// the sink is read *after* the verdict has been checked, so a body cannot be verified against
-/// material published by a request that was then rejected.
-///
-/// No `Debug`, no `Clone`: it holds a signing key.
-pub struct ChunkVerification {
-    key: rustfs_gateway_sig::SigningKey,
-    scope_line: String,
-    amz_date: String,
-}
-
-impl ChunkVerification {
-    /// Publishes the derived key and the scope the chunk chain is dated with.
-    #[must_use]
-    pub fn new(key: rustfs_gateway_sig::SigningKey, scope_line: String, amz_date: String) -> Self {
-        Self {
-            key,
-            scope_line,
-            amz_date,
-        }
-    }
-
-    /// The derived `k_signing`, as the fixed-width value the chunk signer takes.
-    ///
-    /// `None` when the key is not the 32 bytes SigV4 produces, which is a defect in whatever built
-    /// it rather than a property of the request — the caller refuses instead of padding.
-    #[must_use]
-    pub fn chunk_signing_key(&self) -> Option<rustfs_gateway_http::ChunkSigningKey> {
-        let bytes: [u8; 32] = self.key.expose().try_into().ok()?;
-        Some(rustfs_gateway_http::ChunkSigningKey::from_derived(bytes))
-    }
-
-    /// The credential scope line, `<date>/<region>/<service>/aws4_request`.
-    #[must_use]
-    pub fn scope_line(&self) -> &str {
-        &self.scope_line
-    }
-
-    /// The `x-amz-date` the string-to-sign is dated with.
-    #[must_use]
-    pub fn amz_date(&self) -> &str {
-        &self.amz_date
-    }
-}
-
-/// Where an [`Authenticator`] leaves a [`ChunkVerification`] for the body reader to collect.
-///
-/// Write-once: a second publication would mean two answers to "what key verifies this body", and
-/// the reader has no way to choose between them. [`ChunkSink::publish`] silently keeps the first,
-/// because the alternative — a panic on a path an extension point controls — turns an
-/// implementation bug into an availability bug.
-///
-/// # Security
-///
-/// The default sink contains no chunk-verification material. It cannot make a streaming body
-/// verifiable until an authenticator explicitly publishes that material.
-#[derive(Default)]
-pub struct ChunkSink {
-    slot: std::sync::OnceLock<ChunkVerification>,
-}
-
-impl ChunkSink {
-    /// An empty sink.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            slot: std::sync::OnceLock::new(),
-        }
-    }
-
-    /// Publishes the material, if nothing has been published yet.
-    pub fn publish(&self, material: ChunkVerification) {
-        let _ = self.slot.set(material);
-    }
-
-    /// What was published, if anything.
-    #[must_use]
-    pub fn get(&self) -> Option<&ChunkVerification> {
-        self.slot.get()
-    }
-}
-
-impl core::fmt::Debug for ChunkSink {
-    /// Reports only whether it is filled. The contents are a signing key.
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("ChunkSink")
-            .field("published", &self.slot.get().is_some())
-            .finish()
-    }
-}
+#[path = "authenticator_chunk.rs"]
+mod chunk;
+pub use chunk::{ChunkSink, ChunkVerification};
 
 /// One request the security floor has admitted, with everything an authenticator needs to
 /// reconstruct what was signed.
@@ -565,6 +464,13 @@ impl SigV4Authenticator {
     /// A verdict, a rejection, or (under the switch) the store outage `VerificationFailure::Unavailable`.
     async fn try_verify(&self, request: &Authentication<'_>) -> Result<VerifiedWithSecret, VerificationFailure> {
         let sealed = request.sealed();
+        if sealed.marker().family() == SigFamily::V4a {
+            return self.try_verify_sigv4a(request).await;
+        }
+        // Cross-algorithm refusal: SigV4 HMAC cannot pair with ECDSA P-256 streaming chunks.
+        if request.payload().is_ecdsa_streaming() {
+            return Err(AuthError::AuthorizationHeaderMalformed.into());
+        }
         let view = sealed.view();
         let location = sealed.marker().location();
         let service = sealed.expected_service();
@@ -792,6 +698,8 @@ impl From<AuthError> for VerificationFailure {
 #[path = "authenticator_presented.rs"]
 mod presented;
 use presented::Presented;
+#[path = "authenticator_sigv4a.rs"]
+mod sigv4a;
 #[path = "authenticator_sts_body.rs"]
 mod sts_body;
 

@@ -112,6 +112,9 @@ mod signature;
 mod signed_headers;
 mod signed_headers_legacy;
 mod signer;
+mod sigv4a;
+mod sigv4a_derive;
+mod sigv4a_signer;
 pub mod timing;
 mod verdict;
 mod verifier;
@@ -181,6 +184,13 @@ pub use signer::{
     SigningRequest, SigningScope, TRAILER_ALGORITHM, Tamper, TamperComponent, TimestampHeader, X_AMZ_CONTENT_SHA256_HEADER_NAME,
     X_AMZ_DECODED_CONTENT_LENGTH_HEADER_NAME, X_AMZ_TRAILER_HEADER_NAME,
 };
+pub use sigv4a::{
+    EcdsaDerSignature, PresentedRegionSet, SIGV4A_CHUNK_ALGORITHM, SIGV4A_MAX_DER_LEN, SIGV4A_MIN_DER_LEN, SIGV4A_PADDED_HEX_LEN,
+    SIGV4A_TRAILER_ALGORITHM, SigV4aAuthorization, SigV4aCredentialScope, SigV4aPresignedParams, VerifiedSigV4aScope,
+    X_AMZ_REGION_SET, X_AMZ_REGION_SET_HEADER, enforce_sigv4a_scope,
+};
+pub use sigv4a_derive::{SigV4aVerifyingKey, verify_sigv4a_signature};
+pub use sigv4a_signer::{SigV4aChunkSigner, SigV4aSigner};
 pub use verdict::{
     AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, IdentityOrigin, SessionBinding,
     SessionBindingError, Verdict,

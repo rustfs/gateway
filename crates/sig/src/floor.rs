@@ -77,6 +77,7 @@ pub(crate) use crate::presigned_expiry::enforce_presign_expiry;
 use crate::query::{RawQuery, X_AMZ_SIGNATURE, percent_decode};
 use crate::scheme::{SigFamily, SigLocation};
 use crate::sig_v2::{SIGV2_EXPIRES_PARAM, SealedSigV2, SigV2Mode, SigV2Policy};
+use crate::sigv4a::{X_AMZ_REGION_SET, X_AMZ_REGION_SET_HEADER};
 use crate::timing::FailureFloor;
 use crate::verdict::{AnonymousAck, AuthError, CredentialPresence, Verdict};
 use crate::verifier::{
@@ -101,7 +102,7 @@ const X_AMZ_CONTENT_SHA256_HEADER: &str = "x-amz-content-sha256";
 ///
 /// A server that reads the first occurrence and a proxy that reads the last disagree about what
 /// was signed, which is a parameter-smuggling bypass (s3s#176, open with a security label).
-const SIGNED_QUERY_PARAMS: [&str; 11] = [
+const SIGNED_QUERY_PARAMS: [&str; 12] = [
     X_AMZ_ALGORITHM,
     X_AMZ_CREDENTIAL,
     X_AMZ_DATE,
@@ -110,21 +111,20 @@ const SIGNED_QUERY_PARAMS: [&str; 11] = [
     X_AMZ_SIGNATURE,
     X_AMZ_SECURITY_TOKEN,
     X_AMZ_S3SESSION_TOKEN,
+    X_AMZ_REGION_SET,
     AWS_ACCESS_KEY_ID_PARAM,
     SIGV2_SIGNATURE_PARAM,
-    // SigV2's own expiry parameter. It is not `X-Amz-Expires` under another name: it is an
-    // absolute instant, it is inside SigV2's string-to-sign, and until the SigV2 verifier was
-    // wired nothing read it, so nothing noticed it was missing from this list.
     SIGV2_EXPIRES_PARAM,
 ];
 
 /// Every header that carries part of a signature, and must therefore appear at most once.
-const SIGNED_HEADERS: [&str; 5] = [
+const SIGNED_HEADERS: [&str; 6] = [
     AUTHORIZATION_HEADER,
     X_AMZ_DATE_HEADER,
     "x-amz-content-sha256",
     X_AMZ_SECURITY_TOKEN_HEADER,
     X_AMZ_S3SESSION_TOKEN_HEADER,
+    X_AMZ_REGION_SET_HEADER,
 ];
 
 /// Every POST form field that carries part of a signature.

@@ -35,8 +35,9 @@
 
 use super::SecurityFloor;
 use crate::floor::WireView;
+use crate::parse::X_AMZ_ALGORITHM;
 use crate::query::X_AMZ_SIGNATURE;
-use crate::scheme::{SigFamily, SigLocation};
+use crate::scheme::{ALGORITHM_SIGV4A, SigFamily, SigLocation};
 use crate::verifier::{AUTHORIZATION_HEADER, AwsCredentialMarker, SIGV2_SIGNATURE_PARAM, detect_aws_credential_marker};
 
 /// Which requests the floor treats as AWS-signed.
@@ -94,9 +95,19 @@ impl SecurityFloor {
         let (family, location) = if view.query_contains(SIGV2_SIGNATURE_PARAM) {
             (SigFamily::V2, SigLocation::Query)
         } else if view.query_contains(X_AMZ_SIGNATURE) {
-            (SigFamily::V4, SigLocation::Query)
+            let family = if view.query().decoded_value(X_AMZ_ALGORITHM).ok().flatten().as_deref() == Some(ALGORITHM_SIGV4A) {
+                SigFamily::V4a
+            } else {
+                SigFamily::V4
+            };
+            (family, SigLocation::Query)
         } else if view.form_contains("x-amz-signature") {
-            (SigFamily::V4, SigLocation::FormField)
+            let family = if view.form_value("x-amz-algorithm") == Some(ALGORITHM_SIGV4A) {
+                SigFamily::V4a
+            } else {
+                SigFamily::V4
+            };
+            (family, SigLocation::FormField)
         } else if view.form_contains("signature") {
             (SigFamily::V2, SigLocation::FormField)
         } else {

@@ -80,7 +80,10 @@ impl SignedLength {
     /// What a SigV4 signature at `location` declaring `payload`, and owing `digest`, demands.
     pub(crate) fn of(location: SigLocation, payload: &PayloadMode, digest: BodyDigestObligation) -> Self {
         let demanded = match (location, payload) {
-            (_, PayloadMode::StreamingSigned { .. } | PayloadMode::StreamingUnsigned { .. }) => false,
+            (
+                _,
+                PayloadMode::StreamingSigned { .. } | PayloadMode::StreamingEcdsa { .. } | PayloadMode::StreamingUnsigned { .. },
+            ) => false,
             (SigLocation::Header, PayloadMode::ExactSha256(_) | PayloadMode::Base64Sha256(_) | PayloadMode::Unsigned) => true,
             (SigLocation::Query, _) => digest != BodyDigestObligation::None,
             _ => false,

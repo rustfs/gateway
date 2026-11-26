@@ -66,6 +66,8 @@ mod ingest_legacy_refusals;
 mod ingest_legacy_trailers;
 #[path = "ingest_perf_gates.rs"]
 mod ingest_perf_gates;
+#[path = "ingest_sigv4a.rs"]
+mod ingest_sigv4a;
 #[path = "ingest_verify.rs"]
 mod ingest_verify;
 #[path = "reject_wording.rs"]

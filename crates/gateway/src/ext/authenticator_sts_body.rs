@@ -67,7 +67,7 @@ impl<'a> Authentication<'a> {
         self.sealed().marker().location() == SigLocation::Header
             && (self.sts_body.as_ref().is_some_and(|reading| reading.signed.get().is_some())
                 || self.payload().digest().is_some()
-                || matches!(self.payload(), PayloadMode::StreamingSigned { .. }))
+                || matches!(self.payload(), PayloadMode::StreamingSigned { .. } | PayloadMode::StreamingEcdsa { .. }))
     }
     /// The verified SHA-256 digest of a bounded STS or S3 Vectors body hashed when
     /// `x-amz-content-sha256` was absent, once the signature comparison over that digest succeeded.

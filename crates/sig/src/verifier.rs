@@ -73,7 +73,7 @@ use crate::clock::{ClockChecked, PresignExpiry, RequestNow};
 use crate::floor::WireView;
 use crate::parse::{X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL};
 use crate::query::X_AMZ_SIGNATURE;
-use crate::scheme::{ALGORITHM_SIGV2_PREFIX, SigFamily, SigLocation, SigService};
+use crate::scheme::{ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4A, SigFamily, SigLocation, SigService};
 use crate::verdict::{CredentialPresence, Verdict};
 
 /// SigV2's presigned access-key parameter, and its POST-form spelling.
@@ -120,11 +120,14 @@ impl AwsCredentialMarker {
 #[must_use]
 pub fn detect_aws_credential_marker(view: &WireView<'_>) -> Option<AwsCredentialMarker> {
     if let Some(value) = view.headers().get(AUTHORIZATION_HEADER) {
-        let family = if value.as_bytes().starts_with(b"AWS4-") {
-            SigFamily::V4
-        } else if value.as_bytes().starts_with(ALGORITHM_SIGV2_PREFIX.as_bytes())
-            && value.as_bytes().get(ALGORITHM_SIGV2_PREFIX.len()) == Some(&b' ')
+        let bytes = value.as_bytes();
+        let family = if bytes == ALGORITHM_SIGV4A.as_bytes()
+            || (bytes.starts_with(ALGORITHM_SIGV4A.as_bytes()) && bytes.get(ALGORITHM_SIGV4A.len()) == Some(&b' '))
         {
+            SigFamily::V4a
+        } else if bytes.starts_with(b"AWS4-") {
+            SigFamily::V4
+        } else if bytes.starts_with(ALGORITHM_SIGV2_PREFIX.as_bytes()) && bytes.get(ALGORITHM_SIGV2_PREFIX.len()) == Some(&b' ') {
             SigFamily::V2
         } else {
             // Unrecognised, and still AWS-marked: an `Authorization` header is never routed to a
@@ -139,8 +142,13 @@ pub fn detect_aws_credential_marker(view: &WireView<'_>) -> Option<AwsCredential
 
     for name in [X_AMZ_ALGORITHM, X_AMZ_SIGNATURE, X_AMZ_CREDENTIAL] {
         if view.query_contains(name) {
+            let family = if view.query().decoded_value(X_AMZ_ALGORITHM).ok().flatten().as_deref() == Some(ALGORITHM_SIGV4A) {
+                SigFamily::V4a
+            } else {
+                SigFamily::V4
+            };
             return Some(AwsCredentialMarker {
-                family: SigFamily::V4,
+                family,
                 location: SigLocation::Query,
             });
         }
@@ -154,8 +162,13 @@ pub fn detect_aws_credential_marker(view: &WireView<'_>) -> Option<AwsCredential
 
     for name in ["x-amz-algorithm", "x-amz-signature", "x-amz-credential"] {
         if view.form_contains(name) {
+            let family = if view.form_value("x-amz-algorithm") == Some(ALGORITHM_SIGV4A) {
+                SigFamily::V4a
+            } else {
+                SigFamily::V4
+            };
             return Some(AwsCredentialMarker {
-                family: SigFamily::V4,
+                family,
                 location: SigLocation::FormField,
             });
         }
@@ -450,6 +463,10 @@ impl<'a> SealedAws<'a> {
     /// `None` for anything that is not presigned, and for a presigned request whose signature
     /// parameter is unreadable — such a request is about to be rejected anyway.
     ///
+    /// For SigV4a (`AWS4-ECDSA-P256-SHA256`), the ASN.1 DER signature is normalized to canonical
+    /// low-S before hashing so `(r, s)` and its malleable twin `(r, n - s)` map to the exact same
+    /// [`ReplayFingerprint`].
+    ///
     /// A digest rather than the signature itself, so that a store operated outside this process
     /// never receives signature bytes.
     #[must_use]
@@ -460,7 +477,13 @@ impl<'a> SealedAws<'a> {
         let presented = self.view.query().decoded_value(X_AMZ_SIGNATURE).ok()??;
         let mut hasher = Sha256::new();
         hasher.update(self.clock.signed_at().as_str().as_bytes());
-        hasher.update(presented.as_bytes());
+        if self.marker.family() == crate::SigFamily::V4a {
+            let parsed = crate::sigv4a::EcdsaDerSignature::parse_hex(&presented).ok()?;
+            let canonical = crate::sigv4a_derive::canonical_low_s_der(parsed.as_der_bytes())?;
+            hasher.update(canonical.as_bytes());
+        } else {
+            hasher.update(presented.as_bytes());
+        }
         Some(ReplayFingerprint(hasher.finalize().into()))
     }
 }

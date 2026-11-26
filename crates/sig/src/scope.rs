@@ -76,6 +76,14 @@ impl ScopeRegion {
 pub struct ScopeRejection(Option<ScopeRegion>);
 
 impl ScopeRejection {
+    pub(crate) const fn none() -> Self {
+        Self(None)
+    }
+
+    pub(crate) fn first_configured_region(expected: &ExpectedScope<'_>) -> Self {
+        Self(expected.regions().regions.first().cloned())
+    }
+
     /// The configured remediation region for a region mismatch.
     ///
     /// Date and service mismatches deliberately return `None`.
@@ -255,7 +263,7 @@ impl<'a> ExpectedScope<'a> {
     }
 
     /// Whether [`enforce_scope`] admits a scope naming `service` under this expectation.
-    fn admits_service(&self, service: &str) -> bool {
+    pub(crate) fn admits_service(&self, service: &str) -> bool {
         match self.services {
             // Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies an `s3`, `sts` or
             // `s3tables` scope on every operation, so a signature minted for one of those services
@@ -269,7 +277,7 @@ impl<'a> ExpectedScope<'a> {
     }
 
     /// Whether [`enforce_scope`] admits `region` under this expectation.
-    fn admits_region(&self, region: &str) -> bool {
+    pub(crate) fn admits_region(&self, region: &str) -> bool {
         let in_grammar = if self.any_length {
             RegionSet::is_region_name_of_any_length(region)
         } else {

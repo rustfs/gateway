@@ -56,7 +56,7 @@ use smallvec::SmallVec;
 
 use crate::ingest::ChunkFraming;
 use crate::ingest::DecodedLength;
-use crate::ingest::decoder::{ChunkDecoder, DecodeEvent, MIN_CHUNK_META_BYTES};
+use crate::ingest::decoder::{ChunkAuth, ChunkDecoder, DecodeEvent, MIN_CHUNK_META_BYTES};
 use crate::ingest::reject::{ChunkReject, ModeConfusion};
 use crate::ingest::signer::ChunkSigner;
 use crate::ingest::trailer::{TrailerDeclaration, TrailerProgress, parse_trailer_section};
@@ -173,6 +173,11 @@ impl<R> IngestPipeline<R> {
         if framing.has_chunk_signatures() != signer.is_some() {
             return Err(ChunkReject::SignatureChainBroken { chunk_index: 0 });
         }
+        if let Some(active) = signer.as_ref()
+            && active.is_ecdsa() != framing.has_ecdsa_chunk_signatures()
+        {
+            return Err(ChunkReject::SignatureChainBroken { chunk_index: 0 });
+        }
 
         let meta = usize::from(limits.max_chunk_meta_size());
         let chunk = usize::try_from(limits.max_chunk_size()).unwrap_or(usize::MAX);
@@ -185,7 +190,13 @@ impl<R> IngestPipeline<R> {
 
         Ok(Self {
             inner,
-            decoder: ChunkDecoder::new(framing.has_chunk_signatures(), framing.declares_trailers(), declared.get(), limits),
+            decoder: ChunkDecoder::new(
+                framing.has_chunk_signatures(),
+                framing.has_ecdsa_chunk_signatures(),
+                framing.declares_trailers(),
+                declared.get(),
+                limits,
+            ),
             signer,
             observers,
             framing,
@@ -393,9 +404,9 @@ impl<R> IngestPipeline<R> {
     }
 
     /// Verifies the chunk that has just ended and promotes its bytes to deliverable.
-    fn end_chunk(&mut self, signature: Option<[u8; 32]>) -> Result<(), ChunkReject> {
+    fn end_chunk(&mut self, signature: Option<ChunkAuth>) -> Result<(), ChunkReject> {
         match (self.signer.as_mut(), signature) {
-            (Some(signer), Some(presented)) => signer.verify_chunk(&presented)?,
+            (Some(signer), Some(presented)) => signer.verify_chunk_auth(&presented)?,
             (None, None) => {}
             // The decoder's extension whitelist already refuses these, so reaching here would be
             // a decoder bug; failing closed keeps it from becoming a verification bypass.
@@ -511,7 +522,7 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 }
                 Poll::Ready(Ok(()))
             }
-            DecodeEvent::ChunkEnd { signature, .. } => match self.end_chunk(signature) {
+            DecodeEvent::ChunkEnd { signature } => match self.end_chunk(signature) {
                 Ok(()) => Poll::Ready(Ok(())),
                 Err(reject) => Poll::Ready(Err(self.fail(reject))),
             },

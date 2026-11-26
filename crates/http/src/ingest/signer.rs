@@ -49,7 +49,12 @@ use smallvec::SmallVec;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
+use crate::ingest::decoder::ChunkAuth;
 use crate::ingest::reject::ChunkReject;
+use crate::ingest::signer_ecdsa::{
+    ChunkVerifyingKey, ECDSA_CHUNK_STRING_TO_SIGN_PREFIX, ECDSA_TRAILER_STRING_TO_SIGN_PREFIX, EcdsaChunkSeed, EcdsaDerFrame,
+    MAX_ECDSA_DER_HEX_BYTES,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -64,8 +69,9 @@ const AMZ_DATE_BYTES: usize = 16;
 
 /// The string-to-sign buffer size.
 ///
-/// 25 (`AWS4-HMAC-SHA256-PAYLOAD\n`) + 17 (date) + 81 (scope) + 65 + 65 + 64 = 317, rounded up.
-const STRING_TO_SIGN_CAPACITY: usize = 320;
+/// Covers both SigV4 (317 bytes max) and SigV4a (31 + 17 + 81 + 145 + 65 + 64 = 403 bytes max),
+/// rounded up to 512 bytes on the stack.
+const STRING_TO_SIGN_CAPACITY: usize = 512;
 
 /// Lowercase hex SHA-256 of the empty byte string, which is the payload hash of every chunk's
 /// (absent) canonical request.
@@ -381,14 +387,27 @@ impl ChunkScope {
     }
 }
 
+/// Which cryptographic chain drives one [`ChunkSigner`].
+enum ChainMode {
+    Hmac {
+        key: ChunkSigningKey,
+        previous: [u8; 32],
+    },
+    Ecdsa {
+        key: ChunkVerifyingKey,
+        previous_hex: [u8; MAX_ECDSA_DER_HEX_BYTES],
+        previous_hex_len: u8,
+    },
+}
+
 /// The running payload hash and the chained chunk verification.
 ///
-/// One instance per request. It holds the derived key, hashes each run of decoded bytes as the
-/// decoder produces it, and verifies one chunk with one HMAC and one constant-time comparison.
+/// One instance per request. It holds either a derived SigV4 HMAC signing key or a SigV4a public
+/// P-256 verifying key, hashes each run of decoded bytes as the decoder produces it, and verifies
+/// each chunk and optional signed trailer on a stack-resident string-to-sign buffer.
 pub struct ChunkSigner {
-    key: ChunkSigningKey,
+    mode: ChainMode,
     scope: ChunkScope,
-    previous: [u8; 32],
     hasher: Sha256,
     hashed_bytes: u64,
     hmac_calls: u64,
@@ -396,18 +415,42 @@ pub struct ChunkSigner {
 }
 
 impl ChunkSigner {
-    /// Builds a signer over an already-derived key, seeded by the request signature.
+    /// Builds a SigV4 HMAC signer over an already-derived key, seeded by the request signature.
     #[must_use]
     pub fn new(key: ChunkSigningKey, scope: ChunkScope, seed: ChunkSeed) -> Self {
         Self {
-            key,
+            mode: ChainMode::Hmac { key, previous: seed.0 },
             scope,
-            previous: seed.0,
             hasher: Sha256::new(),
             hashed_bytes: 0,
             hmac_calls: 0,
             chunk_index: 0,
         }
+    }
+
+    /// Builds a SigV4a ECDSA P-256 signer over a public verifying key, seeded by the verified
+    /// request-head ASN.1 DER signature.
+    #[must_use]
+    pub fn new_ecdsa(key: ChunkVerifyingKey, scope: ChunkScope, seed: EcdsaChunkSeed) -> Self {
+        let (previous_hex, previous_hex_len) = seed.into_parts();
+        Self {
+            mode: ChainMode::Ecdsa {
+                key,
+                previous_hex,
+                previous_hex_len,
+            },
+            scope,
+            hasher: Sha256::new(),
+            hashed_bytes: 0,
+            hmac_calls: 0,
+            chunk_index: 0,
+        }
+    }
+
+    /// Whether this signer verifies ECDSA P-256 (SigV4a) chunk chains rather than HMAC-SHA256.
+    #[must_use]
+    pub const fn is_ecdsa(&self) -> bool {
+        matches!(self.mode, ChainMode::Ecdsa { .. })
     }
 
     /// Adds one run of decoded chunk bytes to the running payload hash.
@@ -422,7 +465,8 @@ impl ChunkSigner {
         self.hashed_bytes = self.hashed_bytes.saturating_add(bytes.len() as u64);
     }
 
-    /// Verifies the signature of the chunk that has just ended, and advances the chain.
+    /// Verifies the SigV4 HMAC-SHA256 signature of the chunk that has just ended, and advances the
+    /// chain.
     ///
     /// # Errors
     ///
@@ -430,55 +474,80 @@ impl ChunkSigner {
     /// never carries either signature: "expected versus actual" in an authentication failure is a
     /// signing oracle.
     pub fn verify_chunk(&mut self, presented: &[u8; 32]) -> Result<(), ChunkReject> {
+        self.verify_chunk_auth(&ChunkAuth::Hmac(*presented))
+    }
+
+    /// Verifies a parsed HMAC or ECDSA DER chunk tag against this signer's active algorithm mode.
+    pub(crate) fn verify_chunk_auth(&mut self, presented: &ChunkAuth) -> Result<(), ChunkReject> {
         let chunk_index = self.chunk_index;
         let digest: [u8; 32] = core::mem::take(&mut self.hasher).finalize().into();
 
-        let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
-        let len = self
-            .write_string_to_sign(&digest, &mut buf)
-            .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
-        let signed = buf.get(..len).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+        match (&mut self.mode, presented) {
+            (ChainMode::Hmac { key, previous }, ChunkAuth::Hmac(presented_bytes)) => {
+                let mut prev_hex = [0u8; 64];
+                write_hex_lower(previous, &mut prev_hex).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
+                let len = write_chunk_sts(CHUNK_STRING_TO_SIGN_PREFIX, &self.scope, &prev_hex, &digest, &mut buf)
+                    .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+                let signed = buf.get(..len).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
 
-        let expected = hmac_sha256(self.key.expose(), signed);
-        self.hmac_calls = self.hmac_calls.saturating_add(1);
+                let expected = hmac_sha256(key.expose(), signed);
+                self.hmac_calls = self.hmac_calls.saturating_add(1);
 
-        // Constant time, over the raw 32 bytes. Comparing hex would cost an encoding per chunk
-        // and would compare twice as many bytes for no additional strength.
-        let matched: bool = expected.ct_eq(presented).into();
-        if !matched {
-            return Err(ChunkReject::SignatureChainBroken { chunk_index });
+                let matched: bool = expected.ct_eq(presented_bytes).into();
+                if !matched {
+                    return Err(ChunkReject::SignatureChainBroken { chunk_index });
+                }
+
+                *previous = expected;
+                self.chunk_index = self.chunk_index.saturating_add(1);
+                Ok(())
+            }
+            (
+                ChainMode::Ecdsa {
+                    key,
+                    previous_hex,
+                    previous_hex_len,
+                },
+                ChunkAuth::Ecdsa(frame),
+            ) => {
+                let prev_slice = previous_hex
+                    .get(..usize::from(*previous_hex_len))
+                    .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
+                let len = write_chunk_sts(ECDSA_CHUNK_STRING_TO_SIGN_PREFIX, &self.scope, prev_slice, &digest, &mut buf)
+                    .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+                let signed = buf.get(..len).ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+                if !key.verify_der(signed, frame.as_bytes()) {
+                    return Err(ChunkReject::SignatureChainBroken { chunk_index });
+                }
+                let next_len = frame
+                    .write_hex_lower(previous_hex)
+                    .ok_or(ChunkReject::SignatureChainBroken { chunk_index })?;
+                *previous_hex_len = u8::try_from(next_len).map_err(|_| ChunkReject::SignatureChainBroken { chunk_index })?;
+                self.chunk_index = self.chunk_index.saturating_add(1);
+                Ok(())
+            }
+            _ => Err(ChunkReject::SignatureChainBroken { chunk_index }),
         }
-
-        self.previous = expected;
-        self.chunk_index = self.chunk_index.saturating_add(1);
-        Ok(())
     }
 
-    /// Verifies the final HMAC over the canonical trailing checksum header.
+    /// Verifies the final HMAC or ECDSA signature over the canonical trailing checksum header.
     ///
-    /// The terminal zero-sized chunk has already advanced `previous`, so this comparison is
+    /// The terminal zero-sized chunk has already advanced `previous`, so this verification is
     /// chained from that signature. The signature field itself is excluded from the canonical
     /// block; every remaining field is written as `name:value\n`.
     ///
     /// # Errors
     ///
     /// [`ChunkReject::TrailerSignatureMissing`] when the field is absent and
-    /// [`ChunkReject::TrailerSignatureMismatch`] when its spelling or HMAC is wrong.
+    /// [`ChunkReject::TrailerSignatureMismatch`] when its spelling or signature is wrong.
     pub(crate) fn verify_trailer(&mut self, trailers: &rustfs_gateway_stream::TrailingHeaders) -> Result<(), ChunkReject> {
-        let presented = trailers
+        let raw_trailer_sig = trailers
             .as_header_map()
             .get(TRAILER_SIGNATURE_HEADER)
-            .and_then(|value| decode_hex_lower_32(value.as_bytes()))
-            .ok_or_else(|| {
-                if trailers.as_header_map().contains_key(TRAILER_SIGNATURE_HEADER) {
-                    ChunkReject::TrailerSignatureMismatch
-                } else {
-                    ChunkReject::TrailerSignatureMissing
-                }
-            })?;
+            .ok_or(ChunkReject::TrailerSignatureMissing)?;
 
-        // Every field but the signature, ordered by name, as legacy RustFS canonicalises a section
-        // that carries undeclared fields; equal names keep their arrival order.
         let mut fields: SmallVec<[(&HeaderName, &HeaderValue); 2]> = trailers
             .iter()
             .filter(|(name, _)| name.as_str() != TRAILER_SIGNATURE_HEADER)
@@ -495,20 +564,50 @@ impl ChunkSigner {
             Digest::update(&mut canonical, b"\n");
         }
         let digest: [u8; 32] = canonical.finalize().into();
-        let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
-        let len = self
-            .write_trailer_string_to_sign(&digest, &mut buf)
-            .ok_or(ChunkReject::TrailerSignatureMismatch)?;
-        let signed = buf.get(..len).ok_or(ChunkReject::TrailerSignatureMismatch)?;
-        let expected = hmac_sha256(self.key.expose(), signed);
-        self.hmac_calls = self.hmac_calls.saturating_add(1);
 
-        let matched: bool = expected.ct_eq(&presented).into();
-        if !matched {
-            return Err(ChunkReject::TrailerSignatureMismatch);
+        match &mut self.mode {
+            ChainMode::Hmac { key, previous } => {
+                let presented = decode_hex_lower_32(raw_trailer_sig.as_bytes()).ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let mut prev_hex = [0u8; 64];
+                write_hex_lower(previous, &mut prev_hex).ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
+                let len = write_trailer_sts(TRAILER_STRING_TO_SIGN_PREFIX, &self.scope, &prev_hex, &digest, &mut buf)
+                    .ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let signed = buf.get(..len).ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let expected = hmac_sha256(key.expose(), signed);
+                self.hmac_calls = self.hmac_calls.saturating_add(1);
+
+                let matched: bool = expected.ct_eq(&presented).into();
+                if !matched {
+                    return Err(ChunkReject::TrailerSignatureMismatch);
+                }
+                *previous = expected;
+                Ok(())
+            }
+            ChainMode::Ecdsa {
+                key,
+                previous_hex,
+                previous_hex_len,
+            } => {
+                let frame =
+                    EcdsaDerFrame::parse_wire_hex(raw_trailer_sig.as_bytes()).ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let prev_slice = previous_hex
+                    .get(..usize::from(*previous_hex_len))
+                    .ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
+                let len = write_trailer_sts(ECDSA_TRAILER_STRING_TO_SIGN_PREFIX, &self.scope, prev_slice, &digest, &mut buf)
+                    .ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                let signed = buf.get(..len).ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                if !key.verify_der(signed, frame.as_bytes()) {
+                    return Err(ChunkReject::TrailerSignatureMismatch);
+                }
+                let next_len = frame
+                    .write_hex_lower(previous_hex)
+                    .ok_or(ChunkReject::TrailerSignatureMismatch)?;
+                *previous_hex_len = u8::try_from(next_len).map_err(|_| ChunkReject::TrailerSignatureMismatch)?;
+                Ok(())
+            }
         }
-        self.previous = expected;
-        Ok(())
     }
 
     /// How many chunks have been verified so far.
@@ -532,63 +631,70 @@ impl ChunkSigner {
     pub fn hashed_bytes(&self) -> u64 {
         self.hashed_bytes
     }
+}
 
-    /// Writes the chunk string-to-sign into `out` and returns its length.
-    ///
-    /// Entirely on the stack, and every write is bounds-checked: a request performs zero
-    /// allocations for its 81,920 chunk signatures.
-    fn write_string_to_sign(&self, chunk_digest: &[u8; 32], out: &mut [u8; STRING_TO_SIGN_CAPACITY]) -> Option<usize> {
-        let mut at = 0usize;
-        let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
-            let end = at.checked_add(src.len())?;
-            out.get_mut(*at..end)?.copy_from_slice(src);
-            *at = end;
-            Some(())
-        };
+/// Writes one chunk string-to-sign into `out` entirely on the stack, for either HMAC or ECDSA.
+fn write_chunk_sts(
+    prefix: &[u8],
+    scope: &ChunkScope,
+    previous_hex: &[u8],
+    chunk_digest: &[u8; 32],
+    out: &mut [u8; STRING_TO_SIGN_CAPACITY],
+) -> Option<usize> {
+    let mut at = 0usize;
+    let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
+        let end = at.checked_add(src.len())?;
+        out.get_mut(*at..end)?.copy_from_slice(src);
+        *at = end;
+        Some(())
+    };
 
-        put(CHUNK_STRING_TO_SIGN_PREFIX, &mut at)?;
-        put(self.scope.amz_date.as_bytes(), &mut at)?;
-        put(b"\n", &mut at)?;
-        put(self.scope.scope_line.as_bytes(), &mut at)?;
-        put(b"\n", &mut at)?;
+    put(prefix, &mut at)?;
+    put(scope.amz_date.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(scope.scope_line.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(previous_hex, &mut at)?;
+    put(b"\n", &mut at)?;
+    put(EMPTY_SHA256_HEX, &mut at)?;
+    put(b"\n", &mut at)?;
 
-        let mut hex = [0u8; 64];
-        write_hex_lower(&self.previous, &mut hex)?;
-        put(&hex, &mut at)?;
-        put(b"\n", &mut at)?;
+    let mut hex = [0u8; 64];
+    write_hex_lower(chunk_digest, &mut hex)?;
+    put(&hex, &mut at)?;
 
-        put(EMPTY_SHA256_HEX, &mut at)?;
-        put(b"\n", &mut at)?;
+    Some(at)
+}
 
-        write_hex_lower(chunk_digest, &mut hex)?;
-        put(&hex, &mut at)?;
+/// Writes one trailer string-to-sign into `out` entirely on the stack, for either HMAC or ECDSA.
+fn write_trailer_sts(
+    prefix: &[u8],
+    scope: &ChunkScope,
+    previous_hex: &[u8],
+    trailer_digest: &[u8; 32],
+    out: &mut [u8; STRING_TO_SIGN_CAPACITY],
+) -> Option<usize> {
+    let mut at = 0usize;
+    let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
+        let end = at.checked_add(src.len())?;
+        out.get_mut(*at..end)?.copy_from_slice(src);
+        *at = end;
+        Some(())
+    };
 
-        Some(at)
-    }
+    put(prefix, &mut at)?;
+    put(scope.amz_date.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(scope.scope_line.as_bytes(), &mut at)?;
+    put(b"\n", &mut at)?;
+    put(previous_hex, &mut at)?;
+    put(b"\n", &mut at)?;
 
-    /// Writes the final trailer string-to-sign into `out` and returns its length.
-    fn write_trailer_string_to_sign(&self, trailer_digest: &[u8; 32], out: &mut [u8; STRING_TO_SIGN_CAPACITY]) -> Option<usize> {
-        let mut at = 0usize;
-        let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
-            let end = at.checked_add(src.len())?;
-            out.get_mut(*at..end)?.copy_from_slice(src);
-            *at = end;
-            Some(())
-        };
+    let mut hex = [0u8; 64];
+    write_hex_lower(trailer_digest, &mut hex)?;
+    put(&hex, &mut at)?;
 
-        put(TRAILER_STRING_TO_SIGN_PREFIX, &mut at)?;
-        put(self.scope.amz_date.as_bytes(), &mut at)?;
-        put(b"\n", &mut at)?;
-        put(self.scope.scope_line.as_bytes(), &mut at)?;
-        put(b"\n", &mut at)?;
-        let mut hex = [0u8; 64];
-        write_hex_lower(&self.previous, &mut hex)?;
-        put(&hex, &mut at)?;
-        put(b"\n", &mut at)?;
-        write_hex_lower(trailer_digest, &mut hex)?;
-        put(&hex, &mut at)?;
-        Some(at)
-    }
+    Some(at)
 }
 
 impl fmt::Debug for ChunkSigner {

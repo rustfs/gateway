@@ -64,9 +64,10 @@ use crate::codec::{append_hex_lower, encode_hex_lower};
 use crate::mode::CanonicalPayloadToken;
 use crate::parse::{AmzDate, CredentialScope, SCOPE_TERMINATOR};
 use crate::query::{QueryExclusion, RawQuery, percent_decode, percent_encode};
-use crate::scheme::{ALGORITHM_SIGV4, SigService};
+use crate::scheme::{ALGORITHM_SIGV4, ALGORITHM_SIGV4A, SigService};
 use crate::signed_headers::SignedHeaderSet;
 use crate::signed_headers_legacy;
+use crate::sigv4a::SigV4aCredentialScope;
 use crate::verdict::AuthError;
 
 /// Which spelling of the URI path a canonical request was built from.
@@ -562,6 +563,36 @@ impl CanonicalRequest {
         text.push_str(scope_date.as_str());
         text.push('/');
         text.push_str(scope.region());
+        text.push('/');
+        text.push_str(scope.service_name());
+        text.push('/');
+        text.push_str(SCOPE_TERMINATOR);
+        text.push('\n');
+        append_hex_lower(&mut text, &digest);
+        StringToSign { text }
+    }
+
+    /// Builds the four-line SigV4a string-to-sign (`AWS4-ECDSA-P256-SHA256`).
+    ///
+    /// Line three carries `<date>/<service>/aws4_request` without a single region; regions travel
+    /// in the signed `x-amz-region-set` header or `X-Amz-Region-Set` query parameter.
+    #[must_use]
+    pub fn string_to_sign_v4a(&self, date: &AmzDate, scope: &SigV4aCredentialScope) -> StringToSign {
+        let digest: [u8; 32] = Sha256::digest(self.text.as_bytes()).into();
+        let scope_date = scope.date();
+        let capacity = ALGORITHM_SIGV4A.len()
+            + date.as_str().len()
+            + scope_date.as_str().len()
+            + scope.service_name().len()
+            + SCOPE_TERMINATOR.len()
+            + digest.len() * 2
+            + 5;
+        let mut text = String::with_capacity(capacity);
+        text.push_str(ALGORITHM_SIGV4A);
+        text.push('\n');
+        text.push_str(date.as_str());
+        text.push('\n');
+        text.push_str(scope_date.as_str());
         text.push('/');
         text.push_str(scope.service_name());
         text.push('/');
