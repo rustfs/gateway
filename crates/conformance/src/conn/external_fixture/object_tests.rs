@@ -312,6 +312,7 @@ fn a_failed_object_put_is_not_owned() {
 
 #[test]
 fn a_partial_multi_object_prepare_cleans_only_owned_objects_in_reverse_order() {
+    const DELETE_TWO_ONE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 95\r\nConnection: close\r\n\r\n<DeleteResult><Deleted><Key>two</Key></Deleted><Deleted><Key>one</Key></Deleted></DeleteResult>";
     let (url, server) = fixture_server(vec![
         NOT_FOUND,
         OK,
@@ -321,8 +322,7 @@ fn a_partial_multi_object_prepare_cleans_only_owned_objects_in_reverse_order() {
         OK,
         NOT_FOUND,
         SERVER_ERROR,
-        NO_CONTENT,
-        NO_CONTENT,
+        DELETE_TWO_ONE,
         NO_CONTENT,
     ]);
     let mut target = target(std::path::PathBuf::from("."), &url);
@@ -339,11 +339,15 @@ fn a_partial_multi_object_prepare_cleans_only_owned_objects_in_reverse_order() {
         &lines(&requests)[7..],
         [
             "PUT /fixture-bucket/three HTTP/1.1",
-            "DELETE /fixture-bucket/two HTTP/1.1",
-            "DELETE /fixture-bucket/one HTTP/1.1",
+            "POST /fixture-bucket?delete HTTP/1.1",
             "DELETE /fixture-bucket HTTP/1.1",
         ]
     );
+    let delete_body = std::str::from_utf8(&requests[8]).expect("batch delete request is UTF-8");
+    let pos_two = delete_body.find("<Key>two</Key>").expect("owned key two is batched");
+    let pos_one = delete_body.find("<Key>one</Key>").expect("owned key one is batched");
+    assert!(pos_two < pos_one, "owned keys are batched in reverse creation order: {delete_body}");
+    assert!(!delete_body.contains("three"), "failed PUT must never be deleted: {delete_body}");
 }
 
 #[test]

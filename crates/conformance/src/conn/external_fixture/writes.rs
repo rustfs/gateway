@@ -131,10 +131,12 @@ impl Conn {
 
     /// Refuses a run with writes granted unless the endpoint lists no bucket: the cases assume a
     /// pristine server, and cleanup removes only what each case declares.
-    pub(crate) fn ensure_endpoint_empty(&self) -> Result<(), SutError> {
+    pub(crate) fn ensure_endpoint_empty(&mut self) -> Result<(), SutError> {
         const SHOWN: usize = 5;
         let region = super::region::FixtureRegion::parse(None)?;
-        let listing = self.fixture_control_observation("GET", "/", &region, &[], &[])?;
+        let listing = self.fixture_control_observation("GET", "/", &region, &[], &[]);
+        self.external_fixtures.clear_control_connection();
+        let listing = listing?;
         if listing.status != Some(200) {
             return Err(SutError::Environment(format!(
                 "`--allow-external-writes` needs an empty endpoint, but ListBuckets returned status {:?}",
@@ -166,7 +168,7 @@ impl Conn {
 
     /// Empties `bucket` of every upload, version and delete marker its listings show. A bucket
     /// that does not exist (declared absent and never created, or deleted by the case) is empty.
-    pub(super) fn empty_fixture_bucket(&self, bucket: &OwnedBucket) -> Result<(), SutError> {
+    pub(super) fn empty_fixture_bucket(&mut self, bucket: &OwnedBucket) -> Result<(), SutError> {
         for _ in 0..EMPTYING_ROUNDS {
             let uploads =
                 self.list_fixture_bucket(bucket, "uploads", b"ListMultipartUploadsResult", &[b"Upload"], b"UploadId")?;
@@ -203,7 +205,7 @@ impl Conn {
 
     /// The `(Key, id)` of every `items` entry a listing shows; a bucket that does not exist lists none.
     fn list_fixture_bucket(
-        &self,
+        &mut self,
         bucket: &OwnedBucket,
         query: &str,
         root: &[u8],

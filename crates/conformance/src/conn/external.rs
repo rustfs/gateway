@@ -81,6 +81,7 @@ impl Conn {
     }
 
     pub(super) fn exchange_external(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
+        self.external_fixtures.clear_control_connection();
         let endpoint = self
             .external
             .clone()
@@ -235,6 +236,146 @@ fn connection_closes(headers: &[(String, String)]) -> bool {
     headers.iter().any(|(name, value)| {
         name.eq_ignore_ascii_case("connection") && value.split(',').any(|token| token.trim().eq_ignore_ascii_case("close"))
     })
+}
+
+/// Outcome of one external fixture-control HTTP/1.1 exchange.
+pub(super) enum ControlExchangeOutcome {
+    /// A response or timeout completed; `torn_down` is true when the connection must not be reused.
+    Completed { observation: Observation, torn_down: bool },
+    /// The socket failed before any response head arrived; safe to retry once on a fresh socket
+    /// only when the caller reused an idle keep-alive connection for an idempotent control.
+    ClosedBeforeResponse { fallback: Result<Observation, SutError> },
+}
+
+/// Executes one unpaced external fixture-control exchange without paying the 250 ms post-exchange
+/// socket observation window needed only for authored `expect.connection_after` assertions.
+pub(super) fn execute_control_exchange(
+    connection: &mut Connection,
+    wire: &crate::inprocess::Wire,
+    head: &Head,
+    started: Instant,
+    deadline: Instant,
+) -> Result<ControlExchangeOutcome, SutError> {
+    connection.start_exchange();
+    if let Err(error) = connection.write_control(&head.bytes) {
+        let sut_error = SutError::Environment(format!("cannot write on the connection: {error}"));
+        return if is_stale_write_error(error.kind()) {
+            Ok(ControlExchangeOutcome::ClosedBeforeResponse {
+                fallback: Err(sut_error),
+            })
+        } else {
+            Err(sut_error)
+        };
+    }
+    if !wire.body.is_empty()
+        && let Err(error) = connection.write_control(&wire.body)
+    {
+        let sut_error = SutError::Environment(format!("cannot write on the connection: {error}"));
+        return if is_stale_write_error(error.kind()) {
+            Ok(ControlExchangeOutcome::ClosedBeforeResponse {
+                fallback: Err(sut_error),
+            })
+        } else {
+            Err(sut_error)
+        };
+    }
+    let read = match super::remaining(deadline) {
+        Ok(remaining) => connection.read_response_classified(&wire.method, remaining),
+        Err(_) => Err(ReadFailure::TimedOut),
+    };
+    let elapsed_ms = super::elapsed_ms(started);
+    match read {
+        Ok(response) => {
+            if (100..200).contains(&response.status) {
+                return Err(SutError::Environment(format!(
+                    "external endpoint returned informational status {}; consuming the following final response is not implemented",
+                    response.status
+                )));
+            }
+            let framed = response
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("content-length") || name.eq_ignore_ascii_case("transfer-encoding"));
+            if crate::socket::carries_a_body(&wire.method, response.status) && !framed {
+                return Err(SutError::Environment(
+                    "external endpoint returned a close-delimited response body; this target cannot observe it without consuming connection state"
+                        .to_owned(),
+                ));
+            }
+            let torn_down = connection_closes(&response.headers) || connection_closes(&wire.headers);
+            let (outcome, termination, before_error, events, event_note) =
+                super::classify_body(response.status, &response.headers, &response.body);
+            let notes = event_note.into_iter().collect();
+            let observation = Observation {
+                outcome,
+                stream_termination: termination,
+                status: Some(response.status),
+                http_version: Some("http/1.1".to_owned()),
+                h2_control_frames: None,
+                socket_read_after: None,
+                headers: response.headers,
+                trailers: Vec::new(),
+                body: response.body,
+                body_bytes_before_error: before_error,
+                request_body_bytes_sent_at_response: None,
+                request_body_fully_sent: Some(true),
+                ttfb_ms: None,
+                elapsed_ms,
+                harness_wait_ms: 0,
+                deadline_expiry: None,
+                connection_after: None,
+                events,
+                notes,
+            };
+            Ok(ControlExchangeOutcome::Completed { observation, torn_down })
+        }
+        Err(ReadFailure::TimedOut) => Ok(ControlExchangeOutcome::Completed {
+            observation: empty_control_observation(crate::observation::Outcome::Hang, elapsed_ms),
+            torn_down: true,
+        }),
+        Err(ReadFailure::Reset) => Ok(ControlExchangeOutcome::ClosedBeforeResponse {
+            fallback: Ok(empty_control_observation(crate::observation::Outcome::ConnectionReset, elapsed_ms)),
+        }),
+        Err(failure @ ReadFailure::ClosedBeforeHead) => Ok(ControlExchangeOutcome::ClosedBeforeResponse {
+            fallback: Err(SutError::Environment(format!(
+                "external endpoint did not send a complete HTTP/1.1 response: {failure}"
+            ))),
+        }),
+        Err(failure) => Err(SutError::Environment(format!(
+            "external endpoint did not send a complete HTTP/1.1 response: {failure}"
+        ))),
+    }
+}
+
+fn is_stale_write_error(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+    )
+}
+
+fn empty_control_observation(outcome: crate::observation::Outcome, elapsed_ms: u64) -> Observation {
+    Observation {
+        outcome,
+        stream_termination: None,
+        status: None,
+        http_version: None,
+        h2_control_frames: None,
+        socket_read_after: None,
+        headers: Vec::new(),
+        trailers: Vec::new(),
+        body: Vec::new(),
+        body_bytes_before_error: None,
+        request_body_bytes_sent_at_response: None,
+        request_body_fully_sent: Some(true),
+        ttfb_ms: None,
+        elapsed_ms,
+        harness_wait_ms: 0,
+        deadline_expiry: None,
+        connection_after: None,
+        events: Vec::new(),
+        notes: Vec::new(),
+    }
 }
 
 #[cfg(test)]

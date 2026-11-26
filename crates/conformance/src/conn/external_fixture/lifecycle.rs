@@ -42,6 +42,7 @@ impl Conn {
             return Err(SutError::Environment(reason));
         }
         self.connection = None;
+        self.external_fixtures.clear_control_connection();
         let Some(setup) = setup else {
             if self.external_fixtures.holds_anything() {
                 return Err(SutError::Environment(
@@ -212,6 +213,7 @@ impl Conn {
                 }
             }
         }
+        self.external_fixtures.clear_control_connection();
         Ok(captures)
     }
 
@@ -237,7 +239,6 @@ impl Conn {
     }
 
     fn cleanup_owned_external_fixtures(&mut self) -> Result<(), SutError> {
-        let mut failed_objects = Vec::new();
         let mut messages = Vec::new();
         let mut failed_uploads = Vec::new();
         while let Some(upload) = self.external_fixtures.owned_uploads.pop() {
@@ -283,20 +284,7 @@ impl Conn {
         }
         failed_versions.reverse();
         self.external_fixtures.owned_versions = failed_versions;
-        while let Some(object) = self.external_fixtures.owned_objects.pop() {
-            match self.fixture_control_status("DELETE", &object.target, &object.region, &[], &[]) {
-                Ok(204) => {}
-                Ok(status) => {
-                    messages.push(format!("DELETE for object `{}/{}` returned status {status}", object.bucket, object.key));
-                    failed_objects.push(object);
-                }
-                Err(error) => {
-                    messages.push(format!("DELETE for object `{}/{}` failed: {error}", object.bucket, object.key));
-                    failed_objects.push(object);
-                }
-            }
-        }
-        failed_objects.reverse();
+        let failed_objects = self.cleanup_owned_objects(&mut messages);
         let blocked_buckets = failed_objects
             .iter()
             .map(|object| object.bucket.clone())
@@ -344,6 +332,7 @@ impl Conn {
         }
         failed_buckets.reverse();
         self.external_fixtures.owned_buckets = failed_buckets;
+        self.external_fixtures.clear_control_connection();
         if messages.is_empty() {
             self.external_fixtures.active_case = None;
             return Ok(());
@@ -351,8 +340,8 @@ impl Conn {
         Err(SutError::Environment(format!("external fixture cleanup failed: {}", messages.join("; "))))
     }
 
-    fn fixture_control_status(
-        &self,
+    pub(super) fn fixture_control_status(
+        &mut self,
         method: &str,
         target: &str,
         region: &super::region::FixtureRegion,
@@ -363,8 +352,8 @@ impl Conn {
             .map(|(status, _)| status)
     }
 
-    fn fixture_control(
-        &self,
+    pub(super) fn fixture_control(
+        &mut self,
         method: &str,
         target: &str,
         region: &super::region::FixtureRegion,
@@ -379,7 +368,7 @@ impl Conn {
     }
 
     pub(super) fn fixture_control_observation(
-        &self,
+        &mut self,
         method: &str,
         target: &str,
         region: &super::region::FixtureRegion,
@@ -393,7 +382,7 @@ impl Conn {
         let wire = Wire {
             method: method.to_owned(),
             target: target.to_owned(),
-            headers: control_headers(body.len(), extra_headers),
+            headers: control_headers(body.len(), extra_headers, endpoint.is_tls()),
             raw_head: None,
             h2_frames: Vec::new(),
             http_version: None,
@@ -411,24 +400,47 @@ impl Conn {
         let deadline = started
             .checked_add(budget_of(None))
             .ok_or_else(|| SutError::Environment("external fixture control deadline cannot be represented".to_owned()))?;
-        let mut connection = endpoint.open(deadline)?;
-        let result = super::super::external::execute_socket_exchange(
-            &mut connection,
-            &wire,
-            &head,
-            started,
-            deadline,
-            !endpoint.is_tls(),
-        )?;
-        Ok(result.observation)
+        let (mut connection, reused) = match self.external_fixtures.control_connection.take() {
+            Some(connection) if !endpoint.is_tls() && connection.probe_reusable_cleartext() => (connection, true),
+            _ => (endpoint.open(deadline)?, false),
+        };
+        match super::super::external::execute_control_exchange(&mut connection, &wire, &head, started, deadline)? {
+            super::super::external::ControlExchangeOutcome::Completed { observation, torn_down } => {
+                if !torn_down && !endpoint.is_tls() {
+                    self.external_fixtures.control_connection = Some(connection);
+                }
+                Ok(observation)
+            }
+            super::super::external::ControlExchangeOutcome::ClosedBeforeResponse { fallback } => {
+                if !reused || !may_retry_stale_control(method, target, &self.external_fixtures) {
+                    return fallback;
+                }
+                let mut fresh = endpoint.open(deadline)?;
+                match super::super::external::execute_control_exchange(&mut fresh, &wire, &head, started, deadline)? {
+                    super::super::external::ControlExchangeOutcome::Completed { observation, torn_down } => {
+                        if !torn_down && !endpoint.is_tls() {
+                            self.external_fixtures.control_connection = Some(fresh);
+                        }
+                        Ok(observation)
+                    }
+                    super::super::external::ControlExchangeOutcome::ClosedBeforeResponse { fallback } => fallback,
+                }
+            }
+        }
     }
 }
 
-fn control_headers(body_len: usize, extra: &[(String, String)]) -> Vec<(String, String)> {
-    let mut headers = vec![
-        ("content-length".to_owned(), body_len.to_string()),
-        ("connection".to_owned(), "close".to_owned()),
-    ];
+fn may_retry_stale_control(method: &str, target: &str, fixtures: &super::ExternalFixtures) -> bool {
+    matches!(method, "GET" | "HEAD" | "DELETE")
+        || (method == "POST" && target.ends_with("?delete"))
+        || (method == "PUT" && !fixtures.is_versioned_object_target(target))
+}
+
+fn control_headers(body_len: usize, extra: &[(String, String)], close: bool) -> Vec<(String, String)> {
+    let mut headers = vec![("content-length".to_owned(), body_len.to_string())];
+    if close {
+        headers.push(("connection".to_owned(), "close".to_owned()));
+    }
     headers.extend_from_slice(extra);
     if body_len == 0
         && !headers

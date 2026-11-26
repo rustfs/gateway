@@ -24,9 +24,13 @@
 use std::collections::BTreeSet;
 
 use crate::inprocess::Wire;
+use crate::socket::Connection;
 use crate::sut::SutError;
 use crate::value::Value;
 
+mod batch_delete;
+#[cfg(test)]
+mod batch_delete_tests;
 pub(super) mod clock;
 #[cfg(test)]
 mod h2_guard_tests;
@@ -48,7 +52,6 @@ mod writes;
 #[cfg(test)]
 mod writes_tests;
 
-#[derive(Debug)]
 pub(super) struct ExternalFixtures {
     enabled: bool,
     /// The operator declared the endpoint disposable: authored writes are sent, and cleanup
@@ -59,6 +62,24 @@ pub(super) struct ExternalFixtures {
     owned_objects: Vec<object::OwnedObject>,
     owned_uploads: Vec<multipart::OwnedUpload>,
     owned_versions: Vec<versioned::OwnedVersion>,
+    /// Persistent HTTP/1.1 control socket reused across setup or cleanup requests, kept distinct
+    /// from `Conn::connection` and cleared before authored exchanges and after cleanup.
+    control_connection: Option<Connection>,
+}
+
+impl std::fmt::Debug for ExternalFixtures {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExternalFixtures")
+            .field("enabled", &self.enabled)
+            .field("writes", &self.writes)
+            .field("active_case", &self.active_case)
+            .field("owned_buckets", &self.owned_buckets)
+            .field("owned_objects", &self.owned_objects)
+            .field("owned_uploads", &self.owned_uploads)
+            .field("owned_versions", &self.owned_versions)
+            .field("control_connection_open", &self.control_connection.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -97,7 +118,21 @@ impl ExternalFixtures {
             owned_objects: Vec::new(),
             owned_uploads: Vec::new(),
             owned_versions: Vec::new(),
+            control_connection: None,
         }
+    }
+
+    pub(in crate::conn) fn clear_control_connection(&mut self) {
+        self.control_connection = None;
+    }
+
+    /// Whether `target` addresses an object inside an owned versioning-enabled bucket.
+    pub(super) fn is_versioned_object_target(&self, target: &str) -> bool {
+        let path = target.split_once('?').map_or(target, |(path, _)| path);
+        let Some((bucket, key)) = path.strip_prefix('/').and_then(|rest| rest.split_once('/')) else {
+            return false;
+        };
+        !key.is_empty() && self.owned_buckets.iter().any(|owned| owned.name == bucket && owned.versioned)
     }
 
     fn plan(&self, setup: &Value, decoder: &crate::inprocess::InProcess) -> Result<FixturePlan, SutError> {

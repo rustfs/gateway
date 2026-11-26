@@ -174,7 +174,7 @@ impl ExternalFixtures {
 }
 
 impl Conn {
-    pub(super) fn enable_fixture_versioning(&self, bucket: &super::OwnedBucket) -> Result<(), SutError> {
+    pub(super) fn enable_fixture_versioning(&mut self, bucket: &super::OwnedBucket) -> Result<(), SutError> {
         let body = b"<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Status>Enabled</Status></VersioningConfiguration>";
         let headers = [
             ("content-type".to_owned(), "application/xml".to_owned()),
