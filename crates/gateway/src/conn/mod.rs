@@ -44,7 +44,7 @@ use crate::MAX_LINGER_DRAIN_BYTES;
 use crate::close::ConnectionIntent;
 pub use metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 pub use request::SelfHeldRequestBody;
-use request::{ConnectionIo, Expectation, HeaderTimeout, read_request};
+use request::{ConnectionIo, ContinueWithdrawal, Expectation, HeaderTimeout, read_request};
 use response::{write_bad_request, write_expectation_failed, write_response};
 
 /// Driver for an explicitly configured plaintext HTTP/1.1 listener.
@@ -139,7 +139,10 @@ where
         let header_timeout = if first_request {
             HeaderTimeout::At(first_header_deadline)
         } else {
-            HeaderTimeout::After(config.keep_alive_idle.min(config.header_read_timeout))
+            HeaderTimeout::KeepAlive {
+                idle: config.keep_alive_idle,
+                header: config.header_read_timeout,
+            }
         };
         let head = tokio::select! {
             changed = shutdown.changed() => {
@@ -173,9 +176,10 @@ where
             Expectation::None | Expectation::Continue => {}
         }
         let method = parsed.request.method().clone();
-        let mut force_close = parsed.close_after_response || !config.h1_keep_alive;
+        let force_close = parsed.close_after_response || !config.h1_keep_alive;
         let mut request = parsed.request;
         request.extensions_mut().insert(crate::file_fallback::KernelFileTransfer);
+        request.extensions_mut().insert(crate::unread_body::SelfHeldTransport);
         let response = match Service::call(&mut service, request).await {
             Ok(response) => response,
             Err(_) => {
@@ -183,37 +187,62 @@ where
                 return;
             }
         };
-        let response_must_close = response
-            .extensions()
-            .get::<ConnectionIntent>()
-            .copied()
-            .is_some_and(ConnectionIntent::must_close);
-        let response_needs_linger = needs_lingering_read(&response);
-        let mut locked = io.lock().await;
-        if response_needs_linger {
-            locked.stream.mark_request_body_unfinished();
-        }
-        // A peer never invited to send its body may be waiting for the invitation or may send it
-        // anyway: neither is something to wait for, so the connection ends after the answer, as
-        // the Hyper driver ends it.
-        if locked.withdraw_continue() {
-            force_close = true;
-        }
-        if !locked.body_complete()
-            && (force_close || response_must_close || !drain_owed_body(&mut locked, config.lingering_close_time).await)
+        let locked = io.lock().await;
+        if finish_exchange(
+            locked,
+            response,
+            &method,
+            force_close,
+            config.lingering_close_time,
+            transport_metrics.as_deref(),
+        )
+        .await
         {
-            force_close = true;
-            locked.stream.mark_request_body_unfinished();
-        }
-        match write_response(locked, response, &method, force_close, transport_metrics.as_deref()).await {
-            Ok(true) | Err(_) => {
-                close_socket(&io).await;
-                return;
-            }
-            Ok(false) => {}
+            close_socket(&io).await;
+            return;
         }
     }
     close_socket(&io).await;
+}
+
+/// Completes one service exchange on `locked`, returning `true` when the connection must close.
+async fn finish_exchange(
+    mut locked: tokio::sync::MutexGuard<'_, ConnectionIo>,
+    response: Response<rustfs_gateway_server::ConnectionBody<rustfs_gateway_server::ConnectionResponseBody<Body>>>,
+    method: &http::Method,
+    mut force_close: bool,
+    lingering_close_time: Duration,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> bool {
+    let response_must_close = response
+        .extensions()
+        .get::<ConnectionIntent>()
+        .copied()
+        .is_some_and(ConnectionIntent::must_close);
+    let response_needs_linger = needs_lingering_read(&response);
+    // A peer never invited to send its body may be waiting for the invitation or may send it
+    // anyway: neither is something to wait for, so the connection ends after the answer, as the
+    // Hyper driver ends it. If a partial `100 Continue` already reached the wire without
+    // finishing, writing a final status line after it would corrupt HTTP/1.1 framing, so abort
+    // immediately without writing a response.
+    match locked.withdraw_continue() {
+        ContinueWithdrawal::None => {}
+        ContinueWithdrawal::Withdrawn => force_close = true,
+        ContinueWithdrawal::PartiallyWritten => return true,
+    }
+    if response_needs_linger {
+        locked.stream.mark_request_body_unfinished();
+    }
+    if !locked.body_complete()
+        && (force_close || response_must_close || !drain_owed_body(&mut locked, lingering_close_time).await)
+    {
+        force_close = true;
+        locked.stream.mark_request_body_unfinished();
+    }
+    matches!(
+        write_response(locked, response, method, force_close, transport_metrics).await,
+        Ok(true) | Err(_)
+    )
 }
 
 /// Reads and discards what a refused request still owes, so its connection can serve the next one.
@@ -245,8 +274,22 @@ fn needs_lingering_read<B>(response: &Response<B>) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)] // Test assertions deliberately panic on unexpected socket or server errors.
 mod tests {
-    use super::needs_lingering_read;
+    use std::convert::Infallible;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use http::{Method, Request, Response, StatusCode};
+    use rustfs_gateway_server::{AcceptedConnection, ConnectionDriver, ConnectionFuture, Server, ServerConfig};
+    use rustfs_gateway_stream::Body;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio::sync::Mutex;
+    use tower::Service;
+
+    use super::{ConnectionIo, close_socket, finish_exchange, needs_lingering_read};
 
     #[test]
     fn an_unfinished_response_requests_a_lingering_read() {
@@ -258,5 +301,112 @@ mod tests {
     #[test]
     fn an_unmarked_response_does_not_request_a_lingering_read() {
         assert!(!needs_lingering_read(&http::Response::new(())));
+    }
+
+    #[derive(Clone)]
+    struct PartialContinueDriver {
+        prewritten: &'static [u8],
+    }
+
+    #[derive(Clone)]
+    struct RefusalService;
+
+    impl Service<Request<()>> for RefusalService {
+        type Response = Response<Body>;
+        type Error = Infallible;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Request<()>) -> Self::Future {
+            let response = Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from(bytes::Bytes::from_static(b"refused")))
+                .expect("valid refusal");
+            std::future::ready(Ok(response))
+        }
+    }
+
+    impl ConnectionDriver<RefusalService> for PartialContinueDriver {
+        fn drive(&self, accepted: AcceptedConnection<RefusalService>) -> ConnectionFuture {
+            let prewritten = self.prewritten;
+            Box::pin(async move {
+                let Ok((stream, mut service)) = accepted.into_plaintext() else {
+                    return;
+                };
+                let io = Arc::new(Mutex::new(ConnectionIo::new(stream)));
+                {
+                    let mut locked = io.lock().await;
+                    if !prewritten.is_empty() {
+                        locked.stream.write_all(prewritten).await.expect("partial continue writes");
+                    }
+                    locked.set_continue_written_for_test(prewritten.len());
+                }
+                let response = Service::call(&mut service, Request::new(()))
+                    .await
+                    .expect("refusal service succeeds");
+                let locked = io.lock().await;
+                let closed = finish_exchange(locked, response, &Method::PUT, false, Duration::from_millis(50), None).await;
+                assert!(closed, "withdrawn or partially-written 100 Continue must close the socket");
+                close_socket(&io).await;
+            })
+        }
+    }
+
+    /// Negative — when a partial `100 Continue` already reached the wire, `finish_exchange` must
+    /// abort and close the socket without writing a final `HTTP/1.1 404` status line after it.
+    #[tokio::test]
+    async fn n_partial_continue_aborts_socket_without_writing_final_response() {
+        let partial = b"HTTP/1.1 10";
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            ..ServerConfig::default()
+        };
+        let running = Server::new(config, RefusalService)
+            .serve_with(PartialContinueDriver { prewritten: partial })
+            .expect("server starts");
+        let mut client = TcpStream::connect(running.local_addr).await.expect("client connects");
+        let mut wire = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), client.read_to_end(&mut wire))
+            .await
+            .expect("socket closes promptly")
+            .expect("wire reads");
+        assert_eq!(
+            wire,
+            partial,
+            "final HTTP/1.1 response must not be concatenated onto a partial 100 Continue: {:?}",
+            String::from_utf8_lossy(&wire)
+        );
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    /// Positive control — when `100 Continue` was owed with zero bytes written, `finish_exchange`
+    /// still writes the final refusal response cleanly and closes the socket.
+    #[tokio::test]
+    async fn unstarted_continue_still_writes_final_response_and_closes() {
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            ..ServerConfig::default()
+        };
+        let running = Server::new(config, RefusalService)
+            .serve_with(PartialContinueDriver { prewritten: b"" })
+            .expect("server starts");
+        let mut client = TcpStream::connect(running.local_addr).await.expect("client connects");
+        let mut wire = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), client.read_to_end(&mut wire))
+            .await
+            .expect("socket closes promptly")
+            .expect("wire reads");
+        let text = String::from_utf8_lossy(&wire);
+        assert!(text.starts_with("HTTP/1.1 404"), "expected 404 refusal, got: {text:?}");
+        assert!(!text.contains("100 Continue"), "unexpected 100 Continue: {text:?}");
+        assert!(text.to_ascii_lowercase().contains("connection: close"), "{text:?}");
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
     }
 }

@@ -48,8 +48,23 @@ const MAX_TRAILER_BYTES: usize = 16 * 1024;
 const READ_CHUNK_BYTES: usize = 16 * 1024;
 const HTTP2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const CONTINUE: &[u8] = b"HTTP/1.1 100 Continue\r\n\r\n";
+/// The furthest timeout armed by `tokio::time::timeout` here: thirty years, avoiding
+/// `Instant + Duration::MAX` overflow panics (`rustfs/gateway#1211`).
+const FARTHEST_TIMEOUT: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
 
 type PendingLock = Pin<Box<dyn Future<Output = OwnedMutexGuard<ConnectionIo>> + Send + 'static>>;
+
+/// Outcome of withdrawing a pending `100 Continue` after the service produces a response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ContinueWithdrawal {
+    /// No `100 Continue` was pending (never owed, or already sent and flushed completely).
+    None,
+    /// `100 Continue` was owed and zero octets reached the wire; safe to answer and close.
+    Withdrawn,
+    /// At least one octet of `100 Continue` already reached the wire without completing; writing
+    /// a final status line after a partial `100` line would corrupt HTTP/1.1 framing.
+    PartiallyWritten,
+}
 
 pub(super) struct ConnectionIo {
     pub(super) stream: PlaintextConnection,
@@ -81,26 +96,21 @@ impl ConnectionIo {
         self.continue_owed = Some(0);
     }
 
-    /// Withdraws a `100 Continue` the service never asked for by reading, answering whether one
-    /// was still owed: the peer was then never invited to send its body.
-    pub(super) fn withdraw_continue(&mut self) -> bool {
-        self.continue_owed.take().is_some()
+    /// Withdraws a pending `100 Continue`, reporting whether zero octets were written
+    /// ([`ContinueWithdrawal::Withdrawn`]), a partial `100 Continue` already reached the wire
+    /// ([`ContinueWithdrawal::PartiallyWritten`]), or none was pending
+    /// ([`ContinueWithdrawal::None`]).
+    pub(super) fn withdraw_continue(&mut self) -> ContinueWithdrawal {
+        withdraw_continue_state(&mut self.continue_owed)
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_continue_written_for_test(&mut self, written: usize) {
+        self.continue_owed = Some(written);
     }
 
     fn poll_continue(&mut self, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        while let Some(written) = self.continue_owed {
-            let Some(rest) = CONTINUE.get(written..).filter(|rest| !rest.is_empty()) else {
-                ready!(Pin::new(&mut self.stream).poll_flush(context))?;
-                self.continue_owed = None;
-                break;
-            };
-            let wrote = ready!(Pin::new(&mut self.stream).poll_write(context, rest))?;
-            if wrote == 0 {
-                return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
-            }
-            self.continue_owed = Some(written.saturating_add(wrote));
-        }
-        Poll::Ready(Ok(()))
+        poll_continue_to(&mut self.continue_owed, &mut self.stream, context)
     }
 
     pub(super) fn body_complete(&self) -> bool {
@@ -320,6 +330,34 @@ impl ConnectionIo {
     }
 }
 
+fn withdraw_continue_state(continue_owed: &mut Option<usize>) -> ContinueWithdrawal {
+    match continue_owed.take() {
+        None => ContinueWithdrawal::None,
+        Some(0) => ContinueWithdrawal::Withdrawn,
+        Some(_) => ContinueWithdrawal::PartiallyWritten,
+    }
+}
+
+fn poll_continue_to<W: AsyncWrite + Unpin>(
+    continue_owed: &mut Option<usize>,
+    writer: &mut W,
+    context: &mut Context<'_>,
+) -> Poll<io::Result<()>> {
+    while let Some(written) = *continue_owed {
+        let Some(rest) = CONTINUE.get(written..).filter(|rest| !rest.is_empty()) else {
+            ready!(Pin::new(&mut *writer).poll_flush(context))?;
+            *continue_owed = None;
+            break;
+        };
+        let wrote = ready!(Pin::new(&mut *writer).poll_write(context, rest))?;
+        if wrote == 0 {
+            return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
+        }
+        *continue_owed = Some(written.saturating_add(wrote));
+    }
+    Poll::Ready(Ok(()))
+}
+
 /// Streaming request body produced by the self-held HTTP/1.1 parser.
 pub struct SelfHeldRequestBody {
     io: Arc<Mutex<ConnectionIo>>,
@@ -424,8 +462,11 @@ pub(super) enum Expectation {
 }
 
 pub(super) enum HeaderTimeout {
+    /// First request on a newly accepted connection: bounded from accept to complete head.
     At(tokio::time::Instant),
-    After(Duration),
+    /// Subsequent keep-alive request: wait up to `idle` for the first byte (closing cleanly with
+    /// zero bytes written on timeout), then enforce `header` for the rest of the request head.
+    KeepAlive { idle: Duration, header: Duration },
 }
 
 pub(super) async fn read_request(
@@ -433,16 +474,32 @@ pub(super) async fn read_request(
     max_head_bytes: usize,
     timeout: HeaderTimeout,
 ) -> io::Result<Option<ParsedRequest>> {
-    let read = read_request_inner(io, max_head_bytes);
+    let mut locked = io.lock().await;
     match timeout {
-        HeaderTimeout::At(deadline) => tokio::time::timeout_at(deadline, read).await,
-        HeaderTimeout::After(duration) => tokio::time::timeout(duration, read).await,
+        HeaderTimeout::At(deadline) => tokio::time::timeout_at(deadline, read_request_head(&io, &mut locked, max_head_bytes))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "HTTP/1.1 request head timed out"))?,
+        HeaderTimeout::KeepAlive { idle, header } => {
+            if locked.buffer.is_empty() {
+                match tokio::time::timeout(idle.min(FARTHEST_TIMEOUT), locked.fill()).await {
+                    Ok(Ok(true)) => {}
+                    Ok(Ok(false)) | Err(_) => return Ok(None),
+                    Ok(Err(error)) if error.kind() == io::ErrorKind::TimedOut => return Ok(None),
+                    Ok(Err(error)) => return Err(error),
+                }
+            }
+            tokio::time::timeout(header.min(FARTHEST_TIMEOUT), read_request_head(&io, &mut locked, max_head_bytes))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "HTTP/1.1 request head timed out"))?
+        }
     }
-    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "HTTP/1.1 request head timed out"))?
 }
 
-async fn read_request_inner(io: Arc<Mutex<ConnectionIo>>, max_head_bytes: usize) -> io::Result<Option<ParsedRequest>> {
-    let mut locked = io.lock().await;
+async fn read_request_head(
+    io: &Arc<Mutex<ConnectionIo>>,
+    locked: &mut ConnectionIo,
+    max_head_bytes: usize,
+) -> io::Result<Option<ParsedRequest>> {
     let mut head_scan_start = 0;
     let mut lf_scan_start = 0;
     loop {
@@ -476,7 +533,7 @@ async fn read_request_inner(io: Arc<Mutex<ConnectionIo>>, max_head_bytes: usize)
                 BodyState::Empty => Some(0),
                 BodyState::Chunked(_) | BodyState::Invalid => None,
             };
-            let body = SelfHeldRequestBody::new(Arc::clone(&io), remaining);
+            let body = SelfHeldRequestBody::new(Arc::clone(io), remaining);
             let mut request = Request::new(body);
             *request.method_mut() = head.method;
             *request.uri_mut() = head.uri;

@@ -152,7 +152,16 @@ async fn observe_requests(
     mut cancel_after: Option<usize>,
 ) -> io::Result<Vec<ObservedRequest>> {
     let mut requests = Vec::new();
-    while let Some(parsed) = read_request(Arc::clone(&io), limit, HeaderTimeout::After(Duration::from_secs(5))).await? {
+    while let Some(parsed) = read_request(
+        Arc::clone(&io),
+        limit,
+        HeaderTimeout::KeepAlive {
+            idle: Duration::from_secs(5),
+            header: Duration::from_secs(5),
+        },
+    )
+    .await?
+    {
         let path = parsed.request.uri().path().to_owned();
         let mut body = parsed.request.into_body();
         if let Some(frames) = cancel_after.take() {
@@ -406,4 +415,44 @@ async fn dropping_pending_body_preserves_drain_and_next_request() {
             ])
         );
     }
+}
+
+/// Negative — a partial write of `100 Continue` records `written > 0` so withdrawal reports
+/// `PartiallyWritten`, whereas zero bytes written reports `Withdrawn`, and a full write + flush
+/// clears the obligation to `None`.
+#[tokio::test]
+async fn n_partial_continue_write_reports_partially_written_on_withdrawal() {
+    use tokio::io::AsyncReadExt;
+
+    let (mut writer, mut peer) = tokio::io::duplex(10);
+    let mut owed = Some(0);
+    let waker = std::task::Waker::noop();
+    let mut context = Context::from_waker(waker);
+
+    assert!(
+        poll_continue_to(&mut owed, &mut writer, &mut context).is_pending(),
+        "a 10-byte transport buffer can only accept a prefix of 100 Continue"
+    );
+    assert_eq!(owed, Some(10));
+    assert_eq!(withdraw_continue_state(&mut owed), ContinueWithdrawal::PartiallyWritten);
+    assert_eq!(withdraw_continue_state(&mut owed), ContinueWithdrawal::None);
+
+    let mut unstarted = Some(0);
+    assert_eq!(withdraw_continue_state(&mut unstarted), ContinueWithdrawal::Withdrawn);
+
+    let mut received = [0_u8; 10];
+    peer.read_exact(&mut received).await.expect("prefix reads");
+    assert_eq!(received.as_slice(), CONTINUE.get(..10).expect("continue prefix"));
+
+    // Positive control: a large enough transport completes the entire 100 Continue and clears it.
+    let (mut full_writer, mut full_peer) = tokio::io::duplex(64);
+    let mut full_owed = Some(0);
+    assert!(matches!(
+        poll_continue_to(&mut full_owed, &mut full_writer, &mut context),
+        Poll::Ready(Ok(()))
+    ));
+    assert_eq!(full_owed, None);
+    let mut full_received = vec![0_u8; CONTINUE.len()];
+    full_peer.read_exact(&mut full_received).await.expect("full continue reads");
+    assert_eq!(full_received, CONTINUE);
 }

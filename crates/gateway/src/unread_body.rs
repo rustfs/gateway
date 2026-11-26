@@ -50,6 +50,13 @@ use std::time::Duration;
 use http::{HeaderValue, Request, Response, Version, header::CONNECTION};
 use http_body::{Body, Frame, SizeHint};
 
+/// Inserted into a request by [`crate::SelfHeldHttp1Driver`], which owns its socket and handles
+/// unread request bodies directly on its connection lock rather than via a detached drain task.
+/// Crate-private, so external callers cannot construct or spoof it.
+#[cfg(feature = "server")]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SelfHeldTransport;
+
 /// Whether, and with which idle bound, an assembly reads what an HTTP/1 request body still owed
 /// after its answer.
 ///
@@ -169,10 +176,15 @@ pub(crate) struct Retention<B: Body> {
 }
 
 /// Wraps `request`'s body so that a drop before its end hands it back, when `drain` is set, the
-/// request is HTTP/1.0 or HTTP/1.1, and its body had not ended on arrival.
+/// request is HTTP/1.0 or HTTP/1.1, the transport is not self-held, and its body had not ended on
+/// arrival.
 pub(crate) fn retain<B: Body>(request: Request<B>, drain: Option<UnreadBodyDrain>) -> (Request<Retained<B>>, Retention<B>) {
     let (parts, body) = request.into_parts();
-    let owed = matches!(parts.version, Version::HTTP_10 | Version::HTTP_11) && !body.is_end_stream();
+    #[cfg(feature = "server")]
+    let driver_managed = parts.extensions.get::<SelfHeldTransport>().is_some();
+    #[cfg(not(feature = "server"))]
+    let driver_managed = false;
+    let owed = !driver_managed && matches!(parts.version, Version::HTTP_10 | Version::HTTP_11) && !body.is_end_stream();
     match drain.filter(|_| owed) {
         Some(drain) => {
             let slot: Slot<B> = Arc::new(Mutex::new(None));

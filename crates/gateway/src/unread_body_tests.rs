@@ -286,3 +286,21 @@ fn a_zero_idle_bound_is_unbounded() {
         Some(Duration::from_secs(300))
     );
 }
+
+/// Negative — a request originating from `SelfHeldHttp1Driver` carries `SelfHeldTransport` and
+/// must never be retained or drained in a background task: the driver owns its connection mutex
+/// and handles `100 Continue` withdrawal and unread-body draining directly.
+#[cfg(feature = "server")]
+#[tokio::test]
+async fn n_a_self_held_transport_body_is_not_retained() {
+    let (mut request, probe) = owed(Version::HTTP_11);
+    request.extensions_mut().insert(SelfHeldTransport);
+    let (request, retention) = retain(request, drain());
+    assert!(matches!(request.body(), Retained::Through { .. }));
+    drop(request);
+    let mut response = Response::new(());
+    retention.settle(&mut response);
+    assert!(!closes(&response), "self-held transport must not be settled by unread_body");
+    assert!(probe.dropped.load(Ordering::Acquire), "self-held body must be released immediately");
+    assert_eq!(probe.read.load(Ordering::Relaxed), 0);
+}

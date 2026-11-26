@@ -114,10 +114,17 @@ async fn observe(stream: PlaintextConnection, probe: Probe) -> Observation {
             let io = Arc::new(Mutex::new(connection));
             // This path uses the real fill/reserve/read_buf, never the scripted-fill override.
             let profiler = dhat::Profiler::builder().testing().build();
-            let parsed = read_request(Arc::clone(&io), 4096, HeaderTimeout::After(Duration::from_secs(5)))
-                .await
-                .expect("head reads")
-                .expect("one request");
+            let parsed = read_request(
+                Arc::clone(&io),
+                4096,
+                HeaderTimeout::KeepAlive {
+                    idle: Duration::from_secs(5),
+                    header: Duration::from_secs(5),
+                },
+            )
+            .await
+            .expect("head reads")
+            .expect("one request");
             assert_eq!(parsed.request.uri().path(), "/idle");
             assert!(!parsed.body_expected);
             drop(parsed);
