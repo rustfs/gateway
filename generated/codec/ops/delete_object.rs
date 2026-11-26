@@ -80,7 +80,7 @@ impl OperationCodec for dto::DeleteObject {
         // IfMatchSize — header `x-amz-if-match-size`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-if-match-size") {
             let raw = raw.as_ref();
-            input.if_match_size = Some(value::long(raw, "IfMatchSize")?);
+            input.if_match_size = Some(value::long_in_range(raw, "IfMatchSize", 0, 9223372036854775807)?);
         }
         let _ = body;
         value::exit(input.check_required())?;

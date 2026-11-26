@@ -164,3 +164,52 @@ fn n_legacy_persistence_keeps_trailing_text_but_refuses_invalid_attributes_and_n
         );
     }
 }
+
+#[test]
+fn n_root_declares_namespace_inspects_only_root_start_tag() {
+    use crate::root_declares_namespace;
+
+    // Negative false-positive traps: xmlns= in text, SQL expression, comment, CDATA, or child element.
+    for clean in [
+        "<SelectObjectContentRequest><Expression>SELECT * FROM s3object WHERE a = 'xmlns='</Expression></SelectObjectContentRequest>",
+        "<!-- xmlns=\"http://example.com\" --><RestoreRequest><Days>1</Days></RestoreRequest>",
+        "<RestoreRequest><Description><![CDATA[xmlns:s3=\"http://s3.amazonaws.com/doc/2006-03-01/\"]]></Description></RestoreRequest>",
+        "<RestoreRequest><Child xmlns=\"http://example.com\"/></RestoreRequest>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n  <RestoreRequest/>",
+        "",
+    ] {
+        assert_eq!(
+            root_declares_namespace(clean.as_bytes(), XmlLimits::S3),
+            Ok(false),
+            "must not report root namespace for {clean:?}"
+        );
+    }
+
+    // Positive root namespace declarations, including whitespace around `=` and prefixed roots.
+    for qualified in [
+        "<RestoreRequest xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"/>",
+        "<RestoreRequest xmlns = \"http://s3.amazonaws.com/doc/2006-03-01/\"><Days>1</Days></RestoreRequest>",
+        "<RestoreRequest xmlns:s3=\"http://s3.amazonaws.com/doc/2006-03-01/\"/>",
+        "<s3:RestoreRequest xmlns:s3=\"http://s3.amazonaws.com/doc/2006-03-01/\"/>",
+        "<s3:RestoreRequest/>",
+    ] {
+        assert_eq!(
+            root_declares_namespace(qualified.as_bytes(), XmlLimits::S3),
+            Ok(true),
+            "must detect root namespace for {qualified:?}"
+        );
+    }
+
+    // Malformed, DOCTYPE, non-UTF-8, and over-limit inputs fail closed.
+    assert_eq!(
+        root_declares_namespace(b"<!DOCTYPE x><RestoreRequest/>", XmlLimits::S3),
+        Err(XmlError::DocTypeDeclaration)
+    );
+    assert_eq!(root_declares_namespace(&[0xFF, 0xFE], XmlLimits::S3), Err(XmlError::NotUtf8));
+    assert_eq!(
+        root_declares_namespace(b"<RestoreRequest attr=\"unclosed>", XmlLimits::S3),
+        Err(XmlError::Malformed)
+    );
+    let tiny = XmlLimits::new(8, 4, 4, 4, 4).expect("limits");
+    assert_eq!(root_declares_namespace(b"<RestoreRequest/>", tiny), Err(XmlError::BodyTooLarge));
+}

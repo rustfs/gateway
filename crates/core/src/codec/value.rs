@@ -38,6 +38,7 @@ use rustfs_gateway_types::{
 
 use crate::codec::error::CodecError;
 use crate::codec::response::{ResponseOverride, override_header_value};
+pub use crate::codec::value_ext::*;
 use crate::codec::view::MetaView;
 
 /// The error a decoder raises for a required member the wire did not carry.

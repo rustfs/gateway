@@ -28,20 +28,23 @@ const MAX_WIDTH: usize = 130;
 /// upstream's, so how long they get is not something this emitter controls.
 ///
 /// `encodes` adds the url-encoding decision, for a shape that has a member to apply it to.
-pub(super) fn shape_writer_signature(module: &str, type_name: &str, encodes: bool) -> String {
+/// `needs_request` adds the request view, for a shape that has a member with `omit_when = RequestField`.
+pub(super) fn shape_writer_signature(module: &str, type_name: &str, encodes: bool, needs_request: bool) -> String {
     let encoding = if encodes { ", url_encoding: value::UrlEncoding" } else { "" };
+    let request = if needs_request { ", request: &MetaView<'_>" } else { "" };
     let single = format!(
-        "fn write_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}{encoding}) -> Result<(), CodecError> {{\n"
+        "fn write_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}{encoding}{request}) -> Result<(), CodecError> {{\n"
     );
     if single.len().saturating_sub(1) <= MAX_WIDTH {
         return single;
     }
-    let wrapped = if encodes {
+    let wrapped_encoding = if encodes {
         "\n    url_encoding: value::UrlEncoding,"
     } else {
         ""
     };
+    let wrapped_request = if needs_request { "\n    request: &MetaView<'_>," } else { "" };
     format!(
-        "fn write_{module}(\n    writer: &mut rustfs_gateway_xml::XmlWriter,\n    value: &dto::{type_name},{wrapped}\n) -> Result<(), CodecError> {{\n"
+        "fn write_{module}(\n    writer: &mut rustfs_gateway_xml::XmlWriter,\n    value: &dto::{type_name},{wrapped_encoding}{wrapped_request}\n) -> Result<(), CodecError> {{\n"
     )
 }

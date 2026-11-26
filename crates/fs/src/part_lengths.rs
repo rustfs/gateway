@@ -60,7 +60,7 @@ pub(super) fn validate(lengths: &[u64], size: i64, tag: &str) -> Result<(), Hand
 pub(super) fn window(number: u32, lengths: Option<&[u64]>, tag: &ETag, object_len: u64) -> Result<RangeDecision, HandlerError> {
     if !(1..=10000).contains(&number) {
         return Err(HandlerError::new(
-            ErrorCode::INVALID_ARGUMENT,
+            ErrorCode::INVALID_PART_NUMBER,
             "a part number must be between 1 and 10000",
         ));
     }

@@ -143,9 +143,9 @@ async fn n_invalid_or_unavailable_part_numbers_are_refused() {
     create_bucket(&service, BUCKET).await;
     multipart(&service, "object", false).await;
     for (number, code) in [
-        ("0", "InvalidArgument"),
-        ("-1", "InvalidArgument"),
-        ("10001", "InvalidArgument"),
+        ("0", "InvalidPartNumber"),
+        ("-1", "InvalidPartNumber"),
+        ("10001", "InvalidPartNumber"),
         ("2", "InvalidPart"),
         ("5", "InvalidPart"),
     ] {

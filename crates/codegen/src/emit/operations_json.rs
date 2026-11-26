@@ -167,8 +167,9 @@ pub fn render_entries(entries: &[Entry]) -> String {
 const NOTE: &str = "Generated from the pinned model and model/overlays by `cargo xtask codegen`; \
                     edit an overlay and regenerate, never this file. OPERATIONS.md is the same \
                     facts for a human reader. `host_classes` is the constraint the route selector \
-                    carries, not a reachability set, and is empty for every operation today. A \
-                    `key_headers` entry ending in `-` is a header prefix family, not a header name.";
+                    carries, not a reachability set, and is empty when an operation accepts any \
+                    host class. A `key_headers` entry ending in `-` is a header prefix family, \
+                    not a header name.";
 
 /// One row per wire field: its name, its rendered value, and the index keys it contributes.
 ///

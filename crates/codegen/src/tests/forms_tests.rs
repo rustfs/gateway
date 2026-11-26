@@ -43,8 +43,9 @@ fn decoder(name: &str) -> String {
 
 #[test]
 fn a_field_with_no_quirk_at_all_has_no_wire_form() {
-    let conversion = crate::emit::codec::expr::from_wire(&Type::String, "Value", "Fixture", false, None, None, "names")
-        .expect("a string has a plain decoder");
+    let conversion =
+        crate::emit::codec::expr::from_wire(&Type::String, "Value", "Fixture", false, None, None, "names", "reading")
+            .expect("a string has a plain decoder");
     assert_eq!(conversion, "raw.to_owned()");
 }
 
@@ -74,12 +75,21 @@ fn a_wire_form_comes_from_the_contract_record_not_a_codec_rule() {
 #[test]
 fn the_storage_is_composed_without_a_codec_owned_checker() {
     assert_eq!(
-        crate::emit::codec::expr::from_wire(&Type::OpaqueString, "ContinuationToken", "Fixture", false, None, None, "names",)
-            .expect("an opaque string is preserved"),
+        crate::emit::codec::expr::from_wire(
+            &Type::OpaqueString,
+            "ContinuationToken",
+            "Fixture",
+            false,
+            None,
+            None,
+            "names",
+            "reading",
+        )
+        .expect("an opaque string is preserved"),
         "value::opaque(raw)"
     );
     assert_eq!(
-        crate::emit::codec::expr::from_wire(&Type::String, "UploadIdMarker", "Fixture", false, None, None, "names")
+        crate::emit::codec::expr::from_wire(&Type::String, "UploadIdMarker", "Fixture", false, None, None, "names", "reading")
             .expect("a string is preserved"),
         "raw.to_owned()"
     );
@@ -93,7 +103,7 @@ fn upload_id_capabilities_use_the_owned_claim_decoder_and_have_no_response_form(
     assert_eq!(crate::emit::dto::registry::Registry::rust_type(&capability), "crate::UploadIdClaim");
     assert_eq!(crate::emit::spec_toml::type_name(&capability), "Capability(upload_id)");
     assert_eq!(
-        crate::emit::codec::expr::from_wire(&capability, "UploadId", "UploadPart", false, None, None, "names")
+        crate::emit::codec::expr::from_wire(&capability, "UploadId", "UploadPart", false, None, None, "names", "reading")
             .expect("an upload-id capability is constructed from the untrusted wire value"),
         "rustfs_gateway_types::UploadIdClaim::from_wire(raw)"
     );

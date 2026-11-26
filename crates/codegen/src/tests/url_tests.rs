@@ -86,7 +86,7 @@ fn the_generated_encoder_reads_the_decision_once_and_passes_it_down() {
         "the response-wide decision must set and clear the URL echo authoritatively:\n{body}"
     );
     assert!(
-        body.contains("write_object(&mut writer, item, url_encoding)?"),
+        body.contains("write_object(&mut writer, item, url_encoding, request)?"),
         "the entry writer receives the same decision the root used:\n{body}"
     );
     assert!(

@@ -57,7 +57,7 @@ impl OperationCodec for dto::ListMultipartUploads {
         // MaxUploads — query `max-uploads`, percent-decoded once.
         if let Some(raw) = value::query(request, "max-uploads", "MaxUploads")? {
             let raw = raw.as_ref();
-            input.max_uploads = Some(value::integer(raw, "MaxUploads")?);
+            input.max_uploads = Some(value::integer_in_range(raw, "MaxUploads", 1, 1000)?);
         } else {
             input.max_uploads = Some(1000i32);
         }

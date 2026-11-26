@@ -40,7 +40,7 @@ impl OperationCodec for dto::ListBuckets {
         // MaxBuckets — query `max-buckets`, percent-decoded once.
         if let Some(raw) = value::query(request, "max-buckets", "MaxBuckets")? {
             let raw = raw.as_ref();
-            input.max_buckets = Some(value::integer(raw, "MaxBuckets")?);
+            input.max_buckets = Some(value::integer_in_range(raw, "MaxBuckets", 1, 10000)?);
         } else {
             input.max_buckets = Some(10000i32);
         }

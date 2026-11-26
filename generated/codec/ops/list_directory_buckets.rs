@@ -45,7 +45,7 @@ impl OperationCodec for dto::ListDirectoryBuckets {
         // MaxDirectoryBuckets — query `max-directory-buckets`, percent-decoded once.
         if let Some(raw) = value::query(request, "max-directory-buckets", "MaxDirectoryBuckets")? {
             let raw = raw.as_ref();
-            input.max_directory_buckets = Some(value::integer(raw, "MaxDirectoryBuckets")?);
+            input.max_directory_buckets = Some(value::integer_in_range(raw, "MaxDirectoryBuckets", 1, 1000)?);
         }
         let _ = body;
         value::exit(input.check_required())?;

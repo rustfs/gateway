@@ -51,12 +51,8 @@ impl OperationCodec for dto::RestoreObject {
         if matches!(
             crate::contracts::RESTORE_ROOT_NAMESPACE_POLICY,
             crate::contracts::RestoreRootNamespacePolicy::QualifiedName
-        ) && raw_body
-            .as_ref()
-            .windows(6)
-            .any(|part| part == b"xmlns=" || part == b"xmlns:")
-        {
-            return Err(CodecError::malformed_xml("the request body has the wrong root namespace"));
+        ) {
+            crate::codec::reject_qualified_root_namespace(request, raw_body.as_ref())?;
         }
         let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["RestoreRequest"].contains(&root.name.as_str()) {

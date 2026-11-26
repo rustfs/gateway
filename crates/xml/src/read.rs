@@ -284,6 +284,62 @@ pub fn parse_legacy_persistence_with_limits(body: &[u8], limits: XmlLimits) -> R
     parse_with_text_reading(body, limits, TextReading::LegacyPersistence)
 }
 
+/// Reports whether the XML document's root start tag declares an XML namespace or uses a prefixed
+/// root element name.
+///
+/// Inspects only the XML prolog and root start tag, so `xmlns=` occurrences inside text nodes,
+/// comments, CDATA sections, or descendant elements never trigger a false positive, while spaced
+/// forms such as `xmlns = "..."` and prefixed roots such as `<s3:RestoreRequest>` are detected.
+///
+/// # Errors
+///
+/// [`XmlError`] if the body exceeds `limits`, is not UTF-8, carries a `DOCTYPE`, or fails XML
+/// syntax validation before or on the root start tag.
+pub fn root_declares_namespace(body: &[u8], limits: XmlLimits) -> Result<bool, XmlError> {
+    if body.len() > limits.max_body_bytes {
+        return Err(XmlError::BodyTooLarge);
+    }
+    let text = core::str::from_utf8(body).map_err(|_| XmlError::NotUtf8)?;
+    let mut reader = Reader::from_str(text);
+    let config = reader.config_mut();
+    config.trim_text(false);
+    config.check_end_names = true;
+
+    loop {
+        match reader.read_event() {
+            Err(_) => return Err(XmlError::Malformed),
+            Ok(Event::Eof) => return Ok(false),
+            Ok(Event::DocType(_)) => return Err(XmlError::DocTypeDeclaration),
+            Ok(Event::Decl(_) | Event::Comment(_) | Event::PI(_)) => {}
+            Ok(Event::Text(text)) => {
+                if !text.as_ref().iter().all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n')) {
+                    return Err(XmlError::Malformed);
+                }
+            }
+            Ok(Event::Start(tag) | Event::Empty(tag)) => {
+                let mut declared = tag.name().as_ref().contains(&b':');
+                let mut count = 0usize;
+                for attribute in tag.attributes() {
+                    let attribute = attribute.map_err(|_| XmlError::Malformed)?;
+                    count = count.saturating_add(1);
+                    if count > limits.max_attributes_per_element {
+                        return Err(XmlError::TooManyAttributes);
+                    }
+                    if attribute.value.as_ref().len() > limits.max_attribute_bytes {
+                        return Err(XmlError::AttributeTooLong);
+                    }
+                    let key = attribute.key.as_ref();
+                    if key == b"xmlns" || key.starts_with(b"xmlns:") {
+                        declared = true;
+                    }
+                }
+                return Ok(declared);
+            }
+            Ok(_) => return Err(XmlError::Malformed),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum TextReading {
     Xml10,

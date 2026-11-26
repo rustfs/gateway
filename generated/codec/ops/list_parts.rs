@@ -46,7 +46,7 @@ impl OperationCodec for dto::ListParts {
         // MaxParts — query `max-parts`, percent-decoded once.
         if let Some(raw) = value::query(request, "max-parts", "MaxParts")? {
             let raw = raw.as_ref();
-            input.max_parts = Some(value::integer(raw, "MaxParts")?);
+            input.max_parts = Some(value::integer_in_range(raw, "MaxParts", 0, 2147483647)?);
         } else {
             input.max_parts = Some(1000i32);
         }

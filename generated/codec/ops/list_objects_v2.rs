@@ -159,7 +159,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         }
         for item in &output.contents {
             writer.open("Contents", None);
-            write_object(&mut writer, item, url_encoding)?;
+            write_object(&mut writer, item, url_encoding, request)?;
             writer.close();
         }
         for item in &output.common_prefixes {
@@ -210,6 +210,7 @@ fn write_object(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::Object,
     url_encoding: value::UrlEncoding,
+    request: &MetaView<'_>,
 ) -> Result<(), CodecError> {
     writer.order_children(rustfs_order::OBJECT);
     {
@@ -242,7 +243,9 @@ fn write_object(
             writer.element("StorageClass", v.as_str());
         }
     }
-    if let Some(v) = value.owner.as_ref() {
+    if !value::request_query_equals_bool(request, "fetch-owner", false, false)
+        && let Some(v) = value.owner.as_ref()
+    {
         writer.open("Owner", None);
         write_owner(writer, v)?;
         writer.close();

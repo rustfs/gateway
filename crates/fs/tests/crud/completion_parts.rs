@@ -28,12 +28,36 @@
 use super::multipart_sizing::{MIN_PART_SIZE, upload_owned};
 use super::*;
 
-/// The fixture service over a backend that normalizes a completion's part list.
+/// The fixture service over a backend that normalizes a completion's part list under the RustFS
+/// document reading (deferring completion part-number range refusals to `normalized_completion`).
 fn normalizing(root: &TestRoot) -> S3Service {
-    let backend = FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
-        .expect("a usable test root")
-        .normalizing_completed_parts();
-    service_with_backend(Arc::new(backend)).1
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root")
+            .normalizing_completed_parts(),
+    );
+    let credentials =
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
+    let builder = backend.register_crud(
+        rustfs_gateway::ServiceBuilder::new()
+            .read_request_documents_as_rustfs()
+            .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("one region")))
+            .authorizer(allow_when(|_| true))
+            .clock_with_skew_ack(
+                FixedClock::at_unix_seconds(SIGNED_AT_SECONDS),
+                ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            ),
+    );
+    backend
+        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+            backend.register_tagging(
+                backend.register_lifecycle(
+                    backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
+                ),
+            ),
+        ))))
+        .build()
+        .expect("the reference registry is a complete assembly")
 }
 
 fn text(response: &rustfs_gateway::WireResponse) -> String {

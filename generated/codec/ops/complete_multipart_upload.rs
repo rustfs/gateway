@@ -49,7 +49,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         if !["CompleteMultipartUpload"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("MultipartUpload"));
         }
-        input.multipart_upload = read_completed_multipart_upload(&root)?;
+        input.multipart_upload = read_completed_multipart_upload(&root, request.document_reading())?;
         // UploadId — query `uploadId`, percent-decoded once.
         if let Some(raw) = value::query(request, "uploadId", "UploadId")? {
             let raw = raw.as_ref();
@@ -67,7 +67,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         // MpuObjectSize — header `x-amz-mp-object-size`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-mp-object-size") {
             let raw = raw.as_ref();
-            input.mpu_object_size = Some(value::long(raw, "MpuObjectSize")?);
+            input.mpu_object_size = Some(value::long_in_range(raw, "MpuObjectSize", 0, 9223372036854775807)?);
         }
         // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
@@ -259,10 +259,13 @@ impl crate::handler::DeferredOperation for dto::CompleteMultipartUpload {
 
 /// Reads one `CompletedMultipartUpload` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_completed_multipart_upload(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::CompletedMultipartUpload, CodecError> {
+fn read_completed_multipart_upload(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::CompletedMultipartUpload, CodecError> {
     let mut shape = dto::CompletedMultipartUpload { ..Default::default() };
     for item in node.children_named("Part") {
-        shape.parts.push(read_completed_part(item)?);
+        shape.parts.push(read_completed_part(item, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -270,7 +273,10 @@ fn read_completed_multipart_upload(node: &rustfs_gateway_xml::XmlNode) -> Result
 
 /// Reads one `CompletedPart` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_completed_part(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::CompletedPart, CodecError> {
+fn read_completed_part(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::CompletedPart, CodecError> {
     let mut shape = dto::CompletedPart { ..Default::default() };
     if let Some(raw) = node.child_text("ETag") {
         shape.e_tag = Some(value::etag_xml(raw, "ETag")?);
@@ -306,7 +312,7 @@ fn read_completed_part(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Comple
         shape.checksum_xxhash128 = Some(raw.to_owned());
     }
     if let Some(raw) = node.child_text("PartNumber") {
-        shape.part_number = value::integer(raw, "PartNumber")?;
+        shape.part_number = value::tree_integer_in_range(raw, "PartNumber", 1, 10000, reading)?;
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("PartNumber"));
     }

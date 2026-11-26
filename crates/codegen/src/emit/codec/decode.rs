@@ -237,6 +237,7 @@ fn one_field(
                 bounds::of(field, rules, op)?,
                 super::boolean::of(ir, field, rules)?,
                 "request.names()",
+                "request.document_reading()",
             )?;
             let _ = writeln!(out, "        // {member} — header `{wire}`, a comma-delimited list.");
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
@@ -267,6 +268,7 @@ fn one_field(
                         bounds::of(field, rules, op)?,
                         super::boolean::of(ir, field, rules)?,
                         "request.names()",
+                        "request.document_reading()",
                     )?,
                 ),
             };
@@ -292,6 +294,7 @@ fn one_field(
                 bounds::of(field, rules, op)?,
                 super::boolean::of(ir, field, rules)?,
                 "request.names()",
+                "request.document_reading()",
             )?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = value::query(request, \"{wire}\", \"{member}\")? {{");
@@ -542,12 +545,8 @@ fn root_namespace_guard(operation: &str, indent: &str) -> String {
     format!(
         "{indent}if matches!(\n\
          {indent}    {policy}\n\
-         {indent}) && raw_body\n\
-         {indent}    .as_ref()\n\
-         {indent}    .windows(6)\n\
-         {indent}    .any(|part| part == b\"xmlns=\" || part == b\"xmlns:\")\n\
-         {indent}{{\n\
-         {indent}    return Err(CodecError::malformed_xml(\"the request body has the wrong root namespace\"));\n\
+         {indent}) {{\n\
+         {indent}    crate::codec::reject_qualified_root_namespace(request, raw_body.as_ref())?;\n\
          {indent}}}\n"
     )
 }
@@ -590,6 +589,7 @@ fn xml_member(
                 bounds::of(field, rules, operation)?,
                 super::boolean::of(ir, field, rules)?,
                 name_policy.unwrap_or("names"),
+                args.reading,
             )?;
             let links = list_source(*flattened, member_name.as_deref(), &wire)?;
             out.push_str(&for_header(indent, node, &links));
@@ -662,6 +662,7 @@ fn xml_member(
                     bounds::of(field, rules, operation)?,
                     super::boolean::of(ir, field, rules)?,
                     name_policy.unwrap_or("names"),
+                    args.reading,
                 )?
             };
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
@@ -699,6 +700,7 @@ fn xml_attribute_member(
         bounds::of(field, rules, &ir.operation)?,
         super::boolean::of(ir, field, rules)?,
         name_policy.unwrap_or("names"),
+        "crate::codec::DocumentReading::Tree",
     )?;
     let mut out = String::new();
     let _ = writeln!(out, "    // {member} — the `{qualified}` attribute, not a child element.");
@@ -850,6 +852,7 @@ fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules,
                     bounds::of(field, rules, &ir.operation)?,
                     super::boolean::of(ir, field, rules)?,
                     "names",
+                    args.reading,
                 )?;
                 let _ = writeln!(out, "            \"{wire}\" => {{");
                 out.push_str("                let raw = child.text.as_str();\n");

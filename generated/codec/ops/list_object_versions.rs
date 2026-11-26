@@ -58,7 +58,7 @@ impl OperationCodec for dto::ListObjectVersions {
         // MaxKeys — query `max-keys`, percent-decoded once.
         if let Some(raw) = value::query(request, "max-keys", "MaxKeys")? {
             let raw = raw.as_ref();
-            input.max_keys = Some(value::integer(raw, "MaxKeys")?);
+            input.max_keys = Some(value::integer_in_range(raw, "MaxKeys", 0, 1000)?);
         } else {
             input.max_keys = Some(1000i32);
         }

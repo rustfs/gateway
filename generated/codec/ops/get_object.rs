@@ -25,6 +25,7 @@
 //! Upstream: `generated/ir/GetObject.json`, `spec/operations/GetObject.toml`. Downstream:
 //! `crate::codec::ops`.
 
+use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::EtagRender;
 use rustfs_gateway_types::TimestampFormat;
 use rustfs_gateway_types::dto;
@@ -142,7 +143,7 @@ impl OperationCodec for dto::GetObject {
         // PartNumber — query `partNumber`, percent-decoded once.
         if let Some(raw) = value::query(request, "partNumber", "PartNumber")? {
             let raw = raw.as_ref();
-            input.part_number = Some(value::integer(raw, "PartNumber")?);
+            input.part_number = Some(value::integer_in_range_as(raw, "PartNumber", 1, 10000, ErrorCode::INVALID_PART_NUMBER)?);
         }
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
