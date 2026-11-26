@@ -418,3 +418,56 @@ fn n_a_sigv2_date_legacy_rustfs_refuses_is_answered_as_it_answers() {
     let presigned = (sigv2(None, None).0, "Signature=abc".to_owned(), Method::GET);
     assert_eq!(legacy(&presigned), None);
 }
+
+/// Positive — `s3vectors`-scoped header signatures (with or without `x-amz-content-sha256`) are
+/// left to the security floor and authenticator instead of being refused before lookup.
+#[test]
+fn s3vectors_scope_with_and_without_payload_declaration_is_left_to_the_pipeline() {
+    let with_digest = signed(|pairs| set(pairs, "authorization", &authorization("s3vectors", "20150830")));
+    assert_eq!(legacy(&with_digest), None);
+
+    let without_digest = signed(|pairs| {
+        set(pairs, "authorization", &authorization("s3vectors", "20150830"));
+        remove(pairs, "x-amz-content-sha256");
+    });
+    assert_eq!(legacy(&without_digest), None);
+}
+
+/// Negative — an `s3vectors`-scoped request still receives legacy date, skew, and malformed
+/// payload refusals, and unknown services still report the exact legacy service list.
+#[test]
+fn n_s3vectors_scope_still_refuses_malformed_date_and_payload_under_legacy_profile() {
+    let undated = signed(|pairs| {
+        set(pairs, "authorization", &authorization("s3vectors", "20150830"));
+        remove(pairs, "x-amz-date");
+    });
+    assert_eq!(legacy(&undated), answer(400, "InvalidRequest", "missing header: x-amz-date"));
+
+    let skewed = signed(|pairs| {
+        set(pairs, "authorization", &authorization("s3vectors", "20150830"));
+        set(pairs, "x-amz-date", "20150830T122000Z");
+    });
+    assert_eq!(
+        legacy(&skewed),
+        answer(403, "RequestTimeTooSkewed", "request time is too far from server time")
+    );
+
+    let bad_payload = signed(|pairs| {
+        set(pairs, "authorization", &authorization("s3vectors", "20150830"));
+        set(pairs, "x-amz-content-sha256", "not-a-valid-sha256");
+    });
+    assert_eq!(
+        legacy(&bad_payload),
+        answer(403, "SignatureDoesNotMatch", "invalid header: x-amz-content-sha256")
+    );
+
+    let unknown = signed(|pairs| set(pairs, "authorization", &authorization("foo", "20150830")));
+    assert_eq!(
+        legacy(&unknown),
+        answer(
+            501,
+            "NotImplemented",
+            "unknown service 'foo' in credential scope; expected one of: s3, sts, s3tables",
+        )
+    );
+}

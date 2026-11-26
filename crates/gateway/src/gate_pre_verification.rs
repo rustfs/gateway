@@ -67,13 +67,22 @@ where
                     whole_body: true,
                     declared: None,
                 });
+                let map_refusal = |refusal| if legacy_sts { sts_body_refusal(refusal) } else { refusal };
                 let mut bytes = BytesMut::new();
                 if let Some(body) = body {
+                    if let Some(cap) = ceilings.declared
+                        && self.declared_length.is_some_and(|length| length > cap)
+                    {
+                        return Err(map_refusal(super::past_declared_cap(progress.request_body_unfinished())));
+                    }
+                    if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
+                        return Err(map_refusal(super::past_buffered_ceiling(progress.request_body_unfinished())));
+                    }
                     let mut frames = WireFrames::new(body, progress, ceilings, timeouts);
                     loop {
                         let frame = core::future::poll_fn(|context| frames.poll_next(context))
                             .await
-                            .map_err(|refusal| if legacy_sts { sts_body_refusal(refusal) } else { refusal })?;
+                            .map_err(map_refusal)?;
                         let Some(frame) = frame else { break };
                         bytes.put(frame);
                     }
@@ -349,7 +358,7 @@ mod tests {
                     bytes: Bytes::from(vec![b'a'; size]),
                     copied: Arc::clone(&copied),
                 }))),
-                Some(size as u64),
+                None,
             );
             let result = sealed.digest(BodyTimeouts::S3, None).await;
             if size == 3 {
@@ -430,10 +439,18 @@ mod tests {
         assert_eq!(replay, bytes);
     }
 
-    /// Negative — repeating authentication keeps the first refusal and its observed unread tail.
+    /// Negative — repeating authentication keeps the first refusal and its observed unread tail
+    /// for an undeclared-length body that crossed the frame ceiling.
     #[tokio::test]
     async fn n_a_completed_sts_refusal_survives_a_second_digest_request() {
-        let (sealed, polls) = body(Bytes::from(vec![b'a'; 8193]));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let sealed = SealedBody::seal(
+            Some(OpenBody {
+                frame: Some(Bytes::from(vec![b'a'; 8193])),
+                polls: Arc::clone(&polls),
+            }),
+            None,
+        );
         let first = sealed
             .digest(BodyTimeouts::S3, None)
             .await
@@ -501,5 +518,56 @@ mod tests {
             };
             assert_eq!(refusal, first);
         }
+    }
+
+    /// Negative — a request declaring a Content-Length above the buffered ceiling is refused
+    /// immediately before polling a single frame from the underlying body stream.
+    #[tokio::test]
+    async fn n_digest_refuses_declared_oversized_body_before_polling_any_frame() {
+        let vector_polls = Arc::new(AtomicUsize::new(0));
+        let vector_sealed = SealedBody::seal(
+            Some(OpenBody {
+                frame: Some(Bytes::from_static(b"small-chunk")),
+                polls: Arc::clone(&vector_polls),
+            }),
+            Some(16385),
+        );
+        let vector_refusal = vector_sealed
+            .digest(BodyTimeouts::S3, Some(BodyCeilings::of("example:PutVectors", 16384)))
+            .await
+            .expect_err("declared length above ceiling must be refused upfront");
+        assert_eq!(vector_refusal.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
+        assert!(vector_refusal.body_unfinished.is_some());
+        assert_eq!(
+            vector_polls.load(Ordering::SeqCst),
+            0,
+            "oversized declared Content-Length must not poll any frame"
+        );
+        let repeat = vector_sealed
+            .digest(BodyTimeouts::S3, Some(BodyCeilings::of("example:PutVectors", 16384)))
+            .await
+            .expect_err("repeat retains upfront refusal");
+        assert_eq!(repeat, vector_refusal);
+        assert_eq!(vector_polls.load(Ordering::SeqCst), 0);
+
+        let sts_polls = Arc::new(AtomicUsize::new(0));
+        let sts_sealed = SealedBody::seal(
+            Some(OpenBody {
+                frame: Some(Bytes::from_static(b"small-chunk")),
+                polls: Arc::clone(&sts_polls),
+            }),
+            Some(8193),
+        );
+        let sts_refusal = sts_sealed
+            .digest(BodyTimeouts::S3, None)
+            .await
+            .expect_err("legacy STS declared length above 8192 must be refused upfront");
+        assert_eq!(sts_refusal.code(), Some(&ErrorCode::INVALID_REQUEST));
+        assert!(sts_refusal.body_unfinished.is_some());
+        assert_eq!(
+            sts_polls.load(Ordering::SeqCst),
+            0,
+            "oversized STS Content-Length must not poll any frame"
+        );
     }
 }

@@ -367,3 +367,88 @@ async fn n_s3vectors_query_policy_does_not_admit_repeated_s3_parameters() {
 async fn n_s3vectors_query_policy_does_not_admit_a_different_presented_service() {
     assert!(!vectors_query_verdict(vectors_service(), "s3", "tagKeys=a&tagKeys=b", "tagKeys=a&tagKeys=b").await);
 }
+
+/// A credential provider that always fails with an internal backend error.
+struct FailingCredentials;
+
+impl crate::ext::credentials::CredentialProvider for FailingCredentials {
+    fn lookup<'a>(
+        &'a self,
+        _access_key_id: &'a str,
+    ) -> BoxFuture<'a, Result<crate::ext::credentials::CredentialLookup, crate::ext::credentials::ProviderError>> {
+        Box::pin(async { Err(crate::ext::credentials::ProviderError::Backend) })
+    }
+}
+
+/// Negative — an unknown access key on an S3 Vectors request without `x-amz-content-sha256` must
+/// not trigger any body read or hashing, and must return `InvalidAccessKeyId`.
+#[tokio::test]
+async fn n_s3vectors_unknown_key_does_not_read_body_and_returns_invalid_access_key() {
+    let headers = vectors_head("s3vectors", b"{}", false, ("POST", "/PutVectors", ""));
+    let floor = OperationFloor::builtin("example:PutVectors", vectors_service()).require_sigv4_under_every_policy();
+    let admitted = SecurityFloor::new()
+        .admit(WireView::new(&headers, RawQuery::new("")), &floor, RequestNow::from_unix_seconds(NOW))
+        .expect("the header signature is structurally valid");
+    let Admission::Sealed(sealed) = admitted else { panic!("a header signature is sealed") };
+    let host = RawHost::from_host_header(b"s3.example.com").expect("a valid host");
+    let payload = PayloadMode::Empty;
+    let body = Body(Mutex::new(0));
+    let request = Authentication::new(&sealed, &Method::POST, "/PutVectors", &host, &payload, Some(64 * 1024 * 1024))
+        .with_sts_body_reader(Some(&body), "example:PutVectors", &crate::ServiceConfig::new(64 * 1024 * 1024));
+    let authenticator =
+        SigV4Authenticator::new(Arc::new(StaticCredentials::new()), RegionSet::new(["us-east-1"]).expect("non-empty"));
+    let outcome = authenticator.authenticate(&request).await.expect("an authentication answer");
+    assert!(
+        matches!(
+            outcome.verdict(),
+            rustfs_gateway_sig::Verdict::Reject(rustfs_gateway_sig::AuthError::InvalidAccessKeyId)
+        ),
+        "unknown key must fail with InvalidAccessKeyId, got {:?}",
+        outcome.verdict()
+    );
+    assert_eq!(
+        *body.0.lock().expect("uncontended"),
+        0,
+        "an unknown access key must never trigger a pre-auth body read"
+    );
+    assert!(!request.signs_its_body());
+}
+
+/// Negative — a credential store fault on an S3 Vectors request without `x-amz-content-sha256`
+/// must not trigger any body read.
+#[tokio::test]
+async fn n_s3vectors_store_fault_does_not_read_body() {
+    let headers = vectors_head("s3vectors", b"{}", false, ("POST", "/PutVectors", ""));
+    let floor = OperationFloor::builtin("example:PutVectors", vectors_service()).require_sigv4_under_every_policy();
+    let admitted = SecurityFloor::new()
+        .admit(WireView::new(&headers, RawQuery::new("")), &floor, RequestNow::from_unix_seconds(NOW))
+        .expect("the header signature is structurally valid");
+    let Admission::Sealed(sealed) = admitted else { panic!("a header signature is sealed") };
+    let host = RawHost::from_host_header(b"s3.example.com").expect("a valid host");
+    let payload = PayloadMode::Empty;
+    let body = Body(Mutex::new(0));
+    let request = Authentication::new(&sealed, &Method::POST, "/PutVectors", &host, &payload, Some(1024)).with_sts_body_reader(
+        Some(&body),
+        "example:PutVectors",
+        &crate::ServiceConfig::new(16384),
+    );
+    let default_auth = SigV4Authenticator::new(Arc::new(FailingCredentials), RegionSet::new(["us-east-1"]).expect("non-empty"));
+    let outcome = default_auth.authenticate(&request).await.expect("uniform rejection");
+    assert!(
+        matches!(
+            outcome.verdict(),
+            rustfs_gateway_sig::Verdict::Reject(rustfs_gateway_sig::AuthError::InvalidAccessKeyId)
+        ),
+        "store fault without switch must return InvalidAccessKeyId, got {:?}",
+        outcome.verdict()
+    );
+    let unavailable_auth =
+        SigV4Authenticator::new(Arc::new(FailingCredentials), RegionSet::new(["us-east-1"]).expect("non-empty"))
+            .answer_credential_store_faults_as_unavailable();
+    assert!(unavailable_auth.authenticate(&request).await.is_err());
+    assert_eq!(
+        *body.0.lock().expect("uncontended"),
+        0,
+        "a credential store fault must never trigger a pre-auth body read"
+    );
+}

@@ -313,3 +313,152 @@ fn a_default_s3_instance_refuses_a_service_scoped_registry_update() {
             .is_err()
     );
 }
+
+fn rustfs_profile_vectors_service(backend: Arc<Backend>) -> S3Service {
+    let credentials =
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("test credentials")));
+    registered(backend)
+        .answer_header_signatures_as_legacy_rustfs()
+        .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("region")).rustfs_profile())
+        .authorizer(allow_when(|_| true))
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .build()
+        .expect("S3 Vectors service with legacy header signature refusals")
+}
+
+fn signed_with_body(service: SigService, access_key: &str, body: &[u8], include_payload_header: bool) -> Request<Bytes> {
+    use sha2::{Digest as _, Sha256};
+
+    let stamp = support::SIGNED_AT_STAMP;
+    let day = &stamp[..8];
+    let service_name = service.as_str();
+    let scope = format!("{day}/us-east-1/{service_name}/aws4_request");
+    let digest: String = Sha256::digest(body).iter().map(|b| format!("{b:02x}")).collect();
+    let (signed_headers, payload_line) = if include_payload_header {
+        ("host;x-amz-content-sha256;x-amz-date", format!("x-amz-content-sha256:{digest}\n"))
+    } else {
+        ("host;x-amz-date", String::new())
+    };
+    let canonical =
+        format!("POST\n/PutVectors\n\nhost:s3.example.com\n{payload_line}x-amz-date:{stamp}\n\n{signed_headers}\n{digest}");
+    let canonical_hash: String = Sha256::digest(canonical.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{canonical_hash}");
+    let hmac = |key: &[u8], data: &[u8]| -> [u8; 32] {
+        let mut block = [0_u8; 64];
+        block[..key.len()].copy_from_slice(key);
+        let mut inner = Sha256::new();
+        inner.update(block.map(|b| b ^ 0x36));
+        inner.update(data);
+        let mut outer = Sha256::new();
+        outer.update(block.map(|b| b ^ 0x5c));
+        outer.update(inner.finalize());
+        outer.finalize().into()
+    };
+    let mut key = hmac(b"AWS4secret", day.as_bytes());
+    for part in ["us-east-1", service_name, "aws4_request"] {
+        key = hmac(&key, part.as_bytes());
+    }
+    let signature: String = hmac(&key, string_to_sign.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let mut builder = Request::builder()
+        .method(Method::POST)
+        .uri("/PutVectors")
+        .header(http::header::HOST, "s3.example.com")
+        .header(http::header::CONTENT_LENGTH, body.len().to_string())
+        .header("x-amz-date", stamp)
+        .header(
+            http::header::AUTHORIZATION,
+            format!("AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"),
+        );
+    if include_payload_header {
+        builder = builder.header("x-amz-content-sha256", digest);
+    }
+    builder.body(Bytes::copy_from_slice(body)).expect("wire request")
+}
+
+/// Positive — `ServiceBuilder::for_service(SigService::S3Vectors).rustfs_profile()` accepts
+/// `s3vectors`-scoped header signatures both with and without `x-amz-content-sha256`.
+#[tokio::test]
+async fn s3vectors_under_rustfs_profile_authenticates_with_and_without_payload_hash() {
+    let backend = Arc::new(Backend::default());
+    let service = rustfs_profile_vectors_service(Arc::clone(&backend));
+
+    let with_hash = service
+        .call_bytes(signed_with_body(SERVICE, "AKIDEXAMPLE", b"{}", true))
+        .await;
+    assert_eq!(
+        with_hash.status(),
+        StatusCode::OK,
+        "s3vectors with x-amz-content-sha256 under rustfs_profile"
+    );
+
+    let without_hash = service
+        .call_bytes(signed_with_body(SERVICE, "AKIDEXAMPLE", b"{}", false))
+        .await;
+    assert_eq!(
+        without_hash.status(),
+        StatusCode::OK,
+        "s3vectors without x-amz-content-sha256 under rustfs_profile"
+    );
+    assert_eq!(backend.handler_calls.load(Ordering::SeqCst), 2);
+}
+
+/// Negative — under `rustfs_profile()`, an S3 Vectors service still rejects non-`s3vectors`
+/// signing services and unknown access keys.
+#[tokio::test]
+async fn n_s3vectors_under_rustfs_profile_still_refuses_other_services_and_unknown_keys() {
+    let backend = Arc::new(Backend::default());
+    let service = rustfs_profile_vectors_service(Arc::clone(&backend));
+
+    for wrong_service in [SigService::S3, SigService::Sts] {
+        let response = service
+            .call_bytes(signed_with_body(wrong_service, "AKIDEXAMPLE", b"{}", true))
+            .await;
+        assert!(
+            response.status().is_client_error(),
+            "wrong service {wrong_service:?} should be rejected, got {}",
+            response.status()
+        );
+    }
+
+    let (status, body) = support::exchange(&service, signed_with_body(SERVICE, "AKIDUNKNOWN", b"{}", false)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "unknown key should be 403: {body}");
+    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    assert_eq!(backend.handler_calls.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — an ordinary S3 service assembled with `rustfs_profile()` still refuses an
+/// `s3vectors`-scoped signature with `501 NotImplemented` and the legacy expected-service list.
+#[tokio::test]
+async fn n_s3_service_under_rustfs_profile_still_refuses_s3vectors_scope_with_501() {
+    let credentials =
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("test credentials")));
+    let s3_service = ServiceBuilder::new()
+        .rustfs_profile()
+        .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("region")).rustfs_profile())
+        .authorizer(allow_when(|_| true))
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .register::<rustfs_gateway::dto::ListBuckets, _>(Arc::new(support::Backend))
+        .build()
+        .expect("S3 service under rustfs_profile");
+    let mut request = signed_with_body(SERVICE, "AKIDEXAMPLE", b"", true);
+    *request.method_mut() = Method::GET;
+    *request.uri_mut() = "/".parse().expect("root uri");
+    let (status, body) = support::exchange(&s3_service, request).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
+    assert!(
+        body.contains("unknown service &apos;s3vectors&apos; in credential scope; expected one of: s3, sts, s3tables"),
+        "{body}"
+    );
+}

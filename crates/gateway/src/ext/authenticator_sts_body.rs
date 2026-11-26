@@ -113,12 +113,11 @@ impl SigV4Authenticator {
         {
             return Ok(None);
         }
-        // This early lookup rejection is part of the legacy profile: an unknown key must not
-        // trigger a read or have its credential refusal replaced by the body's length refusal. A
-        // store fault is answered at the same point, so the two keep one latency class here; both
-        // answer before the body read and the comparison, so earlier than a wrong signature does.
-        // That is a stated deviation from ADR-0051's "no earlier than a wrong signature".
-        if !vectors && !matches!(resolved, Ok(CredentialLookup::Found(_))) {
+        // An unknown key must never trigger a body read (which would let an unauthenticated caller
+        // force buffering up to the service ceiling) or have its credential refusal replaced by a
+        // body-length refusal. A store fault is answered at the same point, so both keep one
+        // latency class here; both answer before the body read and signature comparison.
+        if !matches!(resolved, Ok(CredentialLookup::Found(_))) {
             return Err(self.unresolved_lookup(resolved));
         }
         let reading = request.sts_body.as_ref().ok_or(AuthError::SignatureDoesNotMatch)?;

@@ -34,7 +34,9 @@
 //! before it looks the access key up, refuses in this order:
 //!
 //! 1. a value that does not read: `400 InvalidRequest` "invalid header: authorization";
-//! 2. a scope service other than `s3`, `sts` and `s3tables`: `501 NotImplemented`, naming it;
+//! 2. a scope service other than `s3`, `sts`, `s3tables` and `s3vectors`: `501 NotImplemented`,
+//!    naming it (with `s3vectors` left to the authenticator so S3 Vectors routes verify it while S3
+//!    routes still refuse it under the legacy scope policy);
 //! 3. no `x-amz-date` — a `Date` header does not stand in for it — `400 InvalidRequest`
 //!    "missing header: x-amz-date", and one that is not `YYYYMMDDTHHMMSSZ` digits,
 //!    "invalid header: x-amz-date";
@@ -48,7 +50,7 @@
 //!    `403 SignatureDoesNotMatch` "invalid header: x-amz-content-sha256";
 //! 8. no `x-amz-content-sha256` on an `s3`-scoped request: `400 InvalidRequest` "missing header:
 //!    x-amz-content-sha256". An `s3tables`-scoped one is refused with the same answer right after
-//!    the lookup, and an `sts`-scoped one is verified over its body instead.
+//!    the lookup, while `sts`- and `s3vectors`-scoped ones are verified over their body instead.
 //!
 //! A header-signed SigV2 request (`AWS <key>:<signature>`) is dated by a single `x-amz-date`,
 //! else by a single `Date`, and refused, before the lookup: without either, `400 InvalidRequest`
@@ -148,7 +150,7 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
     if credential.algorithm != SIGV4_ALGORITHM || !credential.canonical_signature {
         return None;
     }
-    if !SIGNING_SERVICES.contains(&credential.scope.service) {
+    if !SIGNING_SERVICES.contains(&credential.scope.service) && credential.scope.service != "s3vectors" {
         let service = credential.scope.service;
         let expected = SIGNING_SERVICES.join(", ");
         return Some((
@@ -177,7 +179,9 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
         Some(declared) if is_malformed_payload(declared) => {
             refused(ErrorCode::SIGNATURE_DOES_NOT_MATCH, "invalid header: x-amz-content-sha256")
         }
-        None if credential.scope.service != "sts" => refused(ErrorCode::INVALID_REQUEST, "missing header: x-amz-content-sha256"),
+        None if !matches!(credential.scope.service, "sts" | "s3vectors") => {
+            refused(ErrorCode::INVALID_REQUEST, "missing header: x-amz-content-sha256")
+        }
         _ => None,
     }
 }
