@@ -564,7 +564,7 @@ impl SigV4Authenticator {
                     let signed = self
                         .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
                         .map_err(legacy_answer)?;
-                    let paths = self.path_candidates(request.raw_path(), request.claimed)?;
+                    let paths = self.path_candidates(request.raw_path(), request.claimed, service)?;
                     let query = view.query();
                     let mut spec = CanonicalRequestSpec::new(
                         request.method(),

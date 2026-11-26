@@ -578,11 +578,18 @@ impl SigV4Authenticator {
     }
 
     /// The canonical paths a SigV4 signature over `raw_path` is tried against, as this
-    /// authenticator's path switches choose them: for a `claimed` request under a prefix
-    /// [`Self::verify_paths_double_encoded_under`] names, the doubly encoded one alone; else legacy
-    /// RustFS's candidates; else the S3 candidates with this authenticator's raw-path fallback.
-    pub(super) fn path_candidates(&self, raw_path: &str, claimed: bool) -> Result<UriPathCandidates, AuthError> {
-        if claimed && under_any(self.double_encoded_prefixes, raw_path) {
+    /// authenticator's path switches and `service` choose them: [`SigService::S3Vectors`] always
+    /// uses AWS's doubly encoded canonical URI without requiring a prefix opt-in; otherwise a
+    /// `claimed` request under a prefix [`Self::verify_paths_double_encoded_under`] names uses the
+    /// doubly encoded one alone; else legacy RustFS's candidates; else the S3 candidates with this
+    /// authenticator's raw-path fallback.
+    pub(super) fn path_candidates(
+        &self,
+        raw_path: &str,
+        claimed: bool,
+        service: SigService,
+    ) -> Result<UriPathCandidates, AuthError> {
+        if service == SigService::S3Vectors || (claimed && under_any(self.double_encoded_prefixes, raw_path)) {
             UriPathCandidates::double_encoded(raw_path)
         } else if self.legacy_paths {
             UriPathCandidates::for_legacy_rustfs(raw_path)

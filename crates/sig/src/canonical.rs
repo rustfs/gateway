@@ -255,6 +255,23 @@ impl UriPathCandidates {
         })
     }
 
+    /// The canonical path candidates for `service`.
+    ///
+    /// [`SigService::S3Vectors`] follows AWS's non-S3 SigV4 double-encoding rule segment by
+    /// segment without a second raw candidate. S3-family services keep single-pass path
+    /// canonicalisation.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::AuthorizationHeaderMalformed`] if `raw_path` cannot be canonicalised.
+    pub fn for_service(raw_path: &str, service: SigService) -> Result<Self, AuthError> {
+        if service == SigService::S3Vectors {
+            Self::double_encoded(raw_path)
+        } else {
+            Self::new(raw_path)
+        }
+    }
+
     /// These candidates, with the wire spelling tried only as `fallback` says. A
     /// [`UriPathCandidates::double_encoded`] value keeps its single candidate.
     #[must_use]
@@ -392,9 +409,10 @@ impl<'r> CanonicalRequestSpec<'r> {
 
     /// Uses the signing service's query-list policy.
     ///
-    /// Only [`SigService::S3Vectors`] admits repeated decoded `tagKeys` names. All their values
-    /// remain signed, including duplicates; other retained query names remain unique. The default
-    /// is [`RawQuery::canonical`]'s duplicate refusal. A verifier supplies the routed service after
+    /// Only [`SigService::S3Vectors`] on its `UntagResource` route (`DELETE /tags/{+resourceArn}`)
+    /// admits repeated decoded `tagKeys` names. All their values remain signed, including
+    /// duplicates; other retained query names and every other route remain unique. The default is
+    /// [`RawQuery::canonical`]'s duplicate refusal. A verifier supplies the routed service after
     /// scope validation; a signer supplies its own signing scope's service. URI path candidates
     /// and signature-parameter exclusion are unchanged.
     #[must_use]
@@ -414,7 +432,9 @@ impl<'r> CanonicalRequestSpec<'r> {
     /// signed header holds bytes that are not valid UTF-8. [`AuthError::SignatureDoesNotMatch`] if
     /// a header named in the allow-list has vanished from the map between enforcement and here.
     pub fn candidates(&self) -> Result<CanonicalCandidates, AuthError> {
-        let canonical_query = self.query.canonical_for_service(self.exclusion, self.service)?;
+        let canonical_query = self
+            .query
+            .canonical_for_request(self.exclusion, self.service, self.method, self.paths.raw())?;
 
         let mut tail = String::new();
         tail.push('\n');

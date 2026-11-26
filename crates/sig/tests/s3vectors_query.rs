@@ -141,3 +141,79 @@ fn n_s3vectors_rejects_malformed_list_queries() {
         assert!(canonical_query(SigService::S3Vectors, query).is_err(), "query {query}");
     }
 }
+
+fn sign_canonical(service: SigService, method: &Method, path: &str, query: &str) -> Result<String, SignerError> {
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("synthetic credentials");
+    let scope = SigningScope::new(ScopeDate::parse("20150830").expect("a date"), "us-east-1", service)
+        .expect("a supported signing scope");
+    let mut signer = SigV4Signer::new(credentials, scope);
+    let headers = HeaderMap::new();
+    let host = RawHost::from_host_header(b"vectors.example.com").expect("a host");
+    let request = SigningRequest::new(
+        method,
+        path,
+        query,
+        &headers,
+        &host,
+        PayloadMode::Empty,
+        AmzDate::parse("20150830T123600Z").expect("a timestamp"),
+    );
+    signer
+        .sign_headers(&request)
+        .map(|signed| signed.canonical_request().to_owned())
+}
+
+#[test]
+fn s3vectors_signer_double_encodes_tag_resource_arn_canonical_path() {
+    let raw_path = "/tags/arn%3Aaws%3As3vectors%3Aus-east-1%3A123456789012%3Abucket%2Fmy-bucket";
+    let canonical = sign_canonical(SigService::S3Vectors, &Method::GET, raw_path, "").expect("s3vectors signed");
+    let canonical_uri = canonical.lines().nth(1).expect("canonical URI line");
+    assert_eq!(
+        canonical_uri,
+        "/tags/arn%253Aaws%253As3vectors%253Aus-east-1%253A123456789012%253Abucket%252Fmy-bucket"
+    );
+
+    let action = sign_canonical(SigService::S3Vectors, &Method::POST, "/PutVectors", "").expect("action signed");
+    assert_eq!(action.lines().nth(1).expect("canonical URI line"), "/PutVectors");
+}
+
+#[test]
+fn n_s3_and_s3express_signers_keep_single_encoded_canonical_path() {
+    let raw_path = "/tags/arn%3Aaws%3As3vectors%3Aus-east-1%3A123456789012%3Abucket%2Fmy-bucket";
+    for service in [SigService::S3, SigService::S3Express] {
+        let canonical = sign_canonical(service, &Method::GET, raw_path, "").expect("s3-family signed");
+        let canonical_uri = canonical.lines().nth(1).expect("canonical URI line");
+        assert_eq!(canonical_uri, raw_path, "service {service} must keep single-encoding");
+    }
+}
+
+#[test]
+fn s3vectors_signer_accepts_repeated_tag_keys_on_delete_tags_arn() {
+    let raw_path = "/tags/arn%3Aaws%3As3vectors%3Aus-east-1%3A123456789012%3Abucket%2Fmy-bucket";
+    let canonical = sign_canonical(SigService::S3Vectors, &Method::DELETE, raw_path, "tagKeys=b&tagKeys=a")
+        .expect("UntagResource allows repeated tagKeys");
+    assert_eq!(
+        canonical.lines().nth(1).expect("canonical URI"),
+        "/tags/arn%253Aaws%253As3vectors%253Aus-east-1%253A123456789012%253Abucket%252Fmy-bucket"
+    );
+    assert_eq!(canonical.lines().nth(2).expect("canonical query"), "tagKeys=a&tagKeys=b");
+}
+
+#[test]
+fn n_s3vectors_signer_rejects_repeated_tag_keys_on_non_untag_routes() {
+    for (method, path) in [
+        (Method::POST, "/PutVectors"),
+        (Method::GET, "/tags/resource"),
+        (Method::POST, "/tags/resource"),
+        (Method::PUT, "/tags/resource"),
+        (Method::DELETE, "/PutVectors"),
+        (Method::DELETE, "/tags"),
+        (Method::DELETE, "/tags/"),
+        (Method::DELETE, "/tags///"),
+    ] {
+        assert!(
+            sign_canonical(SigService::S3Vectors, &method, path, "tagKeys=a&tagKeys=b").is_err(),
+            "repeated tagKeys must be rejected on {method} {path}"
+        );
+    }
+}
