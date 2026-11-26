@@ -77,6 +77,7 @@
 //! behaviour is the AWS answer ([`Answer::Aws`]) with the host's request identifier.
 
 use rustfs_gateway_core::Router;
+use rustfs_gateway_sig::SigService;
 
 use super::{HostRequestId, RequestTrace};
 
@@ -87,6 +88,8 @@ pub(crate) enum Answer {
     /// error document: AWS's answer, and every assembly's default.
     #[default]
     Aws,
+    /// Non-S3 AWS service answer: `x-amz-request-id` in the head, never the S3-only `x-amz-id-2`.
+    RequestIdOnly,
     /// Legacy RustFS's S3 answer: the request identifier in `x-amz-request-id` and in
     /// `x-request-id`, and in an error document's `<RequestId>` (ruling R10); no host identifier
     /// anywhere.
@@ -112,9 +115,11 @@ impl Identification {
     /// request's path select.
     pub(crate) fn settle<B>(self, minted: RequestTrace, request: &http::Request<B>, router: &Router) -> RequestTrace {
         let host = request.extensions().get::<HostRequestId>();
+        let non_s3 = router.signing_service().is_some_and(|service| service != SigService::S3);
         let answer = match self {
+            Self::Aws if non_s3 => Answer::RequestIdOnly,
             Self::Aws => Answer::Aws,
-            Self::LegacyRustfs if claimed(request, router) => Answer::HostWritten,
+            Self::LegacyRustfs if !non_s3 && claimed(request, router) => Answer::HostWritten,
             Self::LegacyRustfs => Answer::LegacyRustfs,
         };
         minted.identified(host, answer)
@@ -188,6 +193,16 @@ mod tests {
             document(&trace(Answer::LegacyRustfs)),
             "<Error><Code>NoSuchKey</Code><RequestId>7c9e6679-7425-40de-944b-e07fc1f90ae7</RequestId></Error>"
         );
+    }
+
+    /// Negative — a non-S3 AWS answer carries `x-amz-request-id` and removes `x-amz-id-2`.
+    #[test]
+    fn n_a_request_id_only_answer_omits_host_id() {
+        let mut headers = headers_with_everything();
+        trace(Answer::RequestIdOnly).apply(&mut headers);
+        let id = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+        assert_eq!(headers.get_all(REQUEST_ID_HEADER).iter().collect::<Vec<_>>(), [id]);
+        assert!(!headers.contains_key(HOST_ID_HEADER), "{headers:?}");
     }
 
     /// Negative — an answer on the host's path carries no identifier of this service: both of its

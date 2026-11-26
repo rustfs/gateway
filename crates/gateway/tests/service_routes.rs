@@ -20,6 +20,9 @@
 
 use crate::support;
 
+#[path = "service_routes/isolation.rs"]
+mod isolation;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -318,7 +321,7 @@ fn rustfs_profile_vectors_service(backend: Arc<Backend>) -> S3Service {
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("test credentials")));
     registered(backend)
-        .answer_header_signatures_as_legacy_rustfs()
+        .rustfs_profile()
         .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("region")).rustfs_profile())
         .authorizer(allow_when(|_| true))
         .clock_with_skew_ack(
@@ -326,7 +329,7 @@ fn rustfs_profile_vectors_service(backend: Arc<Backend>) -> S3Service {
             ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .build()
-        .expect("S3 Vectors service with legacy header signature refusals")
+        .expect("S3 Vectors service with rustfs_profile")
 }
 
 fn signed_with_body(service: SigService, access_key: &str, body: &[u8], include_payload_header: bool) -> Request<Bytes> {
@@ -429,9 +432,25 @@ async fn n_s3vectors_under_rustfs_profile_still_refuses_other_services_and_unkno
         );
     }
 
-    let (status, body) = support::exchange(&service, signed_with_body(SERVICE, "AKIDUNKNOWN", b"{}", false)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "unknown key should be 403: {body}");
-    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    let unknown = service
+        .call_bytes(signed_with_body(SERVICE, "AKIDUNKNOWN", b"{}", false))
+        .await;
+    assert_eq!(unknown.status(), StatusCode::FORBIDDEN, "unknown key should be 403");
+    assert_eq!(
+        unknown
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(
+        unknown.headers().get("x-amzn-errortype").and_then(|v| v.to_str().ok()),
+        Some("InvalidAccessKeyId")
+    );
+    let wire = rustfs_gateway::collect(unknown).await.expect("collected body");
+    let body = String::from_utf8(wire.body().to_vec()).expect("utf-8 body");
+    assert!(!body.contains("<Code>"), "S3 Vectors must emit REST-JSON, not S3 XML: {body}");
+    assert!(body.starts_with("{\"message\":"), "expected REST-JSON body: {body}");
     assert_eq!(backend.handler_calls.load(Ordering::SeqCst), 0);
 }
 

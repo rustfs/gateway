@@ -28,7 +28,7 @@ use rustfs_gateway_core::{HandlerError, RequestBodyMode, ResponseKind};
 use rustfs_gateway_http::WireRequest;
 use rustfs_gateway_sig::{
     Admission, AuthError, CredentialPresence, OperationFloor, PayloadMode, PostPolicyLimits, QueryBearerClaim, RequestNow,
-    SealedAws, SecurityFloor, Verdict, WireView,
+    SealedAws, SecurityFloor, SigService, Verdict, WireView,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
@@ -99,20 +99,27 @@ impl S3Service {
 
     /// Evaluates legacy pre-lookup header-signature and presigned-URL refusals, holding
     /// [`Self::hold_auth_failure_floor`] when one fires.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn pre_lookup_auth_refusal(
         &self,
         signed_head: &SignedHead<'_>,
         by_header_token: bool,
+        signing_service: Option<SigService>,
         response_kind: ResponseKind,
         body_owed: bool,
         auth_started: MonotonicNow,
         outcome: &mut Outcome<'_>,
     ) -> Option<Response<Body>> {
         let policy = &self.inner.view_policy;
+        let non_s3 = super::is_non_s3_service(signing_service);
         let legacy_refusal = policy
             .header_signatures
-            .refusal(signed_head, response_kind, body_owed)
-            .or_else(|| policy.presigned_urls.refusal(signed_head, response_kind, body_owed));
+            .refusal_for_service(signed_head, response_kind, body_owed, signing_service)
+            .or_else(|| {
+                (!non_s3)
+                    .then(|| policy.presigned_urls.refusal(signed_head, response_kind, body_owed))
+                    .flatten()
+            });
         let refusal = legacy_refusal.filter(|_| !by_header_token)?;
         self.hold_auth_failure_floor(auth_started).await;
         Some(outcome.refuse(refusal))

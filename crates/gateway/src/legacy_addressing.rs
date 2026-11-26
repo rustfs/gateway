@@ -27,10 +27,12 @@ use http::request::Parts;
 use rustfs_gateway_core::codec::{legacy_rustfs_decodable, legacy_rustfs_target};
 use rustfs_gateway_core::{CodecError, RouteRequestParts, Router};
 use rustfs_gateway_http::WireRequest;
+use rustfs_gateway_sig::SigService;
 use rustfs_gateway_types::{ErrorCode, NamePolicy, PathSplit};
 
 use crate::ext::target_of_path;
 use crate::ext::{HostQuery, HostRefusal, HostResolver, ResolvedHost};
+use crate::service::is_non_s3_service;
 
 /// Reads a `GET` of exactly `//` as a `GET` of `/`, query kept, before acceptance, so that routing
 /// and the signature both read `/`.
@@ -42,8 +44,12 @@ use crate::ext::{HostQuery, HostRefusal, HostResolver, ResolvedHost};
 /// and it makes `GET //` signed over `//` fail; kept so that browser keeps listing its buckets. The
 /// intended future behaviour is routing `GET //` to `ListBuckets` with the signature verified over
 /// the path sent.
-pub(crate) fn rewrite_double_slash_root(names: &NamePolicy, parts: &mut Parts) {
-    if names.path_split() != PathSplit::RustfsLegacy || parts.method != Method::GET || parts.uri.path() != "//" {
+pub(crate) fn rewrite_double_slash_root(names: &NamePolicy, signing_service: Option<SigService>, parts: &mut Parts) {
+    if is_non_s3_service(signing_service)
+        || names.path_split() != PathSplit::RustfsLegacy
+        || parts.method != Method::GET
+        || parts.uri.path() != "//"
+    {
         return;
     }
     let target = match parts.uri.query() {
@@ -74,6 +80,9 @@ pub(crate) fn classify<B>(
     wire: &WireRequest<B>,
     mut resolved: ResolvedHost,
 ) -> Result<ResolvedHost, CodecError> {
+    if is_non_s3_service(router.signing_service()) {
+        return Ok(resolved);
+    }
     let refusal = resolver.refusal(&HostQuery {
         host: wire.host(),
         path: wire.raw_path().as_str(),
@@ -145,7 +154,7 @@ mod tests {
             .body(())
             .expect("a valid request")
             .into_parts();
-        rewrite_double_slash_root(names, &mut parts);
+        rewrite_double_slash_root(names, None, &mut parts);
         parts.uri.to_string()
     }
 
@@ -246,6 +255,29 @@ mod tests {
             classified(&NamePolicy::default(), "/bkt%2Fkey", TargetKind::Bucket),
             Ok(TargetKind::Bucket),
             "the literal split"
+        );
+    }
+
+    /// Negative — a non-S3 service never rewrites `GET //` or validates action paths as S3 buckets.
+    #[test]
+    fn n_non_s3_service_skips_double_slash_rewrite_and_bucket_validation() {
+        let (mut parts, ()) = http::Request::builder()
+            .method(Method::GET)
+            .uri("//")
+            .body(())
+            .expect("a valid request")
+            .into_parts();
+        rewrite_double_slash_root(&legacy(), Some(SigService::S3Vectors), &mut parts);
+        assert_eq!(parts.uri.to_string(), "//");
+
+        let router = rustfs_gateway_core::RouterBuilder::for_service(SigService::S3Vectors)
+            .build()
+            .expect("empty S3Vectors router");
+        let wire = accepted(Method::POST, "/PutVectors");
+        let resolved = ResolvedHost::standard(rustfs_gateway_core::TargetKind::Bucket);
+        assert!(
+            classify(&legacy(), &crate::ext::PathStyleOnly, &router, &wire, resolved).is_ok(),
+            "non-S3 /PutVectors must not be validated as an S3 bucket name"
         );
     }
 

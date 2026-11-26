@@ -34,6 +34,9 @@ use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 use crate::builder::{denial_sentences::DenialSentences, sse_refusals::SseRefusals};
 use crate::{close::ConnectionIntent, ext::Denial, trace::RequestTrace};
 
+#[path = "render_json.rs"]
+pub(crate) mod json;
+
 /// Optional refusal headers, details, and redacted signature diagnostics behind one pointer.
 #[derive(Clone, Default)]
 struct Extras {
@@ -483,15 +486,12 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
     }
     trace.apply(headers);
     response.extensions_mut().insert(error.clone());
-    // Only the transport turns these typed extensions into socket action.
     response.extensions_mut().insert(error.connection);
     crate::close::attach_lingering_read(error.code.as_ref(), error.body_unfinished, &mut response);
     response
 }
 
 /// The connection verdict a rendered refusal is carrying, if it is carrying one.
-///
-/// A transport consumes this intent; it is not proof that a socket closed.
 #[must_use]
 pub fn connection_intent_of<B>(response: &Response<B>) -> Option<ConnectionIntent> {
     response.extensions().get::<ConnectionIntent>().copied()
