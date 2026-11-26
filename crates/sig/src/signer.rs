@@ -195,17 +195,17 @@ impl From<SigParseError> for SignerError {
 /// (`x-amz-date`, `x-amz-content-sha256`, `x-amz-security-token`, `x-amz-trailer`) to a copy of it,
 /// so a caller never has to spell them, and never has to keep two copies in step.
 pub struct SigningRequest<'r> {
-    method: &'r Method,
-    path: &'r str,
-    query: &'r str,
-    headers: &'r HeaderMap,
-    host: &'r RawHost,
-    payload: PayloadMode,
-    timestamp: AmzDate,
+    pub(crate) method: &'r Method,
+    pub(crate) path: &'r str,
+    pub(crate) query: &'r str,
+    pub(crate) headers: &'r HeaderMap,
+    pub(crate) host: &'r RawHost,
+    pub(crate) payload: PayloadMode,
+    pub(crate) timestamp: AmzDate,
     timestamp_header: TimestampHeader,
     signed_headers: Option<&'r [HeaderName]>,
-    wire_content_length: Option<u64>,
-    decoded_content_length: Option<u64>,
+    pub(crate) wire_content_length: Option<u64>,
+    pub(crate) decoded_content_length: Option<u64>,
 }
 
 /// Which header a header-signed request is dated with.
@@ -317,6 +317,29 @@ pub struct SignedRequest {
 }
 
 impl SignedRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts(
+        method: Method,
+        path: String,
+        query: String,
+        headers: HeaderMap,
+        location: SigLocation,
+        canonical_request: String,
+        string_to_sign: String,
+        signature_hex: String,
+    ) -> Self {
+        Self {
+            method,
+            path,
+            query,
+            headers,
+            location,
+            canonical_request,
+            string_to_sign,
+            signature_hex,
+        }
+    }
+
     /// The request method.
     #[must_use]
     pub fn method(&self) -> &Method {

@@ -108,8 +108,14 @@ pub(crate) fn unframed_upload_with_signed_trailers(headers: &HeaderMap) -> Optio
     if !matches!(mode, PayloadMode::ExactSha256(_) | PayloadMode::Unsigned) {
         return None;
     }
-    let auth = rustfs_gateway_sig::SigV4Authorization::parse(single("authorization")?).ok()?;
-    if !auth.signed_headers().split(';').any(|name| name == "x-amz-trailer") {
+    let auth_header = single("authorization")?;
+    let covers_trailer = rustfs_gateway_sig::SigV4Authorization::parse(auth_header)
+        .ok()
+        .is_some_and(|auth| auth.signed_headers().split(';').any(|name| name == "x-amz-trailer"))
+        || rustfs_gateway_sig::SigV4aAuthorization::parse(auth_header)
+            .ok()
+            .is_some_and(|auth| auth.signed_headers().split(';').any(|name| name == "x-amz-trailer"));
+    if !covers_trailer {
         return None;
     }
     let obligation = body_digest_obligation(&mode, SigLocation::Header).ok()?;
@@ -207,7 +213,7 @@ pub(crate) fn anonymous_framing(headers: &HeaderMap, decode: bool) -> Result<Opt
     }
     match payload_mode(headers, SigLocation::Header)? {
         mode @ PayloadMode::StreamingUnsigned { .. } => Ok(Some(mode)),
-        PayloadMode::StreamingSigned { .. } => Err(ordinary_refusal(
+        PayloadMode::StreamingSigned { .. } | PayloadMode::StreamingEcdsa { .. } => Err(ordinary_refusal(
             ErrorCode::INVALID_REQUEST,
             "a chunk-signed streaming payload needs a signed request",
         )),

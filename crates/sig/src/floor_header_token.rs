@@ -32,7 +32,7 @@ use crate::verifier::detect_aws_credential_marker;
 /// signature, and another case of one is what a host's own pre-routing guard may read as a
 /// presigned URL (legacy RustFS's reads `x-amz-signature` so). A token request is answered by
 /// the floor alone, so the floor must refuse whatever such a guard would have refused.
-const PRESIGNED_PARAMETERS: [&str; 8] = [
+const PRESIGNED_PARAMETERS: [&str; 9] = [
     "x-amz-algorithm",
     "x-amz-credential",
     "x-amz-signature",
@@ -41,6 +41,7 @@ const PRESIGNED_PARAMETERS: [&str; 8] = [
     "x-amz-date",
     "x-amz-expires",
     "x-amz-signedheaders",
+    "x-amz-region-set",
 ];
 
 /// Whether the query names a SigV4 presigned parameter, ignoring ASCII case, on the decoded name.

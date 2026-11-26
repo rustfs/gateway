@@ -143,7 +143,9 @@ fn legacy_refusal(head: &SignedHead<'_>) -> Option<(ErrorCode, String)> {
 fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, String)> {
     let Some(credential) = read_authorization(value) else {
         // An unreadable value that starts with the SigV4 token is RustFS's guard's to answer.
-        if value.starts_with(SIGV4_ALGORITHM) {
+        // A 4-field SigV4a header is validated by `sigv4_header_guard`, `SecurityFloor`, and
+        // `SigV4Authenticator` rather than rejected by the 5-field legacy SigV4 parser.
+        if value.starts_with(SIGV4_ALGORITHM) || value.starts_with(rustfs_gateway_sig::ALGORITHM_SIGV4A) {
             return None;
         }
         return Some((ErrorCode::INVALID_REQUEST, "invalid header: authorization".to_owned()));

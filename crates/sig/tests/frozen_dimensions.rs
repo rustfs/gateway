@@ -26,7 +26,7 @@ use rustfs_gateway_sig::{
     ALGORITHM_SIGV2_PREFIX, ALGORITHM_SIGV4, ALGORITHM_SIGV4A, AuthScheme, CtBytes, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX,
     PayloadMode, STREAMING_ECDSA, STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER,
     STREAMING_UNSIGNED_TRAILER, SessionToken, SigFamily, SigIdentity, SigLocation, SigParseError, SigService, Signature,
-    TrailerName, TrailerSet, UNSIGNED_PAYLOAD, Unimplemented, VerifyRejection,
+    TrailerName, TrailerSet, UNSIGNED_PAYLOAD, VerifyRejection,
 };
 
 const DIGEST: [u8; 32] = [
@@ -247,14 +247,34 @@ fn c_sig_0011_streaming_modes_require_decoded_length() {
     assert!(unsigned.requires_decoded_length());
 }
 
-/// c-sig-0012 — the SigV4a streaming values are refused with `NotImplemented`, never decoded as
-/// SigV4 chunks.
+/// c-sig-0012 — the SigV4a streaming values parse to their own ECDSA streaming mode, never degrade
+/// to SigV4 HMAC chunks, reject mismatched trailer declarations, and stay `NotImplemented` when
+/// presigned.
 #[test]
 fn c_sig_0012_streaming_sigv4a_is_not_implemented() {
-    for value in [STREAMING_ECDSA, STREAMING_ECDSA_TRAILER] {
-        let err = PayloadMode::parse(value, TrailerSet::None).expect_err("must not parse");
-        assert_eq!(err, SigParseError::NotImplemented(Unimplemented::StreamingSigV4a));
-    }
+    let plain = PayloadMode::parse(STREAMING_ECDSA, TrailerSet::None).expect("ECDSA streaming parses");
+    assert!(plain.is_framed());
+    assert!(plain.has_chunk_signatures());
+    assert!(plain.is_ecdsa_streaming());
+    assert!(plain.requires_decoded_length());
+    assert_eq!(plain.canonical_payload_token().as_str(), STREAMING_ECDSA);
+    assert!(!matches!(plain, PayloadMode::StreamingSigned { .. }));
+
+    let trailer = declared(&["x-amz-checksum-crc32"], true);
+    let with_trailer = PayloadMode::parse(STREAMING_ECDSA_TRAILER, trailer).expect("ECDSA trailer streaming parses");
+    assert!(with_trailer.is_framed());
+    assert!(with_trailer.has_chunk_signatures());
+    assert!(with_trailer.is_ecdsa_streaming());
+    assert_eq!(with_trailer.canonical_payload_token().as_str(), STREAMING_ECDSA_TRAILER);
+
+    assert_eq!(
+        PayloadMode::parse(STREAMING_ECDSA_TRAILER, TrailerSet::None),
+        Err(SigParseError::TrailerRequired)
+    );
+    assert_eq!(
+        PayloadMode::parse(STREAMING_ECDSA, declared(&["x-amz-checksum-crc32"], true)),
+        Err(SigParseError::TrailerNotAllowed)
+    );
 }
 
 /// c-sig-0013 — `AWS4-ECDSA-P256-SHA256` parses to its own family and never degrades to SigV4.
@@ -263,10 +283,10 @@ fn c_sig_0013_sigv4a_never_degrades_to_sigv4() {
     let family = SigFamily::from_algorithm(ALGORITHM_SIGV4A).expect("recognised");
     assert_eq!(family, SigFamily::V4a);
     assert_ne!(family, SigFamily::V4);
-    assert!(!family.is_verification_implemented());
-    assert_eq!(family.ensure_implemented(), Err(SigParseError::NotImplemented(Unimplemented::SigV4a)));
+    assert!(family.is_verification_implemented());
+    assert_eq!(family.ensure_implemented(), Ok(()));
     let scheme = AuthScheme::new(family, SigLocation::Header, SigIdentity::LongTerm, SigService::S3);
-    assert!(!scheme.is_verification_implemented());
+    assert!(scheme.is_verification_implemented());
 }
 
 /// c-sig-0020 (runtime half) — two different algorithms are never compared by truncating or

@@ -31,7 +31,7 @@ use crate::contracts::SIGNATURE_PAYLOAD_TOKEN_VERBATIM;
 use smallvec::SmallVec;
 
 use crate::codec::{decode_base64_sha256, decode_hex_lower, encode_base64_sha256, encode_hex_lower};
-use crate::error::{SigParseError, Unimplemented};
+use crate::error::SigParseError;
 
 /// The `x-amz-content-sha256` value that means "do not verify the payload".
 pub const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
@@ -41,9 +41,9 @@ pub const STREAMING_SIGNED: &str = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD";
 pub const STREAMING_SIGNED_TRAILER: &str = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER";
 /// The `x-amz-content-sha256` value that selects unsigned aws-chunked framing with a trailer.
 pub const STREAMING_UNSIGNED_TRAILER: &str = "STREAMING-UNSIGNED-PAYLOAD-TRAILER";
-/// The SigV4a streaming value; recognised, refused with `501`, never treated as SigV4.
+/// The SigV4a streaming value selecting ECDSA P-256 signed aws-chunked framing.
 pub const STREAMING_ECDSA: &str = "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD";
-/// The SigV4a streaming-with-trailer value; recognised, refused with `501`.
+/// The SigV4a streaming-with-trailer value selecting ECDSA P-256 signed aws-chunked framing.
 pub const STREAMING_ECDSA_TRAILER: &str = "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD-TRAILER";
 
 /// Lowercase hex SHA-256 of the empty byte string, the token signed for a body-less request.
@@ -269,6 +269,12 @@ pub enum PayloadMode {
         /// The declared trailer set; [`TrailerSet::None`] for the non-`-TRAILER` form.
         trailer: TrailerSet,
     },
+    /// `STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD[-TRAILER]`: aws-chunked framing, each chunk
+    /// signed with ECDSA P-256 (SigV4a).
+    StreamingEcdsa {
+        /// The declared trailer set; [`TrailerSet::None`] for the non-`-TRAILER` form.
+        trailer: TrailerSet,
+    },
     /// `STREAMING-UNSIGNED-PAYLOAD-TRAILER`: aws-chunked framing, no chunk signatures.
     StreamingUnsigned {
         /// The declared trailer set; always [`TrailerSet::Declared`] when produced by [`PayloadMode::parse`].
@@ -284,8 +290,6 @@ impl PayloadMode {
     ///
     /// # Errors
     ///
-    /// * [`SigParseError::NotImplemented`] for the SigV4a streaming values. The caller returns
-    ///   `501`; it must not fall through to the SigV4 chunk decoder.
     /// * [`SigParseError::TrailerNotAllowed`] / [`SigParseError::TrailerRequired`] when the
     ///   declared trailers disagree with the mode.
     /// * [`SigParseError::TrailerSignatureNotAllowed`] for a trailer signature on the unsigned
@@ -306,6 +310,14 @@ impl PayloadMode {
                 require_trailer(&trailer)?;
                 Ok(Self::StreamingSigned { trailer })
             }
+            STREAMING_ECDSA => {
+                reject_trailer(&trailer)?;
+                Ok(Self::StreamingEcdsa { trailer })
+            }
+            STREAMING_ECDSA_TRAILER => {
+                require_trailer(&trailer)?;
+                Ok(Self::StreamingEcdsa { trailer })
+            }
             STREAMING_UNSIGNED_TRAILER => {
                 require_trailer(&trailer)?;
                 if trailer.declared().is_some_and(DeclaredTrailers::is_signed) {
@@ -313,7 +325,6 @@ impl PayloadMode {
                 }
                 Ok(Self::StreamingUnsigned { trailer })
             }
-            STREAMING_ECDSA | STREAMING_ECDSA_TRAILER => Err(SigParseError::NotImplemented(Unimplemented::StreamingSigV4a)),
             other if other.len() == 64 => {
                 reject_trailer(&trailer)?;
                 decode_hex_lower::<32>(other)
@@ -336,7 +347,10 @@ impl PayloadMode {
     /// is not an input to it, here or anywhere downstream.
     #[must_use]
     pub fn is_framed(&self) -> bool {
-        matches!(self, Self::StreamingSigned { .. } | Self::StreamingUnsigned { .. })
+        matches!(
+            self,
+            Self::StreamingSigned { .. } | Self::StreamingEcdsa { .. } | Self::StreamingUnsigned { .. }
+        )
     }
 
     /// Whether `x-amz-decoded-content-length` must be present.
@@ -353,14 +367,22 @@ impl PayloadMode {
     /// Whether each chunk carries its own signature.
     #[must_use]
     pub fn has_chunk_signatures(&self) -> bool {
-        matches!(self, Self::StreamingSigned { .. })
+        matches!(self, Self::StreamingSigned { .. } | Self::StreamingEcdsa { .. })
+    }
+
+    /// Whether each chunk carries an ECDSA P-256 (SigV4a) signature rather than HMAC-SHA256.
+    #[must_use]
+    pub fn is_ecdsa_streaming(&self) -> bool {
+        matches!(self, Self::StreamingEcdsa { .. })
     }
 
     /// The declared trailer set, for the streaming modes.
     #[must_use]
     pub fn trailer(&self) -> Option<&TrailerSet> {
         match self {
-            Self::StreamingSigned { trailer } | Self::StreamingUnsigned { trailer } => Some(trailer),
+            Self::StreamingSigned { trailer } | Self::StreamingEcdsa { trailer } | Self::StreamingUnsigned { trailer } => {
+                Some(trailer)
+            }
             _ => None,
         }
     }
@@ -387,6 +409,11 @@ impl PayloadMode {
                 STREAMING_SIGNED_TRAILER
             } else {
                 STREAMING_SIGNED
+            }),
+            Self::StreamingEcdsa { trailer } => Cow::Borrowed(if trailer.is_declared() {
+                STREAMING_ECDSA_TRAILER
+            } else {
+                STREAMING_ECDSA
             }),
             Self::StreamingUnsigned { .. } => Cow::Borrowed(STREAMING_UNSIGNED_TRAILER),
         };

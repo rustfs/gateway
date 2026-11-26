@@ -112,6 +112,10 @@ impl PayloadFramingSource for FramingOf<'_> {
     fn declares_trailers(&self) -> bool {
         self.0.trailer().is_some_and(rustfs_gateway_sig::TrailerSet::is_declared)
     }
+
+    fn has_ecdsa_chunk_signatures(&self) -> bool {
+        self.0.is_ecdsa_streaming()
+    }
 }
 
 /// One request's `aws-chunked` decode, prepared from the head and run over the wire bytes.
@@ -225,7 +229,7 @@ impl ChunkIngest {
             })?;
 
         let signer = if framing.has_chunk_signatures() {
-            Some(build_signer(sink, seed)?)
+            Some(build_signer(&framing, sink, seed)?)
         } else {
             None
         };
@@ -362,14 +366,23 @@ fn decoded_length_header(headers: &HeaderMap) -> Option<&str> {
 /// this runs after the verdict was checked, so the presented value has already been shown equal to
 /// the derived one in constant time. A seed read before that check would be a value an attacker
 /// chose.
-fn build_signer(sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3Error> {
+fn build_signer(framing: &ChunkFraming, sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3Error> {
     let Some(material) = sink.get() else {
         return Err(chunk_signatures_unavailable());
     };
+    let scope = ChunkScope::new(material.scope_line(), material.amz_date()).map_err(from_chunk_reject)?;
+    if framing.has_ecdsa_chunk_signatures() {
+        let Some(key) = material.chunk_verifying_key() else {
+            return Err(chunk_signatures_unavailable());
+        };
+        let Some(seed) = material.chunk_ecdsa_seed() else {
+            return Err(chunk_signatures_unavailable());
+        };
+        return Ok(ChunkSigner::new_ecdsa(key, scope, seed));
+    }
     let Some(key) = material.chunk_signing_key() else {
         return Err(chunk_signatures_unavailable());
     };
-    let scope = ChunkScope::new(material.scope_line(), material.amz_date()).map_err(from_chunk_reject)?;
     let seed = seed
         .ok_or_else(chunk_signatures_unavailable)
         .and_then(|hex| ChunkSeed::from_hex(hex).map_err(from_chunk_reject))?;
@@ -441,6 +454,10 @@ mod seed_tests;
 #[path = "chunked_length_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod length_tests;
+#[cfg(test)]
+#[path = "chunked_sigv4a_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod sigv4a_tests;
 #[cfg(test)]
 #[path = "chunked_trailer_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]

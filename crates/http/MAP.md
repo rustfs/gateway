@@ -22,7 +22,8 @@ after it has accepted.
 | `src/ingest/pipeline.rs` | The single pass over an upload: read, decode, sign, digest, verify, deliver. | The order of the pass, or what is handed over before verification, is in question. |
 | `src/ingest/pipeline/tests.rs` | Private run-metadata bounds under fragmentation, compaction and verification failures. | Pending ranges or their storage change. |
 | `src/ingest/decoder.rs` | The `aws-chunked` state machine, working in place on the socket buffer. | A chunk boundary or size line is decoded wrongly. |
-| `src/ingest/signer.rs` | The chunk signature chain: one derivation per scope, one HMAC per chunk, no allocation. | A signed streaming body verifies wrongly. |
+| `src/ingest/signer.rs` | The chunk signature chain: one derivation per scope, HMAC-SHA256 or ECDSA P-256 per chunk, stack-resident STS buffer. | A signed streaming body verifies wrongly. |
+| `src/ingest/signer_ecdsa.rs` | SigV4a ECDSA P-256 public verifying key adoption, `EcdsaChunkSeed`, strict DER + AWS CRT `'*'`-padding parsing, and high-S-tolerant verification. | Streaming SigV4a chunk or trailer verification changes. |
 | `src/ingest/trailer.rs` | Strict bounded `aws-chunked` trailer parsing and declared-set matching. | A trailer name, size, count, or EOF boundary is accepted wrongly. |
 | `src/ingest/reject.rs` | Every way an `aws-chunked` body is refused, and what each refusal is on the wire. | A chunked-body refusal's status or wording is wrong. |
 | `src/form/mod.rs` | The POST Object form, read so that the file's ceiling is known before the file is. | The policy-before-file order is in question. |

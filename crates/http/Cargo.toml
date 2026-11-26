@@ -50,6 +50,7 @@ smallvec = { workspace = true }
 # `zeroize` wipes a derived key when it is dropped or evicted. The four-step key DERIVATION is
 # deliberately absent: it lives once, in `rustfs-gateway-sig`, and this crate adopts its result.
 hmac = { workspace = true }
+p256 = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }

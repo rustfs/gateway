@@ -29,7 +29,7 @@ use crate::secret::SessionToken;
 
 /// The `Authorization` algorithm token for SigV4.
 pub const ALGORITHM_SIGV4: &str = "AWS4-HMAC-SHA256";
-/// The `Authorization` algorithm token for SigV4a; recognised, refused with `501`.
+/// The `Authorization` algorithm token for SigV4a (`AWS4-ECDSA-P256-SHA256`).
 pub const ALGORITHM_SIGV4A: &str = "AWS4-ECDSA-P256-SHA256";
 /// The `Authorization` scheme prefix for SigV2 (`AWS <access-key>:<signature>`).
 pub const ALGORITHM_SIGV2_PREFIX: &str = "AWS";
@@ -86,20 +86,17 @@ impl SigFamily {
     }
 
     /// Whether this crate can verify signatures of this family.
-    ///
-    /// `false` for [`SigFamily::V4a`]. A caller that sees `false` must reject with
-    /// [`SigParseError::NotImplemented`]; treating it as "try something else" is the downgrade
-    /// this method exists to prevent.
     #[must_use]
     pub const fn is_verification_implemented(&self) -> bool {
-        matches!(self, Self::V2 | Self::V4)
+        matches!(self, Self::V2 | Self::V4 | Self::V4a)
     }
 
     /// The rejection to return when this family is recognised but unimplemented.
     ///
     /// # Errors
     ///
-    /// [`SigParseError::NotImplemented`] for [`SigFamily::V4a`]; `Ok(())` otherwise.
+    /// [`SigParseError::NotImplemented`] for any unimplemented future family; `Ok(())` for
+    /// [`SigFamily::V2`], [`SigFamily::V4`], and [`SigFamily::V4a`].
     pub const fn ensure_implemented(&self) -> Result<(), SigParseError> {
         if self.is_verification_implemented() {
             Ok(())
@@ -303,6 +300,18 @@ impl AuthScheme {
         Self::new(SigFamily::V4, SigLocation::Query, identity, service)
     }
 
+    /// SigV4a (`AWS4-ECDSA-P256-SHA256`) in the `Authorization` header.
+    #[must_use]
+    pub fn sigv4a_header(identity: SigIdentity, service: SigService) -> Self {
+        Self::new(SigFamily::V4a, SigLocation::Header, identity, service)
+    }
+
+    /// SigV4a (`AWS4-ECDSA-P256-SHA256`) in query parameters — a presigned URL.
+    #[must_use]
+    pub fn sigv4a_presigned(identity: SigIdentity, service: SigService) -> Self {
+        Self::new(SigFamily::V4a, SigLocation::Query, identity, service)
+    }
+
     /// SigV2 in the `Authorization` header.
     #[must_use]
     pub fn sigv2_header(identity: SigIdentity, service: SigService) -> Self {
@@ -336,11 +345,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sigv4a_parses_to_its_own_family_and_stays_unimplemented() {
+    fn sigv4a_parses_to_its_own_family_and_is_implemented() {
         let family = SigFamily::from_algorithm(ALGORITHM_SIGV4A).expect("recognised");
         assert_eq!(family, SigFamily::V4a);
-        assert!(!family.is_verification_implemented());
-        assert_eq!(family.ensure_implemented(), Err(SigParseError::NotImplemented(Unimplemented::SigV4a)));
+        assert!(family.is_verification_implemented());
+        assert_eq!(family.ensure_implemented(), Ok(()));
     }
 
     #[test]
