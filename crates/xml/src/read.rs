@@ -271,9 +271,11 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
 /// Parses stored XML using the historical RustFS text interpretation.
 ///
 /// Legacy-compat (rustfs/backlog#2734): stored text keeps literal CR/CRLF and raw characters such
-/// as NUL, while CDATA is ignored. Request XML should use [`parse_with_limits`] instead. Structure,
-/// limits, attributes, and character-reference validation remain unchanged. Accepted text is not
-/// necessarily representable by the XML writer.
+/// as NUL, ignores CDATA inside elements, and ignores text outside the root element (matching the
+/// historical P9 persistence decoders). Request XML should use [`parse_with_limits`] instead.
+/// Structure, limits, attributes, character-reference validation, and outside-root CDATA or
+/// reference refusals remain unchanged. Accepted text is not necessarily representable by the XML
+/// writer.
 ///
 /// # Errors
 ///
@@ -376,6 +378,11 @@ fn parse_with_text_reading(body: &[u8], limits: XmlLimits, text_reading: TextRea
             }
             Ok(Event::Text(chunk)) => {
                 let Some(node) = stack.last_mut() else {
+                    if matches!(text_reading, TextReading::Xml10)
+                        && !chunk.as_ref().iter().all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+                    {
+                        return Err(XmlError::Malformed);
+                    }
                     continue;
                 };
                 match text_reading {
@@ -391,12 +398,12 @@ fn parse_with_text_reading(body: &[u8], limits: XmlLimits, text_reading: TextRea
                 }
             }
             Ok(Event::CData(chunk)) => {
+                let Some(node) = stack.last_mut() else {
+                    return Err(XmlError::Malformed);
+                };
                 if matches!(text_reading, TextReading::LegacyPersistence) {
                     continue;
                 }
-                let Some(node) = stack.last_mut() else {
-                    continue;
-                };
                 // CDATA is part of the same parsed entity and follows the same §2.11 line-end
                 // rule; only entity expansion differs from ordinary text.
                 let decoded = chunk.xml10_content().map_err(|_| XmlError::NotUtf8)?;
@@ -408,7 +415,7 @@ fn parse_with_text_reading(body: &[u8], limits: XmlLimits, text_reading: TextRea
             // parser that expanded them would decide what `&xxe;` means before this code runs.
             Ok(Event::GeneralRef(reference)) => {
                 let Some(node) = stack.last_mut() else {
-                    continue;
+                    return Err(XmlError::Malformed);
                 };
                 let resolved = match reference.resolve_char_ref() {
                     Ok(Some(character)) => character,
@@ -453,12 +460,18 @@ fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String
         let (prefix, local) = split_name(attribute.key.as_ref())?;
         // `xmlns:p="…"` binds `p`; a bare `xmlns="…"` binds the *default* element namespace, and
         // an unprefixed attribute is in no namespace whatever the default is. Only the first
-        // form is a binding this crate can be asked about.
+        // form is a binding this crate can be asked about, but both attribute values must still
+        // pass XML 1.0 normalization and representability checks.
         if prefix.as_deref() == Some("xmlns") {
             let value = attribute
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map_err(|_| XmlError::UnsupportedEntity)?;
             declared.push((local, Arc::from(representable(value.as_ref())?)));
+        } else if prefix.is_none() && local == "xmlns" {
+            let value = attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|_| XmlError::UnsupportedEntity)?;
+            representable(value.as_ref())?;
         }
     }
     Ok(declared)
@@ -481,20 +494,20 @@ fn read_attributes(
         if prefix.as_deref() == Some("xmlns") || (prefix.is_none() && name == "xmlns") {
             continue;
         }
+        let value = attribute
+            .normalized_value(XmlVersion::Implicit1_0)
+            .map_err(|_| XmlError::UnsupportedEntity)?;
+        representable(value.as_ref())?;
         let namespace = match prefix {
             // An undeclared prefix names a namespace the document never bound. Storing it with
             // no namespace would make it indistinguishable from the unprefixed attribute of the
-            // same local name, so it is dropped instead.
+            // same local name, so it is dropped instead — after its value has been validated.
             Some(prefix) => match resolve(scopes, &prefix) {
                 Some(namespace) => Some(namespace),
                 None => continue,
             },
             None => None,
         };
-        let value = attribute
-            .normalized_value(XmlVersion::Implicit1_0)
-            .map_err(|_| XmlError::UnsupportedEntity)?;
-        representable(value.as_ref())?;
         out.push(XmlAttribute {
             name,
             namespace,

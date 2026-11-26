@@ -20,9 +20,9 @@
 
 use std::borrow::Cow;
 
-use rustfs_gateway_xml::XmlWriter;
+use rustfs_gateway_xml::{XmlLimits, XmlWriter, parse_legacy_persistence_with_limits};
 
-use super::{PersistenceCodecError, optional_child, parse_persistence_root};
+use super::{PersistenceCodecError, optional_child};
 
 /// The complete bucket Notification configuration persisted by the old path.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -214,7 +214,14 @@ fn route_projection(
 /// duplicate required fields, or unexpected nested elements.
 pub fn parse_notification(input: &[u8]) -> Result<PersistedNotificationConfiguration, PersistenceCodecError> {
     let body = strip_inert_doctype(input, "NotificationConfiguration");
-    let root = parse_persistence_root(body.as_ref(), "NotificationConfiguration")?;
+    let bound = body.len().max(1);
+    let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
+        unreachable!("max(1) makes every persistence XML limit non-zero");
+    };
+    let root = parse_legacy_persistence_with_limits(body.as_ref(), limits)?;
+    if root.name != "NotificationConfiguration" {
+        return Err(PersistenceCodecError::WrongRoot);
+    }
     let event_bridge_configuration = optional_child(&root, "EventBridgeConfiguration")?
         .map(parse_event_bridge)
         .transpose()?;

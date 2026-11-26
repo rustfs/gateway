@@ -41,6 +41,8 @@ mod fragment_tests;
 #[cfg(test)]
 mod layout_tests;
 #[cfg(test)]
+mod read_validation_tests;
+#[cfg(test)]
 mod tests;
 
 pub use crate::chars::{UNREPRESENTABLE, is_xml_char, is_xml_name, is_xml_representable};

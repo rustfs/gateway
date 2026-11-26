@@ -19,6 +19,7 @@ name and every ordering is supplied by the caller, from IR data.
 | `src/tests.rs` | Writer byte-shape controls and a negative-majority reader matrix, including the P3-05 XML limit cases. | Before changing either half. |
 | `src/layout_tests.rs` | The legacy layout: the compact declaration, declared child orders and entity-tag quotes on and off, and the compact declaration's stripping (rustfs/gateway#1078). | Before changing `legacy_layout`, `order_children` or `entity_tag_element`. |
 | `src/fragment_tests.rs` | Appended elements reject document declarations before changing their parent, while preserving nested elements and character content. | Before changing `append_fragment`. |
+| `src/read_validation_tests.rs` | Negative-majority tests for bare `xmlns` values, undeclared-prefix attributes, and outside-root text, CDATA, and general references. | Before changing attribute or outside-root validation in `src/read.rs`. |
 
 ## Shape decisions worth not re-litigating
 
