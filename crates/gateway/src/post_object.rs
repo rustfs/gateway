@@ -46,7 +46,7 @@ use crate::{ErrorCode, HandlerError, RequestBody, ResponseKind};
 
 mod key_constraints;
 mod response;
-use response::PostObjectResponsePlan;
+pub(crate) use response::PostObjectResponsePlan;
 
 enum AcceptedPolicy {
     SigV4(Box<PostPolicy>),
