@@ -73,6 +73,7 @@ compare and why this is not an in-process dual stack.
 | `src/tests/seam.rs` | Judges the seam diff: rows as declared, matrix differences registered, every legacy input member accounted for, empty optional headers, no stale finding, negative controls. | A seam judgement fails. |
 | `src/tests/seam_outputs.rs` | Judges the seam answer diff: every answer row and every encode-matrix sample through the production seam as declared (the samples the RustFS profile answers otherwise pinned beside), no value the legacy answer holds missing from the gateway's, every legacy output member written or refused by name, no stale answer finding, negative controls. | A seam answer judgement fails. |
 | `src/tests/seam_switches.rs` | The switch census of the RustFS profile: every call of the gateway's two `rustfs_profile` preset halves and of `compat/sut`'s builder chain beside them, but the assembly the seam diff replaces, is turned on by the seam stack; the source reading's negative controls. | The RustFS profile gains a switch, or the preset's switches are read wrongly. |
+| `benches/gateway_vs_s3s.rs`, `benches/gateway_vs_s3s/backends.rs` | Head-to-head `rustfs-gateway` vs pinned `s3s` allocation, latency, and throughput records for GET, PUT, ListObjectsV2, DeleteObjects, and PostObject. | Comparing per-request overhead or allocations across the two stacks. |
 
 ## Verify
 

@@ -72,3 +72,12 @@ time = { version = "0.3.47", default-features = false }
 # The known-diffs register is TOML, like every other reviewed register in this repository. Already
 # in the lock at this version.
 toml = "1.1"
+
+[dev-dependencies]
+dhat = { workspace = true }
+md-5 = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+
+[[bench]]
+name = "gateway_vs_s3s"
+harness = false

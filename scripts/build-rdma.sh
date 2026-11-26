@@ -68,6 +68,6 @@ fi
 
 source "$private/scripts/build-env.sh"
 
-exec cargo "+${RUSTFS_RDMA_TOOLCHAIN:-1.98.1}" build \
+exec cargo "+${RUSTFS_RDMA_TOOLCHAIN:-1.97.1}" build \
     --manifest-path "$ROOT_DIR/rdma/Cargo.toml" --features rdma \
     -j "${CARGO_BUILD_JOBS:-2}" "$@"

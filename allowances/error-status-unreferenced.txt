@@ -14,28 +14,28 @@
 # Format: WireCode|reason
 AccountProblem|account-level condition; this gateway has no account model, the storage side answers it
 AllAccessDisabled|account-level condition; same owner as AccountProblem
-AmbiguousGrantByEmailAddress|grant-by-email ACL; the ACL family resolves no email grantees
-CredentialsNotSupported|session-credential path; P2 verifies signatures but raises no session-token codes
-CrossLocationLoggingProhibited|bucket-logging family; no logging operation is served yet
-IllegalVersioningConfigurationException|versioning family; PutBucketVersioning is not served yet
-IncorrectNumberOfFilesInPostRequest|browser POST upload; no POST object-upload family exists
-InlineDataTooLarge|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
+AmbiguousGrantByEmailAddress|grant-by-email ACL; crates/core/src/ops/shared/acl.rs validates syntax without resolving email grantees to accounts
+CredentialsNotSupported|session-credential path; crates/sig raises ExpiredToken but leaves unsupported-credential refusals to storage/STS
+CrossLocationLoggingProhibited|bucket-logging family; PutBucketLogging is served, and cross-region target-bucket checks belong to the storage side
+IllegalVersioningConfigurationException|versioning family; PutBucketVersioning is served, shared/bucket_config.rs raises MalformedXML for invalid values, and bucket-state conflicts belong to the storage side
+IncorrectNumberOfFilesInPostRequest|browser POST upload; PostObject is served, and crates/gateway/src/post_object/refusals.rs maps form-file count/structure faults to MalformedPOSTRequest
+InlineDataTooLarge|browser POST upload; PostObject is served, and form prelude/size refusals map to MalformedPOSTRequest or EntityTooLarge in crates/gateway/src/post_object/refusals.rs
 InvalidBucketState|bucket-state conflict the storage side detects, not the protocol layer
-InvalidEncryptionAlgorithmError|SSE configuration family; no encryption-configuration operation is served yet
-InvalidPayer|requester-pays; no payer model exists in this gateway
-InvalidRetentionPeriod|object-lock family; retention validation is not implemented yet
+InvalidEncryptionAlgorithmError|SSE configuration family; PutBucketEncryption is served, shared/encryption.rs raises MalformedXML for unknown SSEAlgorithm values, and object SSE header refusals use InvalidArgument or InvalidRequest
+InvalidPayer|requester-pays; no payer billing model exists in this gateway (PutBucketRequestPayment validates Payer values as InvalidArgument)
+InvalidRetentionPeriod|object-lock family; crates/core/src/ops/shared/object_lock.rs validates retention periods and raises InvalidArgument for out-of-range periods and non-future RetainUntilDate
 InvalidSOAPRequest|SOAP; deliberately never served, kept so the vocabulary is complete
-InvalidSecurity|session-credential path; same owner as CredentialsNotSupported
-InvalidTargetBucketForLogging|bucket-logging family; same owner as CrossLocationLoggingProhibited
-InvalidToken|session-credential path; same owner as CredentialsNotSupported
-MalformedACLError|ACL grant parsing; the ACL body validator does not raise it yet
-MaxPostPreDataLengthExceededError|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
-MissingSecurityElement|browser POST policy document; same owner as MalformedPOSTRequest
-MissingSecurityHeader|browser POST policy document; same owner as MissingSecurityElement
-NoLoggingStatusForKey|bucket-logging family; same owner as CrossLocationLoggingProhibited
+InvalidSecurity|session-credential path; crates/sig raises InvalidAccessKeyId, AccessDenied, or ExpiredToken rather than InvalidSecurity
+InvalidTargetBucketForLogging|bucket-logging family; PutBucketLogging is served, shared/bucket_config.rs raises InvalidArgument for empty TargetBucket, and target-bucket existence/ACL checks belong to the storage side
+InvalidToken|session-credential path; crates/sig raises ExpiredToken for expired sessions and maps other token failures to InvalidAccessKeyId or AccessDenied
+MalformedACLError|ACL grant parsing; crates/core/src/ops/shared/acl.rs maps malformed ACL bodies to MalformedXML and malformed grant headers to InvalidArgument
+MaxPostPreDataLengthExceededError|browser POST upload; PostObject is served, and crates/gateway/src/post_object/refusals.rs maps oversized pre-data form fields to MalformedPOSTRequest
+MissingSecurityElement|browser POST policy document; PostObject is served, and missing signed-form fields map to InvalidRequest or InvalidPolicyDocument
+MissingSecurityHeader|request security headers; missing required auth headers map to AccessDenied, InvalidRequest, or AuthorizationHeaderMalformed rather than MissingSecurityHeader
+NoLoggingStatusForKey|bucket-logging family; GetBucketLogging/PutBucketLogging are served on buckets only (no object-key logging route), kept for storage-side responses
 OperationAborted|concurrent-modification conflict the storage side detects
-RequestIsNotMultiPartContent|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
-TokenRefreshRequired|session-credential path; same owner as CredentialsNotSupported
+RequestIsNotMultiPartContent|browser POST upload; PostObject is served, and non-multipart POST requests are rejected as InvalidRequest or MalformedPOSTRequest
+TokenRefreshRequired|session-credential path; crates/sig raises ExpiredToken for expired session tokens rather than TokenRefreshRequired
 TooManyBuckets|account-level quota; same owner as AccountProblem
 UnresolvableGrantByEmailAddress|grant-by-email ACL; same owner as AmbiguousGrantByEmailAddress
-UserKeyMustBeSpecified|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
+UserKeyMustBeSpecified|browser POST upload; PostObject is served, and a missing key form field currently maps to MalformedPOSTRequest in crates/gateway/src/post_object.rs

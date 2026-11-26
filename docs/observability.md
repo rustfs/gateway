@@ -17,10 +17,12 @@ event instead, and the host's subscriber decides where it goes. Without a subscr
 written, which is what a library owes a process it did not start.
 
 `clippy::print_stdout`, `clippy::print_stderr` and `clippy::dbg_macro` are denied outside tests in
-`rustfs-gateway`, `rustfs-gateway-core`, `rustfs-gateway-server`, `rustfs-gateway-stream` and the
-add-ons `dialect-rustfs-admin`, `dialect-minio` and `fs` (`#![cfg_attr(not(test), deny(...))]` in each
-`lib.rs`), so a print cannot come back unnoticed there. The protocol crates `http`, `sig`, `types`
-and `xml` write nothing either, but do not declare the lint yet. Only `rustfs-gateway` and
+`rustfs-gateway`, `rustfs-gateway-core`, `rustfs-gateway-server`, `rustfs-gateway-stream`,
+`rustfs-gateway-types`, the add-ons `dialect-rustfs-admin`, `dialect-minio`, `fs`, `corpus` and
+`corpus-recorder`, and the build-time crates `model`, `codegen` and `macros`
+(`#![cfg_attr(not(test), deny(...))]` in each `lib.rs`), so a print cannot come back unnoticed
+there. The remaining protocol crates `http`, `sig` and `xml` write nothing either, and will adopt
+the same crate attribute once concurrent changes in those crates land. Only `rustfs-gateway` and
 `rustfs-gateway-server` emit events at all. CI's clippy run builds default features, so the
 `dangerous-*` code paths are linted only by `cargo clippy -p rustfs-gateway --all-features
 --all-targets`.
