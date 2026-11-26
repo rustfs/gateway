@@ -750,3 +750,33 @@ fn n_a_repeated_date_header_is_refused() {
     ]);
     assert_eq!(accept(request).err(), Some(WireReject::DuplicateSingleValuedHeader("date")));
 }
+
+#[path = "../../../fuzz/support/http_metadata_query.rs"]
+mod http_metadata_query_fuzz;
+
+/// Negative — replays the `http_metadata_query` fuzz property on control characters, RFC 2047
+/// encoded-words, invalid UTF-8, and query strings exceeding tight limits so a false-positive
+/// invariant panic cannot reach `fuzz-nightly.yml`.
+#[test]
+fn n_http_metadata_query_fuzz_property_handles_controls_utf8_and_tight_limits() {
+    let long_utf8 = "café-".repeat(900);
+    let samples: [&[u8]; 14] = [
+        b"",
+        b"\x01",
+        b"\t",
+        b"\r\n",
+        b"\x7f",
+        "\u{83}".as_bytes(),
+        b"plain-ascii",
+        b"=?UTF-8?B?AA==?=",
+        b"=?UTF-8?B?aGVsbG8=?=",
+        b"\xff\xfe",
+        b"uploadId=1&uploadId=2",
+        b"a%20b=1",
+        b"a=1&b=2&c=3&d=4&e=5&long=01234567890123456789",
+        long_utf8.as_bytes(),
+    ];
+    for sample in samples {
+        http_metadata_query_fuzz::check(sample);
+    }
+}

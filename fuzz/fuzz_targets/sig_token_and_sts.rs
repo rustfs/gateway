@@ -126,7 +126,12 @@ fuzz_target!(|input: &[u8]| {
         );
     }
 
-    // 3. STS form-body signing with SigService::Sts.
+    // 3. STS form-body signing with SigService::Sts (both empty and hashed form-body modes).
+    let form_body = take_str(&mut rest, 256);
+    let mut digest = [0u8; 32];
+    for (idx, byte) in form_body.bytes().enumerate() {
+        digest[idx % 32] ^= byte.wrapping_add(idx as u8);
+    }
     let creds = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("synthetic credentials");
     let scope = SigningScope::new(ScopeDate::parse("20260101").expect("valid date"), "us-east-1", SigService::Sts)
         .expect("valid STS scope");
@@ -137,14 +142,21 @@ fuzz_target!(|input: &[u8]| {
         HeaderName::from_static("content-type"),
         HeaderValue::from_static("application/x-www-form-urlencoded"),
     );
-    let req = SigningRequest::new(
+    let stamp = AmzDate::parse("20260101T000000Z").expect("valid timestamp");
+    let empty_req = SigningRequest::new(&Method::POST, "/", &raw_query, &sts_headers, &host, PayloadMode::Empty, stamp);
+    let _ = signer.sign_headers(&empty_req);
+
+    if let Ok(len_val) = HeaderValue::from_str(&form_body.len().to_string()) {
+        sts_headers.insert(HeaderName::from_static("content-length"), len_val);
+    }
+    let hashed_req = SigningRequest::new(
         &Method::POST,
         "/",
         &raw_query,
         &sts_headers,
         &host,
-        PayloadMode::Empty,
-        AmzDate::parse("20260101T000000Z").expect("valid timestamp"),
+        PayloadMode::ExactSha256(digest),
+        stamp,
     );
-    let _ = signer.sign_headers(&req);
+    let _ = signer.sign_headers(&hashed_req);
 });
