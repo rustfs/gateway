@@ -84,7 +84,7 @@ impl Bound {
 ///
 /// Typed codec rules in `rules` are consulted first so mutation tests over `q-part-number-0072`
 /// and `q-max-keys-0073` control their exact members. Members without a typed codec rule fall back
-/// to [`protocol_bound`], which carries the remaining AWS S3 integer and long boundaries.
+/// to `protocol_bound`, which carries the remaining AWS S3 integer and long boundaries.
 ///
 /// # Errors
 ///
