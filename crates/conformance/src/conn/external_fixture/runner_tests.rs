@@ -436,6 +436,9 @@ fn the_rustfs_ledger_rules_no_case_unavailable_externally() {
     let rulings = crate::rulings::Rulings::parse(&text).expect("the committed ledger parses");
     assert!(!rulings.is_empty(), "the control ledger is empty, so this test proves nothing");
     let corpus = crate::corpus::Corpus::load(&crate::corpus::Corpus::discover_root().expect("corpus")).expect("corpus loads");
+    rulings
+        .bind(corpus.cases().iter().map(|case| case.id.as_str()))
+        .expect("every committed ruling names a case in the corpus");
     let unavailable: Vec<&str> = corpus
         .cases()
         .iter()
