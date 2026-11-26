@@ -368,7 +368,7 @@ async fn custom_server_config_enforces_tls13_only_and_reloads_atomically() {
         .expect("TLS 1.3-only server config builds");
     tls13_only.alpn_protocols = vec![b"http/1.1".to_vec()];
 
-    let handle = TlsHandle::from_server_config(Arc::new(tls13_only));
+    let handle = TlsHandle::from_server_config(tls13_only);
     let RunningServer {
         local_addr,
         task,
@@ -414,7 +414,7 @@ async fn custom_server_config_enforces_tls13_only_and_reloads_atomically() {
         .with_single_cert(vec![second.cert_der.clone()], second_key)
         .expect("second custom server config builds");
     second_cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
-    handle.reload_server_config(Arc::new(second_cfg));
+    handle.reload_server_config(second_cfg);
 
     let mut second_roots = rustls::RootCertStore::empty();
     second_roots.add(second.cert_der).expect("second anchor");

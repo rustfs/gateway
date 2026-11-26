@@ -150,3 +150,73 @@ async fn a_configured_temporary_redirect_location_is_allowed() {
     assert_eq!(response.status(), http::StatusCode::TEMPORARY_REDIRECT);
     assert_eq!(response.header("location"), Some("https://configured.example.test"));
 }
+
+/// Negative — duplicate `Content-Length`, malformed `Content-Length`, and duplicate
+/// `Transfer-Encoding` introduced by a response filter are rejected as `500 InternalError` before
+/// reaching the wire.
+#[tokio::test]
+async fn n_duplicate_or_malformed_framing_headers_from_filter_are_rejected_as_500() {
+    for case in ["duplicate_cl", "malformed_cl", "duplicate_te"] {
+        let service = wired()
+            .register::<ContentPing, _>(Arc::new(Backend))
+            .dialect(&crate::support::content_ping_dialect())
+            .stage_filter(response_filter(
+                move |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
+                    let headers = response.headers_mut();
+                    match case {
+                        "duplicate_cl" => {
+                            headers.append(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("5"));
+                        }
+                        "malformed_cl" => {
+                            headers.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("5, 5"));
+                        }
+                        "duplicate_te" => {
+                            headers.remove(http::header::CONTENT_LENGTH);
+                            headers.append(http::header::TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+                            headers.append(http::header::TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                },
+            ))
+            .build()
+            .expect("a complete assembly");
+        let response = exchange_wire(&service, plain(http::Method::PUT, "/")).await;
+        let body = std::str::from_utf8(response.body()).expect("UTF-8 error document");
+        assert_eq!(
+            response.status(),
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+            "case={case} was not refused: {body}"
+        );
+        assert!(body.contains("<Code>InternalError</Code>"), "case={case}: {body}");
+    }
+}
+
+/// Negative — `205 Reset Content` carries no body and no `Transfer-Encoding`, and MUST declare
+/// `Content-Length: 0` (RFC 9110 §15.3.6) so HTTP/1.1 clients do not hang waiting for EOF.
+#[tokio::test]
+async fn n_reset_content_response_sets_zero_content_length_and_counts_body_correction() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .stage_filter(response_filter(
+            |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
+                *response.status_mut() = http::StatusCode::RESET_CONTENT;
+                *response.body_mut() = rustfs_gateway::Body::from_bytes(Bytes::from_static(b"<Nonsense/>"));
+                response
+                    .headers_mut()
+                    .insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("11"));
+                Ok(())
+            },
+        ))
+        .build()
+        .expect("a complete assembly");
+    assert_eq!(service.response_body_corrections_total(), 0);
+    let response = exchange_wire(&service, plain(http::Method::POST, "/")).await;
+    assert_eq!(response.status(), http::StatusCode::RESET_CONTENT);
+    assert!(response.body().is_empty(), "a 205 kept a filter's body");
+    assert_eq!(response.header("content-length"), Some("0"));
+    assert_eq!(response.header("transfer-encoding"), None);
+    assert_eq!(service.response_body_corrections_total(), 1);
+}

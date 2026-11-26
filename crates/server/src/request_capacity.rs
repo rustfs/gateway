@@ -27,6 +27,8 @@ use std::task::{Context, Poll};
 
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, watch};
 
+use crate::task_tracker::TaskTracker;
+
 /// A request-local signal that becomes `true` when the transport stops waiting for the response.
 ///
 /// The server inserts one into every request extension. A service that starts durable work should
@@ -60,6 +62,7 @@ where
     future: Option<Pin<Box<F>>>,
     cancellation: Option<RequestCancellationSource>,
     force_abort: Arc<AtomicBool>,
+    background_tasks: TaskTracker,
 }
 
 impl<F> RequestCancellationFuture<F>
@@ -67,11 +70,17 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    pub(super) fn new(future: F, cancellation: RequestCancellationSource, force_abort: Arc<AtomicBool>) -> Self {
+    pub(super) fn new(
+        future: F,
+        cancellation: RequestCancellationSource,
+        force_abort: Arc<AtomicBool>,
+        background_tasks: TaskTracker,
+    ) -> Self {
         Self {
             future: Some(Box::pin(future)),
             cancellation: Some(cancellation),
             force_abort,
+            background_tasks,
         }
     }
 }
@@ -113,7 +122,7 @@ where
             return;
         }
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
+            self.background_tasks.spawn_on(&runtime, async move {
                 let _ = future.await;
             });
         }

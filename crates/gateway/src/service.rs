@@ -132,7 +132,7 @@ use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::ext::{
     AuthSchemeRef, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage, BucketOwnerSource, CachedCorsSource, ClassKind,
     ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver, InputAuthzRequest, PolicySnapshot, RequestContext,
-    RequestEvent, ResponseView, RoutedView, WireHead, emit_safely,
+    RequestEvent, ResponseView, RoutedView, emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
@@ -143,7 +143,7 @@ use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{from_auth_context, from_codec, from_denial, from_handler, from_pre_auth};
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
-use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
+use crate::request_deadline::{PolicySnapshotOutcome, elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
 use crate::trace::TraceSource;
 use crate::{response::into_response, routing::RuntimeAssembly};
@@ -151,6 +151,7 @@ use crate::{response::into_response, routing::RuntimeAssembly};
 mod authenticate;
 mod body_preparation;
 mod cors;
+pub(crate) mod extension_guards;
 pub(crate) mod host_tokens;
 mod outcome;
 pub(crate) mod refused_post;
@@ -169,6 +170,8 @@ const UNAUTHENTICATED: &str = "the request could not be authenticated";
 pub(crate) struct Inner {
     pub(crate) floor: SecurityFloor,
     pub(crate) signing_service: Option<SigService>,
+    pub(crate) selection: rustfs_gateway_core::route::Selection,
+    pub(crate) monomorphic: bool,
     pub(crate) limits: Limits,
     pub(crate) names: NamePolicy,
     pub(crate) config: ConfigStore,
@@ -343,11 +346,8 @@ impl S3Service {
                     operation: outcome.operation,
                     method: &method,
                 };
-                for filter in runtime.filters.iter() {
-                    if let Err(error) = filter.on_response(&view, &mut response) {
-                        response = outcome.refuse_handler(error);
-                        break;
-                    }
+                if let Err(error) = extension_guards::run_response_filters(&runtime.filters, &view, &mut response, &trace) {
+                    response = outcome.refuse_handler(error);
                 }
             }
             self.finish_response(response, outcome, &method, &handler_deadline_report, now)
@@ -494,13 +494,8 @@ impl S3Service {
         // The wire seam, before acceptance so that whatever it writes is subject to every
         // acceptance rule — the framing conflict, the duplicate headers, the limits — exactly as a
         // client's own bytes are.
-        if !runtime.filters.is_empty() {
-            let mut head = WireHead::new(&mut parts);
-            for filter in runtime.filters.iter() {
-                if let Err(error) = filter.on_wire(&mut head) {
-                    return outcome.refuse_handler(error);
-                }
-            }
+        if let Err(error) = extension_guards::run_wire_filters(&runtime.filters, &mut parts, Some(outcome.trace)) {
+            return outcome.refuse_handler(error);
         }
 
         self.withhold_header_token(&mut parts.headers); // ADR-0054: nothing accepted holds a claimed header token
@@ -521,7 +516,11 @@ impl S3Service {
         }
 
         // The host's one reading, and the bucket label SigV2 signs from it (rustfs/gateway#1232).
-        let (resolved, vhost_bucket) = crate::ext::resolve_host(&*self.inner.host_resolver, &wire);
+        let (resolved, vhost_bucket) =
+            match extension_guards::resolve_host_safely(&*self.inner.host_resolver, &wire, Some(outcome.trace)) {
+                Ok(resolved) => resolved,
+                Err(error) => return outcome.refuse_handler(error),
+            };
         let config = config.targeted();
         let target_origin = resolved.origin();
 
@@ -576,9 +575,17 @@ impl S3Service {
         }
 
         let resolver = &*self.inner.host_resolver;
-        let resolved = match crate::legacy_addressing::classify(&self.inner.names, resolver, router, &wire, resolved) {
-            Ok(resolved) => resolved,
-            Err(refusal) => return outcome.refuse_at(Refused::Wire, from_codec(refusal, response_kind)),
+        let resolved = match extension_guards::classify_addressing_safely(
+            &self.inner.names,
+            resolver,
+            router,
+            &wire,
+            resolved,
+            Some(outcome.trace),
+        ) {
+            Ok(Ok(resolved)) => resolved,
+            Ok(Err(refusal)) => return outcome.refuse_at(Refused::Wire, from_codec(refusal, response_kind)),
+            Err(error) => return outcome.refuse_handler(error),
         };
         let dispatched = match router.dispatch(&RouteRequestParts {
             method: wire.method(),
@@ -683,10 +690,8 @@ impl S3Service {
                 key: meta.key(),
                 declared_body_bytes: declared_length,
             };
-            for filter in runtime.filters.iter() {
-                if let Err(error) = filter.on_routed(&view) {
-                    return outcome.refuse_handler(error);
-                }
+            if let Err(error) = extension_guards::run_routed_filters(&runtime.filters, &view, outcome.trace) {
+                return outcome.refuse_handler(error);
             }
         }
 
@@ -805,11 +810,18 @@ impl S3Service {
                     Err(response) => return response,
                 };
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
-                let replacement_verdict = self
+                let replacement_verdict = match self
                     .inner
                     .dangerously_replaced_signature_verifier
                     .as_ref()
-                    .map(|verifier| verifier.verify_sealed(&sealed));
+                    .map(|verifier| crate::panic_boundary::contain_decision(|| verifier.verify_sealed(&sealed)))
+                {
+                    Some(Ok(verdict)) => Some(verdict),
+                    Some(Err(())) => {
+                        return outcome.refuse_handler(extension_guards::replaced_verifier_panicked(outcome.trace, operation));
+                    }
+                    None => None,
+                };
                 #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
                 let replacement_verdict: Option<rustfs_gateway_sig::Verdict> = None;
                 (Ok(Admission::Sealed(sealed)), Some(prepared), replacement_verdict)
@@ -986,39 +998,27 @@ impl S3Service {
             )
             .await
             {
-                Some(Ok(policy)) => policy,
-                Some(Err(_)) | None => {
-                    let decision = Decision::Indeterminate;
-                    emit_safely(
-                        route_runtime.authz_audit.as_ref(),
-                        &AuthzAuditEvent {
+                PolicySnapshotOutcome::Ready(Ok(policy)) => policy,
+                outcome => {
+                    return Err(extension_guards::handle_policy_snapshot_failure(
+                        matches!(outcome, PolicySnapshotOutcome::Panicked),
+                        extension_guards::PolicyLoadContext {
+                            service: route_service,
+                            runtime: route_runtime.as_ref(),
                             request_id,
-                            stage: AuthzStage::Route,
                             operation,
-                            action: requirement.action,
-                            resource: requirement.resource,
+                            requirement,
                             bucket: route_meta.bucket(),
                             key: route_effective_key,
-                            resources: asked,
+                            asked,
                             auth_scheme,
                             identity: route_verdict.identity(),
                             target_origin,
-                            policy_snapshot: None,
-                            decision,
-                            elapsed: elapsed_since(route_service.inner.authz_clock.as_ref(), authz_started),
+                            authz_started,
+                            response_kind,
                         },
-                    );
-                    hold_failure_floor(
-                        route_service.inner.floor.failure_floor(),
-                        route_service.inner.authz_clock.as_ref(),
-                        authz_started,
                     )
-                    .await;
-                    return Err(from_denial(
-                        rustfs_gateway_core::Denied::indeterminate(),
-                        response_kind,
-                        route_service.inner.view_policy.denial_sentences(),
-                    ));
+                    .await);
                 }
             };
             let policy = Arc::new(policy);
@@ -1031,31 +1031,19 @@ impl S3Service {
                 route_query,
             );
             let route_started = route_service.inner.authz_clock.monotonic();
-            let mut decisions = Vec::with_capacity(if questions.is_empty() { 0 } else { asked.len() });
-            let mut route_error = None;
             // A subject is an account, and an anonymous caller has none: refused without asking,
             // even when a deployment delegates anonymous admission to the authorizer (ADR-0025).
             let anonymous_about_a_subject = route_subjects.is_some() && route_verdict.identity().is_none();
-            for question in asked {
-                if anonymous_about_a_subject {
-                    break;
-                }
-                match catch_boxed_future(|| route_runtime.authorizer.authorize_route_result(&authz_context, question)).await {
-                    Ok(Ok(decision)) => decisions.push(decision),
-                    Ok(Err(error)) => {
-                        route_error = Some(error);
-                        break;
-                    }
-                    Err(()) => {
-                        crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
-                        return Err(from_handler(
-                            HandlerError::internal_error("the authorizer failed"),
-                            response_kind,
-                            ConnectionIntent::MayKeepAlive,
-                        ));
-                    }
-                }
-            }
+            let (decisions, mut route_error) = extension_guards::evaluate_route_questions(
+                route_runtime.authorizer.as_ref(),
+                &authz_context,
+                asked,
+                anonymous_about_a_subject,
+                request_id,
+                operation,
+                response_kind,
+            )
+            .await?;
             let mut route_decision = if route_error.is_some() {
                 Decision::Indeterminate
             } else if anonymous_about_a_subject {
@@ -1101,30 +1089,20 @@ impl S3Service {
                         ..route_request
                     });
                 }
-                for extra_request in &route_extras {
-                    match catch_boxed_future(|| route_runtime.authorizer.authorize_route_result(&authz_context, extra_request))
-                        .await
-                    {
-                        Ok(Err(error)) => {
-                            route_error = Some(error);
-                            route_decision = Decision::Indeterminate;
-                            break;
-                        }
-                        Ok(Ok(decision)) => {
-                            if decision != Decision::Allow {
-                                route_decision = decision;
-                                break;
-                            }
-                        }
-                        Err(()) => {
-                            crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
-                            return Err(from_handler(
-                                HandlerError::internal_error("the authorizer failed"),
-                                response_kind,
-                                ConnectionIntent::MayKeepAlive,
-                            ));
-                        }
-                    }
+                let (extra_decision, extra_error) = extension_guards::evaluate_route_extras(
+                    route_runtime.authorizer.as_ref(),
+                    &authz_context,
+                    &route_extras,
+                    request_id,
+                    operation,
+                    response_kind,
+                )
+                .await?;
+                if extra_error.is_some() {
+                    route_error = extra_error;
+                }
+                if extra_decision != Decision::Allow {
+                    route_decision = extra_decision;
                 }
             }
             // Combine for the audit only when an extra was asked: nothing allocates otherwise.

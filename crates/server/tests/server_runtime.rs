@@ -27,6 +27,8 @@ mod accept_recovery;
 mod client_ceiling;
 #[path = "server_runtime/connection_driver.rs"]
 mod connection_driver;
+#[path = "server_runtime/connection_lifetime.rs"]
+mod connection_lifetime;
 #[path = "server_runtime/drain_fixture.rs"]
 mod drain_fixture;
 pub(crate) use drain_fixture::observed_shutdown_drain;
@@ -39,8 +41,12 @@ pub(crate) mod frozen_clock;
 mod global_admission;
 #[path = "server_runtime/listener_stop.rs"]
 mod listener_stop;
+#[path = "server_runtime/proxy_admission.rs"]
+mod proxy_admission;
 #[path = "server_runtime/shutdown_drain.rs"]
 pub(crate) mod shutdown_drain;
+#[path = "server_runtime/shutdown_tracking.rs"]
+mod shutdown_tracking;
 #[path = "server_runtime/task_reaping.rs"]
 mod task_reaping;
 #[path = "server_runtime/unbounded_timeouts.rs"]

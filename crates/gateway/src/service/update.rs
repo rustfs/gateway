@@ -71,7 +71,12 @@ impl S3Service {
     /// matching codec/handler dispatch table.
     /// The last-good generation remains installed on every error.
     pub fn replace_registry(&self, builder: ServiceBuilder) -> Result<(), AssemblyError> {
-        let routing = Arc::new(builder.into_routing()?);
+        let routing = Arc::new(builder.into_routing_with_selection(self.inner.selection)?);
+        crate::builder::post_object_handler::validate_staged_post(
+            &routing,
+            self.inner.view_policy.post_forms.is_legacy_rustfs(),
+            self.inner.monomorphic,
+        )?;
         self.check_service_scope(&routing.router)?;
         self.inner.config.rcu(|current| {
             Arc::new(AssemblySnapshot {
@@ -101,7 +106,11 @@ impl S3Service {
     /// Returns [`AssemblyError`] for an invalid candidate or a changed signing-service scope,
     /// preserving the installed assembly.
     pub fn replace_assembly(&self, update: AssemblyUpdate) -> Result<(), AssemblyError> {
-        let snapshot = update.into_snapshot()?;
+        let snapshot = update.into_snapshot_with_selection(
+            self.inner.selection,
+            self.inner.view_policy.post_forms.is_legacy_rustfs(),
+            self.inner.monomorphic,
+        )?;
         self.check_service_scope(&snapshot.runtime().routing.router)?;
         self.inner.config.store(Arc::new(snapshot));
         Ok(())

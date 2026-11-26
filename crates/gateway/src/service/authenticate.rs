@@ -238,7 +238,12 @@ impl S3Service {
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                     .with_chunk_sink(&chunk_sink)
                     .with_sts_body_reader(sts_body_reader, operation, config);
-                    let result = self.inner.authenticator.authenticate(&question).await;
+                    let auth = self.inner.authenticator.as_ref();
+                    let result =
+                        match super::extension_guards::authenticate_safely(auth, &question, outcome.trace, operation).await {
+                            Ok(result) => result,
+                            Err(error) => return Err(outcome.refuse_handler(error)),
+                        };
                     signed_body = question.signs_its_body();
                     body_digest = self.settle_body_digest(request_body_mode, body_digest, &question);
                     let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
@@ -277,17 +282,27 @@ impl S3Service {
             Ok(Admission::SealedSigV2(sealed)) => {
                 let question = SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket)
                     .with_post_policy_limits(post_policy_limits);
-                match self.inner.authenticator.authenticate_sigv2(&question).await {
-                    Ok(authentication) => (authentication, None),
-                    Err(_) => {
+                let auth = self.inner.authenticator.as_ref();
+                match super::extension_guards::authenticate_sigv2_safely(auth, &question, outcome.trace, operation).await {
+                    Ok(Ok(authentication)) => (authentication, None),
+                    Ok(Err(_)) => {
                         self.hold_auth_failure_floor(auth_started).await;
                         return Err(outcome.refuse_unavailable(UNAUTHENTICATED, body_owed));
                     }
+                    Err(error) => return Err(outcome.refuse_handler(error)),
                 }
             }
             Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {
                 Some(verifier) => {
-                    let verdict = verifier.verify(&request);
+                    let verdict = match super::extension_guards::verify_custom_signature_safely(
+                        verifier.as_ref(),
+                        &request,
+                        outcome.trace,
+                        operation,
+                    ) {
+                        Ok(verdict) => verdict,
+                        Err(error) => return Err(outcome.refuse_handler(error)),
+                    };
                     let verdict = if verdict.is_anonymous() {
                         Verdict::reject(AuthError::AuthorizationHeaderMalformed)
                     } else {

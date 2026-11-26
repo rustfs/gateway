@@ -39,9 +39,10 @@
 //! no content. The length is one of those fields, and it is the answer the request was asking for:
 //! rewriting it to `0` turns "this object is 5 bytes and I am not sending them" into "this object is
 //! empty", which is a wrong answer rather than a missing one. So the bytes go and the number stays.
-//! Only the statuses that carry no content *and* no framing — `1xx`, `204`, `205`, `304` — lose the
+//! Only the statuses that carry no content *and* no framing — `1xx`, `204`, `304` — lose the
 //! header too, which is what `c-cond-0005`, `c-cond-0007`, `c-cond-0010`, `c-cond-0017` and
-//! `c-cond-0022` pin for the `304`.
+//! `c-cond-0022` pin for the `304`; `205 Reset Content` carries no content and declares
+//! `Content-Length: 0` (RFC 9110 §15.3.6).
 //!
 //! # The third rule: a declared length that the body cannot honour
 //!
@@ -80,6 +81,12 @@ use rustfs_gateway_stream::Body;
 pub(crate) enum EncodeError {
     /// Two framing authorities were present on one response.
     ContentLengthWithTransferEncoding,
+    /// More than one `Content-Length` header line was present on one response.
+    DuplicateContentLength,
+    /// A `Content-Length` header value was not an ASCII decimal integer (`1*DIGIT`).
+    MalformedContentLength,
+    /// More than one `Transfer-Encoding` header line was present on one response.
+    DuplicateTransferEncoding,
     /// A temporary redirect named no assembly-approved target.
     UnconfiguredTemporaryRedirect,
 }
@@ -89,6 +96,11 @@ impl From<EncodeError> for HandlerError {
         match error {
             EncodeError::ContentLengthWithTransferEncoding => {
                 Self::internal_error("the response carried both Content-Length and Transfer-Encoding")
+            }
+            EncodeError::DuplicateContentLength => Self::internal_error("the response carried duplicate Content-Length headers"),
+            EncodeError::MalformedContentLength => Self::internal_error("the response carried a malformed Content-Length header"),
+            EncodeError::DuplicateTransferEncoding => {
+                Self::internal_error("the response carried duplicate Transfer-Encoding headers")
             }
             EncodeError::UnconfiguredTemporaryRedirect => {
                 Self::internal_error("the temporary redirect target was not configured by the service")
@@ -109,11 +121,38 @@ impl CorrectionReport {
     }
 }
 
-/// Refuses two framing authorities or a temporary redirect outside the assembly-time allowlist.
+/// Parses an RFC 9110 §8.6 `Content-Length` (`1*DIGIT`) strictly.
+fn parse_strict_content_length(value: &http::HeaderValue) -> Option<u64> {
+    let text = value.to_str().ok()?;
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<u64>().ok()
+}
+
+/// Refuses conflicting, duplicate, or malformed framing headers or a temporary redirect outside
+/// the assembly-time allowlist.
 pub(crate) fn validate(response: &Response<Body>, temporary_redirect_targets: &[RedirectTarget]) -> Result<(), EncodeError> {
     let headers = response.headers();
-    if headers.contains_key(http::header::CONTENT_LENGTH) && headers.contains_key(http::header::TRANSFER_ENCODING) {
+    let mut content_lengths = headers.get_all(http::header::CONTENT_LENGTH).iter();
+    let first_content_length = content_lengths.next();
+    let has_duplicate_content_length = content_lengths.next().is_some();
+    let mut transfer_encodings = headers.get_all(http::header::TRANSFER_ENCODING).iter();
+    let has_transfer_encoding = transfer_encodings.next().is_some();
+    let has_duplicate_transfer_encoding = transfer_encodings.next().is_some();
+    if first_content_length.is_some() && has_transfer_encoding {
         return Err(EncodeError::ContentLengthWithTransferEncoding);
+    }
+    if has_duplicate_content_length {
+        return Err(EncodeError::DuplicateContentLength);
+    }
+    if let Some(value) = first_content_length
+        && parse_strict_content_length(value).is_none()
+    {
+        return Err(EncodeError::MalformedContentLength);
+    }
+    if has_duplicate_transfer_encoding {
+        return Err(EncodeError::DuplicateTransferEncoding);
     }
     if response.status() == http::StatusCode::TEMPORARY_REDIRECT {
         let Some(location) = headers.get(http::header::LOCATION) else {
@@ -143,7 +182,11 @@ pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) -> Correct
     if !body_allowed {
         *response.body_mut() = Body::empty();
     }
-    if !framing_allowed {
+    if response.status() == http::StatusCode::RESET_CONTENT {
+        let headers = response.headers_mut();
+        headers.remove(http::header::TRANSFER_ENCODING);
+        headers.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"));
+    } else if !framing_allowed {
         let headers = response.headers_mut();
         headers.remove(http::header::CONTENT_LENGTH);
         headers.remove(http::header::TRANSFER_ENCODING);
@@ -153,29 +196,45 @@ pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) -> Correct
     CorrectionReport { removed_forbidden_body }
 }
 
-/// Makes `Content-Length` agree with a body whose length is known.
+/// Makes `Content-Length` agree with a body whose length is known, and strips or replaces
+/// duplicate or malformed `Content-Length` and duplicate `Transfer-Encoding` headers.
 ///
-/// Does nothing when there is no declared length, when the body's length is not known, or when the
-/// two already agree — which is every response this workspace's encoders produce.
+/// Does nothing when there is no declared length (and no duplicate `Transfer-Encoding`), or when a
+/// single well-formed `Content-Length` already agrees with the body — which is every response this
+/// workspace's encoders produce.
 fn reconcile_length(response: &mut Response<Body>) {
-    let Some(actual) = response.body().len_hint() else {
+    let actual = response.body().len_hint();
+    let mut transfer_encodings = response.headers().get_all(http::header::TRANSFER_ENCODING).iter();
+    let has_transfer_encoding = transfer_encodings.next().is_some();
+    let has_duplicate_transfer_encoding = transfer_encodings.next().is_some();
+    if has_duplicate_transfer_encoding {
+        response.headers_mut().remove(http::header::TRANSFER_ENCODING);
+    }
+    let mut content_lengths = response.headers().get_all(http::header::CONTENT_LENGTH).iter();
+    let Some(first) = content_lengths.next() else {
         return;
     };
-    let declared = response
-        .headers()
-        .get(http::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|text| text.parse::<u64>().ok());
-    if declared.is_none_or(|declared| declared == actual) {
+    let duplicate = content_lengths.next().is_some();
+    let parsed = (!duplicate).then(|| parse_strict_content_length(first)).flatten();
+    if has_transfer_encoding && !has_duplicate_transfer_encoding {
         return;
     }
-    let Ok(corrected) = http::HeaderValue::from_str(&actual.to_string()) else {
-        // An ASCII decimal is always a legal header value; the fallible constructor is the only
-        // one there is. Removing the header rather than leaving a lie is the safe half.
-        response.headers_mut().remove(http::header::CONTENT_LENGTH);
-        return;
-    };
-    response.headers_mut().insert(http::header::CONTENT_LENGTH, corrected);
+    match (parsed, actual) {
+        (Some(declared), Some(actual)) if declared == actual => {}
+        (Some(_), None) => {}
+        (_, Some(actual)) => {
+            let Ok(corrected) = http::HeaderValue::from_str(&actual.to_string()) else {
+                // An ASCII decimal is always a legal header value; the fallible constructor is the only
+                // one there is. Removing the header rather than leaving a lie is the safe half.
+                response.headers_mut().remove(http::header::CONTENT_LENGTH);
+                return;
+            };
+            response.headers_mut().insert(http::header::CONTENT_LENGTH, corrected);
+        }
+        (None, None) => {
+            response.headers_mut().remove(http::header::CONTENT_LENGTH);
+        }
+    }
 }
 
 /// Removes every header naming a customer-provided encryption key.
@@ -252,12 +311,7 @@ mod tests {
     /// connection exactly as the `HEAD` case does.
     #[test]
     fn a_bodyless_status_loses_its_framing_headers_too() {
-        for status in [
-            StatusCode::NOT_MODIFIED,
-            StatusCode::NO_CONTENT,
-            StatusCode::RESET_CONTENT,
-            StatusCode::CONTINUE,
-        ] {
+        for status in [StatusCode::NOT_MODIFIED, StatusCode::NO_CONTENT, StatusCode::CONTINUE] {
             for method in [Method::GET, Method::HEAD, Method::PUT] {
                 let mut response = five_bytes(status);
                 response
@@ -269,6 +323,93 @@ mod tests {
                 assert!(response.headers().get(TRANSFER_ENCODING).is_none());
             }
         }
+    }
+
+    /// Negative — `205 Reset Content` drops its content and `Transfer-Encoding` and sets
+    /// `Content-Length: 0` (RFC 9110 §15.3.6), matching `core` and `SelfHeld`.
+    #[test]
+    fn n_reset_content_drops_body_and_transfer_encoding_and_sets_zero_content_length() {
+        for method in [Method::GET, Method::HEAD, Method::PUT] {
+            let mut response = five_bytes(StatusCode::RESET_CONTENT);
+            response
+                .headers_mut()
+                .insert(TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+            let first = enforce(&mut response, &method);
+            assert!(first.removed_forbidden_body(), "205 under {method} should report body removal");
+            assert!(response.body().is_empty(), "205 under {method} kept its content");
+            assert_eq!(length_of(&response), Some("0"), "205 under {method} must declare Content-Length: 0");
+            assert!(response.headers().get(TRANSFER_ENCODING).is_none());
+            let second = enforce(&mut response, &method);
+            assert!(!second.removed_forbidden_body());
+            assert_eq!(length_of(&response), Some("0"));
+        }
+    }
+
+    /// Negative — duplicate `Content-Length`, malformed `Content-Length`, and duplicate
+    /// `Transfer-Encoding` are rejected by `validate` and repaired by `reconcile_length`.
+    #[test]
+    fn n_duplicate_or_malformed_framing_headers_are_detected_by_validate_and_reconcile_length() {
+        for second in ["5", "10"] {
+            let mut duplicate_cl = five_bytes(StatusCode::OK);
+            duplicate_cl
+                .headers_mut()
+                .append(CONTENT_LENGTH, http::HeaderValue::from_static(second));
+            assert_eq!(
+                validate(&duplicate_cl, &[]),
+                Err(EncodeError::DuplicateContentLength),
+                "duplicate Content-Length (5, {second}) must be refused by validate"
+            );
+            enforce(&mut duplicate_cl, &Method::GET);
+            let values: Vec<_> = duplicate_cl.headers().get_all(CONTENT_LENGTH).iter().collect();
+            assert_eq!(values.len(), 1, "reconcile_length left duplicate Content-Length headers");
+            assert_eq!(values.first().and_then(|v| v.to_str().ok()), Some("5"));
+        }
+
+        for bad in ["abc", "-1", "+5", "5, 5", ""] {
+            let mut malformed_cl = Response::new(Body::from(b"hello".to_vec()));
+            malformed_cl
+                .headers_mut()
+                .insert(CONTENT_LENGTH, http::HeaderValue::from_static(bad));
+            assert_eq!(
+                validate(&malformed_cl, &[]),
+                Err(EncodeError::MalformedContentLength),
+                "malformed Content-Length {bad:?} must be refused by validate"
+            );
+            enforce(&mut malformed_cl, &Method::GET);
+            assert_eq!(
+                length_of(&malformed_cl),
+                Some("5"),
+                "reconcile_length left malformed Content-Length {bad:?}"
+            );
+        }
+
+        let mut duplicate_te = Response::new(Body::from(b"hello".to_vec()));
+        duplicate_te
+            .headers_mut()
+            .append(TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        duplicate_te
+            .headers_mut()
+            .append(TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        assert_eq!(
+            validate(&duplicate_te, &[]),
+            Err(EncodeError::DuplicateTransferEncoding),
+            "duplicate Transfer-Encoding must be refused by validate"
+        );
+        enforce(&mut duplicate_te, &Method::GET);
+        assert_eq!(
+            duplicate_te.headers().get_all(TRANSFER_ENCODING).iter().count(),
+            0,
+            "reconcile_length left duplicate Transfer-Encoding headers"
+        );
+
+        // Positive controls: valid single framing headers remain accepted.
+        let valid_cl = five_bytes(StatusCode::OK);
+        assert_eq!(validate(&valid_cl, &[]), Ok(()));
+        let mut valid_te = Response::new(Body::from(b"hello".to_vec()));
+        valid_te
+            .headers_mut()
+            .insert(TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        assert_eq!(validate(&valid_te, &[]), Ok(()));
     }
 
     /// Negative — a response with both framing authorities is rejected as one typed encode

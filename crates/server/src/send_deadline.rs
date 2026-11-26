@@ -49,6 +49,7 @@ use pin_project_lite::pin_project;
 use tokio::time::{Instant, Sleep};
 
 use crate::io::transport_now;
+use crate::task_tracker::TaskTracker;
 
 tokio::task_local! {
     static STREAM_PROGRESS: SendProgress;
@@ -148,16 +149,20 @@ impl<F: Future> Future for SendDeadline<F> {
     }
 }
 
-/// The executor Hyper spawns each HTTP/2 stream on: Tokio's, with every stream under a
-/// [`SendDeadline`] of `write_progress_timeout`.
-#[derive(Clone, Copy, Debug)]
+/// The executor Hyper spawns each HTTP/2 stream on: Tokio's, tracked by the listener's shutdown
+/// [`TaskTracker`] and wrapped under a [`SendDeadline`] of `write_progress_timeout`.
+#[derive(Clone, Debug)]
 pub(crate) struct StreamExecutor {
     timeout: Duration,
+    background_tasks: TaskTracker,
 }
 
 impl StreamExecutor {
-    pub(crate) const fn new(timeout: Duration) -> Self {
-        Self { timeout }
+    pub(crate) fn new(timeout: Duration, background_tasks: TaskTracker) -> Self {
+        Self {
+            timeout,
+            background_tasks,
+        }
     }
 }
 
@@ -167,6 +172,6 @@ where
     F::Output: Send + 'static,
 {
     fn execute(&self, stream: F) {
-        tokio::spawn(SendDeadline::new(stream, self.timeout));
+        self.background_tasks.spawn(SendDeadline::new(stream, self.timeout));
     }
 }

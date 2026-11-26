@@ -143,7 +143,18 @@ where
         let question = SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), None)
             .with_post_policy_limits(Some(policy_limits));
         // A form's file part is still owed, as every refusal on this path renders it.
-        let Ok(authentication) = service.inner.authenticator.authenticate_sigv2(&question).await else {
+        let authentication = match super::extension_guards::authenticate_sigv2_safely(
+            service.inner.authenticator.as_ref(),
+            &question,
+            outcome.trace,
+            "UnroutedPostForm",
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => return outcome.refuse_handler(error),
+        };
+        let Ok(authentication) = authentication else {
             service.hold_auth_failure_floor(auth_started).await;
             return outcome.refuse_unavailable(FORM_UNAUTHENTICATED, true);
         };
@@ -184,7 +195,17 @@ where
         )
         .with_post_policy_limits(Some(policy_limits))
         .with_unrouted_post_policy(&policy);
-        let authentication = service.inner.authenticator.authenticate(&question).await;
+        let authentication = match super::extension_guards::authenticate_safely(
+            service.inner.authenticator.as_ref(),
+            &question,
+            outcome.trace,
+            "UnroutedPostForm",
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => return outcome.refuse_handler(error),
+        };
         let (_, legacy, _) = question.into_published();
         let Ok(authentication) = authentication else {
             service.hold_auth_failure_floor(auth_started).await;

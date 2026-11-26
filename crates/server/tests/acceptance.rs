@@ -30,7 +30,8 @@ use bytes::Bytes;
 use http::{Request, Response};
 use http_body_util::Full;
 use rustfs_gateway_server::{
-    ConfigError, PrefixDispatch, Server, ServerConfig, ServerError, TlsHandle, TlsMaterial, WriteStrategy, conn_memory_budget,
+    ConfigError, IpCidr, PrefixDispatch, ProxyPolicy, Server, ServerConfig, ServerError, TlsHandle, TlsMaterial, TlsMinVersion,
+    WriteStrategy, conn_memory_budget,
 };
 use tokio::sync::Semaphore;
 use tower::{Service, ServiceExt, service_fn};
@@ -182,8 +183,51 @@ fn zero_optional_intervals_and_stream_ceiling_are_rejected() {
                 ..ServerConfig::default()
             },
         ),
+        (
+            "h2_max_header_list_size",
+            ServerConfig {
+                h2_max_header_list_size: 0,
+                ..ServerConfig::default()
+            },
+        ),
+        (
+            "h2_max_pending_accept_reset_streams",
+            ServerConfig {
+                h2_max_pending_accept_reset_streams: Some(0),
+                ..ServerConfig::default()
+            },
+        ),
+        (
+            "h2_max_local_error_reset_streams",
+            ServerConfig {
+                h2_max_local_error_reset_streams: Some(0),
+                ..ServerConfig::default()
+            },
+        ),
+        (
+            "h2_max_send_buf_size",
+            ServerConfig {
+                h2_max_send_buf_size: 0,
+                ..ServerConfig::default()
+            },
+        ),
     ] {
         assert_eq!(config.validate(true), Err(ConfigError::Zero(name)));
+    }
+
+    for empty_proxy in [
+        ProxyPolicy::ProxyProtocol {
+            trusted_proxies: Vec::new(),
+        },
+        ProxyPolicy::ExemptTrustedProxies {
+            trusted_proxies: Vec::new(),
+        },
+    ] {
+        let config = ServerConfig {
+            proxy_policy: empty_proxy,
+            ..ServerConfig::default()
+        };
+        assert_eq!(config.validate(true), Err(ConfigError::EmptyTrustedProxies));
     }
 
     let one_nanosecond = Duration::from_nanos(1);
@@ -192,9 +236,25 @@ fn zero_optional_intervals_and_stream_ceiling_are_rejected() {
         h2_keep_alive_interval: Some(one_nanosecond),
         connection_lifetime: Some(one_nanosecond),
         h2_max_concurrent_streams: 1,
+        h2_max_header_list_size: 1,
+        h2_max_pending_accept_reset_streams: Some(1),
+        h2_max_local_error_reset_streams: Some(1),
+        h2_max_send_buf_size: 1,
+        proxy_policy: ProxyPolicy::ProxyProtocol {
+            trusted_proxies: vec![IpCidr::host(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))],
+        },
         ..ServerConfig::default()
     };
     assert!(config.validate(true).is_ok());
+}
+
+#[test]
+fn tls_material_debug_redacts_private_key_and_supports_tls13_policy() {
+    let sentinel = b"SECRET-PRIVATE-KEY-BYTES".to_vec();
+    let material = TlsMaterial::from_der(vec![vec![1, 2, 3]], sentinel).with_min_version(TlsMinVersion::Tls13);
+    let rendered = format!("{material:?}");
+    assert!(!rendered.contains("SECRET-PRIVATE-KEY-BYTES"), "Debug leaked key material");
+    assert!(rendered.contains("Tls13"));
 }
 
 #[tokio::test]

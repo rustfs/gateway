@@ -109,6 +109,21 @@ impl EncodedResponse {
         self.headers.insert(name, value);
     }
 
+    /// Appends a header value without replacing existing values under `name`, ignoring a value
+    /// the HTTP grammar cannot carry.
+    ///
+    /// Used for multi-valued response headers such as `Set-Cookie`, where overwriting via
+    /// [`Self::set_header`] would drop earlier values.
+    pub fn append_header(&mut self, name: &'static str, value: &str) {
+        let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+            return;
+        };
+        let Ok(value) = HeaderValue::from_str(value) else {
+            return;
+        };
+        self.headers.append(name, value);
+    }
+
     /// Sets a header whose name is only known at run time — the `x-amz-meta-*` family.
     pub fn set_prefixed_header(&mut self, prefix: &str, suffix: &str, value: &str) {
         let mut name = String::with_capacity(prefix.len().saturating_add(suffix.len()));
@@ -169,7 +184,11 @@ impl EncodedResponse {
         if !response_body_allowed(method, self.status) {
             self.body = ResponseBody::Empty;
         }
-        if !response_framing_allowed(method, self.status) {
+        if self.status == StatusCode::RESET_CONTENT {
+            self.headers.remove(http::header::TRANSFER_ENCODING);
+            self.headers
+                .insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("0"));
+        } else if !response_framing_allowed(method, self.status) {
             self.headers.remove(http::header::CONTENT_LENGTH);
             self.headers.remove(http::header::TRANSFER_ENCODING);
         }
@@ -178,8 +197,8 @@ impl EncodedResponse {
 
 /// What RFC 9110 lets a response carry, given the method it answers and the status it goes out with.
 ///
-/// Three answers rather than two, because "no content" and "no content and no framing header" are
-/// different responses and the difference is the whole of [`Self::HeadOfContent`].
+/// Four answers: full content, `HEAD` metadata without bytes, zero-length framing (`205`), and
+/// framing-free bodyless statuses (`1xx`, `204`, `304`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BodyAllowance {
     /// Content, and the framing headers that describe it.
@@ -190,7 +209,10 @@ pub enum BodyAllowance {
     /// a `HEAD` was asking for, and a client that reads `0` concludes the object is empty. Dropping
     /// the *bytes* is the rule; reporting zero of them is a different bug.
     HeadOfContent,
-    /// No content, and no framing header describing one — `1xx`, `204`, `205`, `304`.
+    /// No content, `Content-Length: 0`, and no `Transfer-Encoding` — `205 Reset Content`
+    /// (RFC 9110 §15.3.6).
+    ZeroLength,
+    /// No content, and no framing header describing one — `1xx`, `204`, `304`.
     Bodyless,
 }
 
@@ -202,6 +224,9 @@ pub enum BodyAllowance {
 /// the two overlap on a `304` answered to a `HEAD` and the stricter answer is the right one there.
 #[must_use]
 pub fn body_allowance(method: &Method, status: StatusCode) -> BodyAllowance {
+    if status == StatusCode::RESET_CONTENT {
+        return BodyAllowance::ZeroLength;
+    }
     match (response_body_allowed(method, status), response_framing_allowed(method, status)) {
         (true, _) => BodyAllowance::Content,
         (false, true) => BodyAllowance::HeadOfContent,
@@ -235,7 +260,7 @@ pub fn response_framing_allowed(_method: &Method, status: StatusCode) -> bool {
             crate::contracts::NotModifiedFramingPolicy::Preserve
         );
     }
-    !(status.is_informational() || code == 204 || code == 205)
+    !(status.is_informational() || code == 204)
 }
 
 /// One `response-<x>` query parameter and the response header it overwrites.
@@ -289,4 +314,59 @@ pub fn override_header_value(value: &str) -> Option<HeaderValue> {
 /// reaching this is a generator defect rather than anything a caller did.
 pub fn status_code(status: u16) -> Result<StatusCode, CodecError> {
     StatusCode::from_u16(status).map_err(|_| CodecError::internal("the operation declares a status that is not an HTTP status"))
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn n_reset_content_enforces_zero_content_length_and_no_body_or_transfer_encoding() {
+        for method in [Method::GET, Method::HEAD, Method::PUT] {
+            let mut response = EncodedResponse::of(205);
+            response.body = ResponseBody::Complete(b"hello".to_vec());
+            response.set_header("content-length", "5");
+            response.set_header("transfer-encoding", "chunked");
+            response.enforce_http_invariants(&method);
+            assert!(response.body.is_empty(), "205 under {method} kept its body");
+            assert_eq!(
+                response
+                    .headers
+                    .get(http::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok()),
+                Some("0"),
+                "205 under {method} must declare Content-Length: 0"
+            );
+            assert!(response.headers.get(http::header::TRANSFER_ENCODING).is_none());
+            assert_eq!(body_allowance(&method, StatusCode::RESET_CONTENT), BodyAllowance::ZeroLength);
+            assert!(!response_body_allowed(&method, StatusCode::RESET_CONTENT));
+            assert!(response_framing_allowed(&method, StatusCode::RESET_CONTENT));
+        }
+
+        // Control: 204, 100, and 304 still strip framing headers.
+        for status in [StatusCode::CONTINUE, StatusCode::NO_CONTENT, StatusCode::NOT_MODIFIED] {
+            let mut response = EncodedResponse::of(status.as_u16());
+            response.body = ResponseBody::Complete(b"hello".to_vec());
+            response.set_header("content-length", "5");
+            response.enforce_http_invariants(&Method::GET);
+            assert!(response.body.is_empty());
+            assert!(response.headers.get(http::header::CONTENT_LENGTH).is_none());
+            assert_eq!(body_allowance(&Method::GET, status), BodyAllowance::Bodyless);
+        }
+    }
+
+    #[test]
+    fn append_header_preserves_multiple_values_in_order() {
+        let mut response = EncodedResponse::of(200);
+        response.append_header("set-cookie", "a=1");
+        response.append_header("set-cookie", "b=2");
+        let values: Vec<_> = response
+            .headers
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert_eq!(values, vec!["a=1", "b=2"]);
+    }
 }
