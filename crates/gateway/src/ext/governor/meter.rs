@@ -67,7 +67,11 @@ impl AtomicMeter {
         let mut current = self.state.load(Ordering::Relaxed);
         loop {
             let (tokens, last) = unpack(current);
-            let elapsed = now.wrapping_sub(last);
+            // Half-space modular comparison: if another thread already advanced `last` past `now`,
+            // treat elapsed time as zero and keep `last` rather than wrapping to ~49.7 days or
+            // rewinding `last` backwards.
+            let diff = now.wrapping_sub(last);
+            let (elapsed, next_last) = if diff < 0x8000_0000 { (diff, now) } else { (0, last) };
             let refilled = u64::from(tokens)
                 .saturating_add(u64::from(elapsed).saturating_mul(u64::from(rate.per_second())))
                 .min(u64::from(capacity)) as u32;
@@ -77,7 +81,7 @@ impl AtomicMeter {
             } else {
                 refilled
             };
-            let next = pack(remaining, now);
+            let next = pack(remaining, next_last);
             match self
                 .state
                 .compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Relaxed)
@@ -280,5 +284,69 @@ mod tests {
         }
         meter.refund(unlimited);
         assert_eq!(meter.state.into_inner(), untouched, "an unlimited layer counted something");
+    }
+
+    /// Negative — an out-of-order tick behind `last` (as when another thread has already advanced
+    /// the bucket) must neither wrap into a huge refill nor rewind `last` backwards so a later
+    /// call double-counts the elapsed time.
+    #[test]
+    fn n_an_out_of_order_tick_neither_refills_nor_rewinds_the_atomic_meter() {
+        let rate = Rate::new(2, 1);
+        let meter = AtomicMeter::full(rate, START);
+        assert!(meter.take(rate, START));
+        assert!(meter.take(rate, START));
+        assert!(!meter.take(rate, START));
+
+        // Advance 500ms: accumulates 500 millitokens (< COST), refuses, and moves `last` to 1_500.
+        assert!(!meter.take(rate, MonotonicNow::from_millis(1_500)));
+
+        // Stale ticks from concurrent threads behind `last` must neither refill nor rewind `last`.
+        assert!(!meter.take(rate, MonotonicNow::from_millis(1_499)));
+        assert!(!meter.take(rate, START));
+
+        // If `last` had been rewound to START (1_000), calling at 1_500 again would credit a
+        // second 500 millitokens and admit. It must still refuse until 2_000.
+        assert!(!meter.take(rate, MonotonicNow::from_millis(1_500)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(1_999)));
+        assert!(meter.take(rate, MonotonicNow::from_millis(2_000)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(2_000)));
+    }
+
+    /// Negative — an out-of-order tick straddling the `u32` millisecond wrap boundary must not
+    /// refill or rewind the stored timestamp.
+    #[test]
+    fn n_an_out_of_order_tick_across_the_u32_wrap_neither_refills_nor_rewinds() {
+        let rate = Rate::new(1, 1);
+        let t0 = u64::from(u32::MAX) - 10;
+        let t1 = t0 + 510;
+        let stale = t0 + 5;
+        let meter = AtomicMeter::full(rate, MonotonicNow::from_millis(t0));
+        assert!(meter.take(rate, MonotonicNow::from_millis(t0)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(t1)));
+
+        // Pre-wrap stale tick arriving after post-wrap `t1` must neither refill nor rewind.
+        assert!(!meter.take(rate, MonotonicNow::from_millis(stale)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(t1)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(t0 + 999)));
+
+        // Exactly one second after `t0` restores one token and no more.
+        assert!(meter.take(rate, MonotonicNow::from_millis(t0 + 1_000)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(t0 + 1_000)));
+    }
+
+    /// Positive — normal forward progress across the `u32` wrap refills and saturates at burst.
+    #[test]
+    fn an_atomic_meter_refills_and_saturates_across_the_u32_wrap() {
+        let rate = Rate::new(2, 1);
+        let t0 = u64::from(u32::MAX) - 200;
+        let meter = AtomicMeter::full(rate, MonotonicNow::from_millis(t0));
+        assert!(meter.take(rate, MonotonicNow::from_millis(t0)));
+        assert!(meter.take(rate, MonotonicNow::from_millis(t0)));
+        assert!(!meter.take(rate, MonotonicNow::from_millis(t0)));
+
+        let later = MonotonicNow::from_millis(t0 + 10_000);
+        assert!(meter.take(rate, later));
+        assert!(meter.take(rate, later));
+        assert!(!meter.take(rate, later));
     }
 }
