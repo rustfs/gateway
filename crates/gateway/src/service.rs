@@ -514,15 +514,11 @@ impl S3Service {
         }
 
         // The host's one reading, and the bucket label SigV2 signs from it (S3-only).
-        let (resolved, vhost_bucket) = match isolation::resolve_host_for_service(
-            &*self.inner.host_resolver,
-            &wire,
-            signing_service,
-            Some(outcome.trace),
-        ) {
-            Ok(resolved) => resolved,
-            Err(error) => return outcome.refuse_handler(error),
-        };
+        let (resolved, vhost_bucket) =
+            match isolation::resolve_host_for_service(&*self.inner.host_resolver, &wire, signing_service, Some(outcome.trace)) {
+                Ok(resolved) => resolved,
+                Err(error) => return outcome.refuse_handler(error),
+            };
         let config = config.targeted();
         let target_origin = resolved.origin();
 
