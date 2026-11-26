@@ -272,17 +272,20 @@ async fn n_opaque_form_algorithms_keep_the_legacy_kms_refusal_order() {
 }
 
 /// Positive — the members RustFS reads and never uses change nothing: with every one set, a wrong
-/// checksum, a foreign expected owner and conditions that would fail included, the form overwrites
-/// the object exactly as a form without them does.
+/// checksum and conditions that would fail included, the form overwrites the object exactly as a
+/// form without them does; a foreign `x-amz-expected-bucket-owner` is refused with `403 AccessDenied`
+/// by the gateway's bucket-owner gate (rustfs/gateway#1628).
 #[tokio::test]
 async fn the_members_rustfs_ignores_change_nothing() {
     let (_root, service) = public_bucket().await;
     let first = post_form(&service, "ignored", &[], "first").await;
     assert_eq!(first.status(), 204, "{}", body_of(&first));
+    let foreign_owner = post_form(&service, "ignored", &[("x-amz-expected-bucket-owner", "999999999999")], "must not land").await;
+    assert_eq!(foreign_owner.status(), 403, "{}", body_of(&foreign_owner));
+    assert!(body_of(&foreign_owner).contains("<Code>AccessDenied</Code>"));
     let ignored = [
         ("x-amz-acl", "public-read"),
         ("x-amz-grant-read", "id=\"someone\""),
-        ("x-amz-expected-bucket-owner", "999999999999"),
         ("x-amz-request-payer", "requester"),
         ("x-amz-server-side-encryption-bucket-key-enabled", "true"),
         ("x-amz-sdk-checksum-algorithm", "CRC32"),

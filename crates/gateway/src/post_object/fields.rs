@@ -173,6 +173,70 @@ pub(super) fn legacy_managed_algorithm(fields: &PostObjectFields) -> Option<&'st
     }
 }
 
+/// Whether the form carries any managed-encryption field that would contradict SSE-C headers.
+pub(super) fn carries_managed_encryption(
+    fields: &PostObjectFields,
+    legacy_grammar: bool,
+    gateway_bucket_key: Option<&str>,
+) -> bool {
+    if legacy_grammar {
+        fields.server_side_encryption.is_some() || fields.ssekms_key_id.is_some()
+    } else {
+        fields.server_side_encryption.is_some()
+            || fields.ssekms_key_id.is_some()
+            || fields.ssekms_encryption_context.is_some()
+            || fields.bucket_key_enabled.is_some()
+            || gateway_bucket_key.is_some()
+    }
+}
+
+/// Judges POST form SSE fields alongside the already-enforced HTTP header SSE proof.
+///
+/// Order matches `rustfs_gateway_core::sse::enforce`:
+/// 1. Plaintext transport gate for any form customer key.
+/// 2. Cross-channel contradiction between header managed SSE and form SSE-C (or vice versa).
+/// 3. Existing legacy KMS header precedence when the form carries no customer key.
+/// 4. Form SSE enforcement and constant-time agreement if both header and form carry SSE-C.
+pub(super) fn enforce_post_sse(
+    fields: &PostObjectFields,
+    legacy_grammar: bool,
+    gateway_bucket_key: Option<&str>,
+    from_headers: rustfs_gateway_core::SseEnforced,
+    transport: rustfs_gateway_core::TransportSecurity,
+    config: &rustfs_gateway_core::SseConfig,
+) -> Result<rustfs_gateway_core::SseEnforced, rustfs_gateway_core::SseRejection> {
+    let form_customer = carries_customer_key(fields);
+    if form_customer
+        && transport == rustfs_gateway_core::TransportSecurity::Plaintext
+        && !config.allows_customer_keys_over_plaintext()
+    {
+        return Err(rustfs_gateway_core::SseRejection::PlaintextCustomerKey);
+    }
+    let form_managed = carries_managed_encryption(fields, legacy_grammar, gateway_bucket_key);
+    if (from_headers.managed_algorithm().is_some() && form_customer)
+        || (from_headers.customer_key_fingerprint().is_some() && form_managed)
+    {
+        return Err(rustfs_gateway_core::SseRejection::ChannelsContradict);
+    }
+    if !carries_encryption(fields, legacy_grammar, gateway_bucket_key)
+        || (legacy_grammar
+            && !form_customer
+            && from_headers
+                .managed_algorithm()
+                .is_some_and(|algorithm| algorithm.as_str() == "aws:kms"))
+    {
+        return Ok(from_headers);
+    }
+    let form_proof =
+        rustfs_gateway_core::sse::enforce_with(sse_lookup(fields, legacy_grammar, gateway_bucket_key), transport, config)?;
+    if let (Some(header_key), Some(form_key)) = (from_headers.customer_key_fingerprint(), form_proof.customer_key_fingerprint())
+        && !header_key.matches(form_key)
+    {
+        return Err(rustfs_gateway_core::SseRejection::ChannelsContradict);
+    }
+    Ok(form_proof)
+}
+
 /// Whether the form requires its own proof: every encryption field under the gateway grammar;
 /// the unchanged customer-key gate or a recognized effective managed request under legacy.
 pub(super) fn carries_encryption(fields: &PostObjectFields, legacy_grammar: bool, gateway_bucket_key: Option<&str>) -> bool {

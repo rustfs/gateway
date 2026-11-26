@@ -71,8 +71,8 @@ use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AuthError, AuthScheme, CanonicalRequestSpec, ExpectedScope, PayloadMode, RawHost, RawPathFallback, RegionSet, ScopeRejection,
-    SealedAws, SigFamily, SigIdentity, SigLocation, SignatureMatch, Unimplemented, Verdict, calculate_signature, enforce_scope,
-    signing_key, timing,
+    SealedAws, SigFamily, SigIdentity, SigLocation, Unimplemented, Verdict, calculate_signature, enforce_scope, signing_key,
+    timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -209,6 +209,8 @@ pub struct Authentication<'a> {
     body_refusal: std::sync::OnceLock<crate::render::S3Error>,
     /// Whether routing placed the request inside a dialect's claim (`with_claimed_route`).
     pub(super) claimed: bool,
+    /// Only allocate and retain `SignatureMismatchDetail` when verbose errors are enabled.
+    pub(super) verbose_signature_errors: bool,
 }
 
 impl core::fmt::Debug for Authentication<'_> {
@@ -254,6 +256,7 @@ impl<'a> Authentication<'a> {
             sts_body: None,
             body_refusal: std::sync::OnceLock::new(),
             claimed: false,
+            verbose_signature_errors: false,
         }
     }
 
@@ -537,9 +540,8 @@ impl SigV4Authenticator {
         let session_refusal = match &resolved {
             Ok(CredentialLookup::Found(credentials)) => presented.session_refusal(credentials, sealed, location),
             Ok(CredentialLookup::NotFound) | Err(_) => {
-                if let Some(placeholder) = super::session_answer::placeholder_session() {
-                    let _ = presented.session_refusal(placeholder, sealed, location);
-                }
+                let _ = super::session_answer::placeholder_session()
+                    .map(|placeholder| presented.session_refusal(placeholder, sealed, location));
                 None
             }
         };
@@ -548,52 +550,52 @@ impl SigV4Authenticator {
         let payload = sts_payload.as_ref().unwrap_or_else(|| request.payload());
         let key = signing_key(&secret, &verified);
         let date = presented.signed_at(sealed);
-        let (mut proof, mismatch_detail): (Option<SignatureMatch>, Option<rustfs_gateway_sig::SignatureMismatchDetail>) =
-            match &presented {
-                Presented::Form(policy) => (policy.verify(&key).ok(), None),
-                Presented::UnroutedForm(policy) => (policy.verify(&key).ok(), None),
-                Presented::Header(_, _) | Presented::Query(_, _) => {
-                    let (signed_headers, signature) =
-                        presented.canonical_parts().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                    let legacy_answer = |error: AuthError| {
-                        if let Some(refusal) = self.signed_headers_refusal(signed_headers, view.headers(), location, &error) {
-                            let _ = request.legacy_refusal.set(refusal);
-                        }
-                        error
-                    };
-                    let signed = self
-                        .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
-                        .map_err(legacy_answer)?;
-                    let paths = self.path_candidates(request.raw_path(), request.claimed, service)?;
-                    let query = view.query();
-                    let mut spec = CanonicalRequestSpec::new(
-                        request.method(),
-                        &paths,
-                        &query,
-                        view.headers(),
-                        &signed,
-                        request.host(),
-                        payload.canonical_payload_token(),
-                    )
-                    .for_service(service);
-                    if location.is_presigned() {
-                        spec = spec.presigned();
+        let (mut proof, mismatch_detail) = match &presented {
+            Presented::Form(policy) => (policy.verify(&key).ok(), None),
+            Presented::UnroutedForm(policy) => (policy.verify(&key).ok(), None),
+            Presented::Header(_, _) | Presented::Query(_, _) => {
+                let (signed_headers, signature) = presented.canonical_parts().ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                let legacy_answer = |error: AuthError| {
+                    if let Some(refusal) = self.signed_headers_refusal(signed_headers, view.headers(), location, &error) {
+                        let _ = request.legacy_refusal.set(refusal);
                     }
-                    let mut matched = None;
-                    let mut detail = None;
-                    for candidate in spec.candidates().map_err(legacy_answer)? {
-                        let string_to_sign = candidate.string_to_sign(&date, presented.scope());
-                        let derived = calculate_signature(&key, &string_to_sign);
-                        detail = Some(rustfs_gateway_sig::SignatureMismatchDetail::new(&candidate, &string_to_sign));
-                        // Every candidate is derived and compared even after one has matched:
-                        // returning early would make the number of HMAC rounds observable.
-                        if let Ok(equal) = signature.ct_verify(&derived) {
-                            matched = matched.or(Some(equal));
-                        }
-                    }
-                    (matched, detail)
+                    error
+                };
+                let signed = self
+                    .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
+                    .map_err(legacy_answer)?;
+                let paths = self.path_candidates(request.raw_path(), request.claimed, service)?;
+                let query = view.query();
+                let mut spec = CanonicalRequestSpec::new(
+                    request.method(),
+                    &paths,
+                    &query,
+                    view.headers(),
+                    &signed,
+                    request.host(),
+                    payload.canonical_payload_token(),
+                )
+                .for_service(service);
+                if location.is_presigned() {
+                    spec = spec.presigned();
                 }
-            };
+                let mut matched = None;
+                let mut detail = None;
+                for candidate in spec.candidates().map_err(legacy_answer)? {
+                    let string_to_sign = candidate.string_to_sign(&date, presented.scope());
+                    let derived = calculate_signature(&key, &string_to_sign);
+                    if request.verbose_signature_errors {
+                        detail = Some(rustfs_gateway_sig::SignatureMismatchDetail::new(&candidate, &string_to_sign));
+                    }
+                    // Every candidate is derived and compared even after one has matched:
+                    // returning early would make the number of HMAC rounds observable.
+                    if let Ok(equal) = signature.ct_verify(&derived) {
+                        matched = matched.or(Some(equal));
+                    }
+                }
+                (matched, detail)
+            }
+        };
 
         // The unknown-key branch has now paid for the same derivation a known key does. Only after
         // that is the uniform credential rejection — or, under the switch, a fault — answered.
@@ -604,10 +606,9 @@ impl SigV4Authenticator {
             if let Some(pending) = session_refusal {
                 return Err(pending.uniform().into());
             }
-            let Some(detail) = mismatch_detail else {
-                return Err(AuthError::SignatureDoesNotMatch.into());
-            };
-            let _ = request.signature_mismatch.set(detail);
+            if let Some(detail) = mismatch_detail {
+                let _ = request.signature_mismatch.set(detail);
+            }
             return Err(AuthError::SignatureDoesNotMatch.into());
         };
         // A credential that exists, is correctly signed for, and is still not usable: switched
@@ -652,14 +653,8 @@ impl SigV4Authenticator {
             _ => return Err(AuthError::AuthorizationHeaderMalformed.into()),
         };
 
-        // Published only here: after the comparison produced a `SignatureMatch` and after the
-        // access key was found. A key made available on the failing path would be one an
-        // unauthenticated caller had caused to be derived, and the body reader has no way to know
-        // which path it came from — the sink carries no provenance, so the ordering has to.
-        //
-        // Published only when the mode actually frames the body. `has_chunk_signatures()` reads
-        // `x-amz-content-sha256` and nothing else, which is the one sanctioned input to that
-        // question; `Content-Encoding: aws-chunked` is metadata and is not consulted anywhere.
+        // Publish chunk verification material only after both lookup and signature match succeeded,
+        // and only when `x-amz-content-sha256` frames the body (never from `Content-Encoding`).
         if request.payload().has_chunk_signatures()
             && let Some(sink) = request.chunk_sink()
             && let Some(seed) = presented.chunk_seed()

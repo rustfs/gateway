@@ -84,10 +84,22 @@ impl Handler<ListBuckets> for Backend {
     }
 }
 
+struct FixedOwner;
+
+impl rustfs_gateway::BucketOwnerSource for FixedOwner {
+    fn owner<'a>(
+        &'a self,
+        _bucket: &'a rustfs_gateway::BucketName,
+    ) -> rustfs_gateway::BoxFuture<'a, Result<Arc<str>, rustfs_gateway::BucketOwnerError>> {
+        Box::pin(async { Ok(Arc::<str>::from("123456789012")) })
+    }
+}
+
 fn service(backend: Arc<Backend>, allow: bool, legacy: bool) -> S3Service {
     let builder = wired_at_signed_time()
         .register::<ListBuckets, _>(Arc::clone(&backend))
         .register::<PostObject, _>(backend)
+        .bucket_owner_source(FixedOwner)
         .authorizer(rustfs_gateway::allow_when(move |_| allow));
     let builder = if legacy { builder.legacy_rustfs_post_forms() } else { builder };
     builder.build().expect("complete POST Object service")

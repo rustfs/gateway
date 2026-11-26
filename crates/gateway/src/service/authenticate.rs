@@ -61,6 +61,7 @@ pub(super) struct AuthStageInput<'a> {
     pub(super) declared_length: Option<u64>,
     pub(super) external_bound: bool,
     pub(super) claimed: bool,
+    pub(super) bearer_claim: Option<QueryBearerClaim>,
     pub(super) bearer_verified_claim: Option<QueryBearerClaim>,
     pub(super) secret_scope: crate::routed_facts::CallerKeyOptIn,
     pub(super) vhost_bucket: Option<&'a str>,
@@ -182,6 +183,7 @@ impl S3Service {
             declared_length,
             external_bound,
             claimed,
+            bearer_claim,
             bearer_verified_claim,
             secret_scope,
             vhost_bucket,
@@ -240,6 +242,7 @@ impl S3Service {
                     )
                     .with_post_form(post_policy_limits, post_filename)
                     .with_claimed_route(claimed)
+                    .with_verbose_signature_errors(config.verbose_signature_errors())
                     // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
                     // chain is verified with the same key and seed the request signature was, and
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
@@ -249,7 +252,10 @@ impl S3Service {
                     let result =
                         match super::extension_guards::authenticate_safely(auth, &question, outcome.trace, operation).await {
                             Ok(result) => result,
-                            Err(error) => return Err(outcome.refuse_handler(error)),
+                            Err(error) => {
+                                self.hold_auth_failure_floor(auth_started).await;
+                                return Err(outcome.refuse_handler(error));
+                            }
                         };
                     signed_body = question.signs_its_body();
                     body_digest = self.settle_body_digest(request_body_mode, body_digest, &question);
@@ -268,20 +274,24 @@ impl S3Service {
                     }
                 }
             }
-            // Unsigned: anonymous, or admitted by the header token claim (ADR-0054). One framing rule serves both.
-            Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
+            Ok(Admission::Anonymous(evidence)) => {
                 framing_mode = match crate::payload_header::anonymous_framing(headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,
                     Err(error) => return Err(outcome.refuse_at(Refused::Decode, error)),
                 };
-                let verdict = match unsigned {
-                    Admission::Anonymous(evidence) => Verdict::anonymous(evidence),
-                    Admission::HeaderToken(admission) => {
-                        header_token_admitted = true;
-                        self.header_token_verdict(admission, wire.transport_extensions(), outcome.trace, operation)
-                    }
-                    _ => Verdict::reject(AuthError::AccessDenied), // not reachable: the pattern admits only those two
-                };
+                (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None)
+            }
+            // ADR-0054: verify the header token before decoding anonymous framing so a rejected
+            // token always awaits `FailureFloor` and never surfaces a framing error instead.
+            Ok(Admission::HeaderToken(admission)) => {
+                header_token_admitted = true;
+                let verdict = self.header_token_verdict(admission, wire.transport_extensions(), outcome.trace, operation);
+                if verdict.rejection().is_none() {
+                    framing_mode = match crate::payload_header::anonymous_framing(headers, self.inner.decode_anonymous_framing) {
+                        Ok(mode) => mode,
+                        Err(error) => return Err(outcome.refuse_at(Refused::Decode, error)),
+                    };
+                }
                 (AuthenticationOutcome::ordinary(verdict), None)
             }
             // No payload mode and no framed body: SigV2 has neither, so `framing_mode` stays
@@ -296,7 +306,10 @@ impl S3Service {
                         self.hold_auth_failure_floor(auth_started).await;
                         return Err(outcome.refuse_unavailable(UNAUTHENTICATED, body_owed));
                     }
-                    Err(error) => return Err(outcome.refuse_handler(error)),
+                    Err(error) => {
+                        self.hold_auth_failure_floor(auth_started).await;
+                        return Err(outcome.refuse_handler(error));
+                    }
                 }
             }
             Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {
@@ -308,7 +321,10 @@ impl S3Service {
                         operation,
                     ) {
                         Ok(verdict) => verdict,
-                        Err(error) => return Err(outcome.refuse_handler(error)),
+                        Err(error) => {
+                            self.hold_auth_failure_floor(auth_started).await;
+                            return Err(outcome.refuse_handler(error));
+                        }
                     };
                     let verdict = if verdict.is_anonymous() {
                         Verdict::reject(AuthError::AuthorizationHeaderMalformed)
@@ -374,6 +390,7 @@ impl S3Service {
                     error,
                     signature_mismatch.as_ref(),
                     config.verbose_signature_errors(),
+                    bearer_claim.as_ref().map(QueryBearerClaim::param),
                     response_kind,
                     body_owed,
                 ),

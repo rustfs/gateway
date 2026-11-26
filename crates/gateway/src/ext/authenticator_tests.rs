@@ -640,3 +640,45 @@ async fn an_expired_session_form_without_the_secret_is_not_told_it_expired() {
         assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId), "{access_key}");
     }
 }
+
+/// Negative — when `verbose_signature_errors` is disabled (the default), signature verification
+/// must not allocate or retain an unredacted `SignatureMismatchDetail` on `Authentication`.
+#[tokio::test]
+async fn n_signature_mismatch_detail_is_not_retained_when_verbose_errors_disabled() {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.test"));
+    headers.insert("x-amz-date", http::HeaderValue::from_static(SCOPE_STAMP));
+    headers.insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_static(
+            "AWS4-HMAC-SHA256 Credential=AKIDLIVE/20150830/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=0000000000000000000000000000000000000000000000000000000000000000",
+        ),
+    );
+    let view = WireView::new(&headers, RawQuery::new(""));
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let admitted = SecurityFloor::new()
+        .admit(view, &operation, RequestNow::from_unix_seconds(SCOPE_NOW))
+        .expect("admitted");
+    let Admission::Sealed(sealed) = admitted else { panic!("expected sealed") };
+    let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
+    let (method, payload) = (Method::GET, PayloadMode::Unsigned);
+    let request = Authentication::new(&sealed, &method, "/bucket", &host, &payload, None);
+    let authenticator = SigV4Authenticator::new(
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDLIVE", SESSION_SECRET).expect("creds"))),
+        RegionSet::new(["us-east-1"]).expect("non-empty"),
+    );
+    let outcome = authenticator.authenticate(&request).await.expect("store answers");
+    assert_eq!(outcome.into_parts().0.rejection(), Some(AuthError::SignatureDoesNotMatch));
+    let (detail, _, _) = request.into_published();
+    assert!(
+        detail.is_none(),
+        "unredacted SignatureMismatchDetail must not be retained when verbose errors are disabled"
+    );
+
+    // Positive control: enabling verbose_signature_errors retains mismatch diagnostics.
+    let verbose_request =
+        Authentication::new(&sealed, &method, "/bucket", &host, &payload, None).with_verbose_signature_errors(true);
+    let verbose_outcome = authenticator.authenticate(&verbose_request).await.expect("store answers");
+    assert_eq!(verbose_outcome.into_parts().0.rejection(), Some(AuthError::SignatureDoesNotMatch));
+    assert!(verbose_request.into_published().0.is_some());
+}

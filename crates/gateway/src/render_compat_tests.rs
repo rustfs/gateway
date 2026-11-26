@@ -265,7 +265,7 @@ fn an_auth_refusal_closes_only_when_body_octets_are_owed() {
             "plain, body_owed = {body_owed}"
         );
         assert_eq!(
-            from_auth_with_detail(AuthError::SignatureDoesNotMatch, None, false, ResponseKind::Other, body_owed).connection,
+            from_auth_with_detail(AuthError::SignatureDoesNotMatch, None, false, None, ResponseKind::Other, body_owed).connection,
             expected,
             "detailed, body_owed = {body_owed}"
         );

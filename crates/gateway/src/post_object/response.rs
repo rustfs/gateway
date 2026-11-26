@@ -182,6 +182,9 @@ fn legacy_redirect_action(raw: &str) -> SuccessAction {
     let Ok(parsed) = url::Url::parse(raw) else {
         return SuccessAction::InvalidRedirect;
     };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return SuccessAction::InvalidRedirect;
+    }
     // Malformed URLs win before storage; control bytes in a parseable URL are refused after it.
     if raw.bytes().any(|byte| byte.is_ascii_control()) {
         SuccessAction::UnrenderableRedirect

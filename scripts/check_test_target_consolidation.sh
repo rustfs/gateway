@@ -765,6 +765,8 @@ gateway_modules = (
     "governor_runtime",
     "governor_streaming",
     "handler_panic",
+    "hardening_auth_and_owner",
+    "hardening_post_object",
     "header_lookup_allocations",
     "header_token",
     "header_token_host",

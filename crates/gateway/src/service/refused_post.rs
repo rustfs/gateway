@@ -138,7 +138,10 @@ where
                 service.hold_auth_failure_floor(auth_started).await;
                 return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true));
             }
-            Ok(_) => return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NO_ROUTE_MESSAGE)),
+            Ok(_) => {
+                service.hold_auth_failure_floor(auth_started).await;
+                return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NO_ROUTE_MESSAGE));
+            }
         };
         // The form's own policy ceilings, as the routed path and the SigV4 branch below pass them.
         let question = SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), None)
@@ -153,7 +156,10 @@ where
         .await
         {
             Ok(result) => result,
-            Err(error) => return outcome.refuse_handler(error),
+            Err(error) => {
+                service.hold_auth_failure_floor(auth_started).await;
+                return outcome.refuse_handler(error);
+            }
         };
         let Ok(authentication) = authentication else {
             service.hold_auth_failure_floor(auth_started).await;
@@ -205,7 +211,10 @@ where
         .await
         {
             Ok(result) => result,
-            Err(error) => return outcome.refuse_handler(error),
+            Err(error) => {
+                service.hold_auth_failure_floor(auth_started).await;
+                return outcome.refuse_handler(error);
+            }
         };
         let (_, legacy, _) = question.into_published();
         let Ok(authentication) = authentication else {

@@ -132,7 +132,7 @@ use crate::ext::{
     ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver, InputAuthzRequest, PolicySnapshot, RequestContext,
     RequestEvent, ResponseView, RoutedView, emit_safely,
 };
-use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
+use crate::gate::{BodyCeilings, MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
@@ -770,7 +770,7 @@ impl S3Service {
         let aws_credential_marker = self.inner.floor.credential_marker(&view);
         let presented = presence.any()
             || aws_credential_marker.is_some()
-            || self.inner.floor.custom_schemes().matching(&view).is_some()
+            || self.inner.floor.custom_schemes().any_matches(&view)
             || token_presented;
         if let (false, RoutedBody::Ordinary(sealed)) = (presented, &routed_body)
             && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
@@ -804,6 +804,7 @@ impl S3Service {
                 {
                     Some(Ok(verdict)) => Some(verdict),
                     Some(Err(())) => {
+                        self.hold_auth_failure_floor(auth_started).await;
                         return outcome.refuse_handler(extension_guards::replaced_verifier_panicked(outcome.trace, operation));
                     }
                     None => None,
@@ -825,6 +826,7 @@ impl S3Service {
                     declared_length,
                     external_bound,
                     claimed,
+                    bearer_claim,
                     bearer_verified_claim,
                     secret_scope,
                     vhost_bucket: vhost_bucket.as_deref(),
@@ -865,6 +867,7 @@ impl S3Service {
         // Metadata admission and credential location follow the settled verdict; a missing proof
         // is refused, and codec-facing header rewrites cannot supply or erase the original AWS fact.
         let Some(metadata_admission) = MetadataAdmission::of(&verdict) else {
+            self.hold_auth_failure_floor(auth_started).await;
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
@@ -887,13 +890,14 @@ impl S3Service {
         };
         let post_key_constraints = accepted_body.post_key_constraints(&verdict);
         // Own the form's request facts so the route and input stages borrow no body.
-        let (effective_key, post_response, post_fields, post_date_offset) = match &accepted_body {
-            AcceptedBody::Ordinary(_) => (meta.key().cloned(), None, None, None),
+        let (effective_key, post_response, post_fields, post_date_offset, post_expected_owner) = match &accepted_body {
+            AcceptedBody::Ordinary(_) => (meta.key().cloned(), None, None, None, None),
             AcceptedBody::PostObject(post) => (
                 Some(post.key().clone()),
                 Some(post.response_plan()),
                 Some(post.permission_fields()),
                 post.retain_until_offset_seconds(),
+                post.expected_bucket_owner().map(str::to_owned),
             ),
         };
         let defer_post_success_check = M::defers_post_object_success_check(&op);
@@ -933,6 +937,7 @@ impl S3Service {
         let route_verdict = &verdict;
         let route_effective_key = effective_key.as_ref();
         let route_post_fields = post_fields.as_deref();
+        let route_post_expected_owner = post_expected_owner.as_deref();
         let route_subjects = subjects.as_ref();
         let cors_slot = Mutex::new(None);
         let route_cors = &cors_slot;
@@ -1055,6 +1060,18 @@ impl S3Service {
                         }
                     }
                     (None, _) | (_, None) => Decision::Indeterminate,
+                };
+            }
+            if route_decision == Decision::Allow
+                && let Some(expected_owner) = route_post_expected_owner
+            {
+                route_decision = match route_meta.bucket() {
+                    Some(bucket) => match catch_boxed_future(|| route_service.inner.bucket_owner_source.owner(bucket)).await {
+                        Ok(Ok(actual_owner)) if actual_owner.as_ref() == expected_owner => Decision::Allow,
+                        Ok(Ok(_)) => Decision::Deny,
+                        Ok(Err(_)) | Err(()) => Decision::Indeterminate,
+                    },
+                    None => Decision::Indeterminate,
                 };
             }
             // Each triggered, profile-required extra is all-of on top of the base decision.
@@ -1249,7 +1266,9 @@ impl S3Service {
                     }
                     handed
                 }
-                AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission, defer_post_success_check)?,
+                AcceptedBody::PostObject(post) => {
+                    (*post).handoff(&metadata_admission, defer_post_success_check, state.config.body_quota())?
+                }
             };
             #[cfg(feature = "external-payload")]
             let body = crate::external_payload::bind_input(body, body_wire.transport_extensions())
@@ -1267,6 +1286,7 @@ impl S3Service {
         let input_service = self;
         let input_runtime = runtime;
         let input_meta = &meta;
+        let input_headers = &headers;
         let input_verdict = &verdict;
         let input_wire = &wire;
         let input_query: &str = &context_query;
@@ -1350,8 +1370,8 @@ impl S3Service {
                 };
             let decisions = input_decisions.as_slice().to_vec();
             let visibility = input_decisions.visibility();
-            let stage = input_decisions.stage();
-            let input_decision = if stage != Decision::Allow {
+            let mut stage = input_decisions.stage();
+            let mut input_decision = if stage != Decision::Allow {
                 stage
             } else {
                 decisions
@@ -1360,6 +1380,43 @@ impl S3Service {
                     .find(|decision| *decision != Decision::Allow)
                     .unwrap_or(Decision::Allow)
             };
+            if input_decision == Decision::Allow
+                && (matches!(operation, "CopyObject" | "UploadPartCopy")
+                    || resources.iter().any(|resource| resource.identity().is_some()))
+                && input_headers.contains_key("x-amz-source-expected-bucket-owner")
+                && input_meta.has_header("x-amz-source-expected-bucket-owner")
+            {
+                let source_owner_decision = match input_meta.header("x-amz-source-expected-bucket-owner") {
+                    Some(expected_owner) if !resources.is_empty() => {
+                        let mut verdict = Decision::Allow;
+                        for resource in &resources {
+                            verdict = match resource.bucket() {
+                                Some(source_bucket) => {
+                                    match catch_boxed_future(|| input_service.inner.bucket_owner_source.owner(source_bucket))
+                                        .await
+                                    {
+                                        Ok(Ok(actual_owner)) if actual_owner.as_ref() == expected_owner.as_ref() => {
+                                            Decision::Allow
+                                        }
+                                        Ok(Ok(_)) => Decision::Deny,
+                                        Ok(Err(_)) | Err(()) => Decision::Indeterminate,
+                                    }
+                                }
+                                None => Decision::Indeterminate,
+                            };
+                            if verdict != Decision::Allow {
+                                break;
+                            }
+                        }
+                        verdict
+                    }
+                    _ => Decision::Indeterminate,
+                };
+                if source_owner_decision != Decision::Allow {
+                    stage = source_owner_decision;
+                    input_decision = source_owner_decision;
+                }
+            }
             let mut audited_resources = Vec::with_capacity(input_resources.len().saturating_add(1));
             audited_resources.push(route_request);
             audited_resources.extend(input_resources.iter().copied());

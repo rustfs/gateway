@@ -336,6 +336,9 @@ where
             });
             (metadata, None, object_fields, gateway_bucket_key)
         };
+        let expected_bucket_owner = fields
+            .iter()
+            .find_map(|(name, value)| (*name == "x-amz-expected-bucket-owner").then(|| (*value).to_owned()));
         let permission_fields = fields::permission_fields(&fields);
         let response = PostObjectResponsePlan::parse(&fields, &bucket, &key, legacy_store)?;
         let ceiling = policy.read_ceiling(self.limits);
@@ -354,6 +357,7 @@ where
             content_type,
             metadata,
             object_fields,
+            expected_bucket_owner,
             retain_until_offset_seconds,
             gateway_bucket_key,
             permission_fields,
@@ -380,6 +384,8 @@ pub(crate) struct ResolvedPostObject<B: Body> {
     /// The other `PutObject` members the form set: every one legacy RustFS reads under the RustFS
     /// profile, the Object Lock and encryption members under either grammar.
     object_fields: PostObjectFields,
+    /// Form-supplied `x-amz-expected-bucket-owner`, enforced by the route stage under either grammar.
+    expected_bucket_owner: Option<String>,
     retain_until_offset_seconds: Option<i32>,
     /// As sent, including an unreadable flag: the gateway SSE gate decides its refusal order.
     gateway_bucket_key: Option<String>,
@@ -400,6 +406,10 @@ where
         &self.key
     }
 
+    pub(crate) fn expected_bucket_owner(&self) -> Option<&str> {
+        self.expected_bucket_owner.as_deref()
+    }
+
     pub(crate) fn retain_until_offset_seconds(&self) -> Option<i32> {
         self.retain_until_offset_seconds
     }
@@ -413,10 +423,7 @@ where
         self.permission_fields.clone()
     }
 
-    /// The handler's SSE proof, judged by the shared gate for form encryption. The legacy grammar
-    /// retains its customer-key rules, ignores the qualifiers its host ignores, and preserves
-    /// `from_headers` when it has no recognized form intent. A KMS header stays effective on a
-    /// legacy POST even beside form AES, as RustFS refuses it before validating form algorithms.
+    /// The handler's SSE proof, judged by the shared gate for form encryption alongside headers.
     ///
     /// # Errors
     ///
@@ -427,17 +434,11 @@ where
         transport: TransportSecurity,
         config: &SseConfig,
     ) -> Result<SseEnforced, SseRejection> {
-        if !fields::carries_encryption(&self.object_fields, self.legacy_grammar, self.gateway_bucket_key.as_deref())
-            || (self.legacy_grammar
-                && !fields::carries_customer_key(&self.object_fields)
-                && from_headers
-                    .managed_algorithm()
-                    .is_some_and(|algorithm| algorithm.as_str() == "aws:kms"))
-        {
-            return Ok(from_headers);
-        }
-        rustfs_gateway_core::sse::enforce_with(
-            fields::sse_lookup(&self.object_fields, self.legacy_grammar, self.gateway_bucket_key.as_deref()),
+        fields::enforce_post_sse(
+            &self.object_fields,
+            self.legacy_grammar,
+            self.gateway_bucket_key.as_deref(),
+            from_headers,
             transport,
             config,
         )
@@ -447,6 +448,7 @@ where
         self,
         _proof: &MetadataAdmission<'_>,
         defer_success_check: bool,
+        body_quota: Option<std::sync::Arc<dyn crate::ext::BodyQuota>>,
     ) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
         if !defer_success_check {
             self.response.before_storage().map_err(policy_refusal)?;
@@ -482,7 +484,7 @@ where
         let opened = StreamingRead::new_with_refusal(
             Some(body),
             (self.file_length, None),
-            (BodyCeilings::streaming(None), self.timeouts, None),
+            (BodyCeilings::streaming(None), self.timeouts, body_quota),
             None,
             BodyDigestObligation::None,
             BodyIntegrity::NONE,
@@ -601,8 +603,11 @@ where
                     Some(frame) => frame,
                     None => match self.frames.poll_next(context) {
                         Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Err(_)) => {
-                            return Poll::Ready(Some(Err(PostBodyError("the POST body transport failed", None))));
+                        Poll::Ready(Err(refusal)) => {
+                            return Poll::Ready(Some(Err(PostBodyError(
+                                "the POST body transport failed",
+                                Some(Box::new(refusal)),
+                            ))));
                         }
                         Poll::Ready(Ok(None)) => {
                             // The legacy RustFS grammar confirms its close only at the end of the

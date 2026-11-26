@@ -53,6 +53,7 @@ pub(super) fn parse(name: &str) -> Result<HeaderName, InvalidHeaderName> {
         "x-amz-server-side-encryption-customer-algorithm" => "x-amz-server-side-encryption-customer-algorithm",
         "x-amz-server-side-encryption-customer-key" => "x-amz-server-side-encryption-customer-key",
         "x-amz-server-side-encryption-customer-key-md5" => "x-amz-server-side-encryption-customer-key-md5",
+        "x-amz-source-expected-bucket-owner" => "x-amz-source-expected-bucket-owner",
         "x-amz-storage-class" => "x-amz-storage-class",
         "x-amz-tagging" => "x-amz-tagging",
         "x-amz-website-redirect-location" => "x-amz-website-redirect-location",
