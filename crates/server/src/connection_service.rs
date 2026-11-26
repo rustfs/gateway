@@ -37,6 +37,7 @@ use tower_http::catch_panic::{DefaultResponseForPanic, ResponseForPanic};
 use crate::driver::ConnectionInfo;
 use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermit};
 use crate::send_deadline::SendProgress;
+use crate::task_tracker::TaskTracker;
 use crate::write_receipt::WriteReceipts;
 
 /// The erased error returned to a connection driver.
@@ -220,6 +221,7 @@ pub struct ConnectionService<S> {
     connection_in_flight: Arc<AtomicUsize>,
     request_body_unfinished: Arc<AtomicBool>,
     receipts: Arc<WriteReceipts>,
+    background_tasks: TaskTracker,
 }
 
 impl<S> ConnectionService<S> {
@@ -242,12 +244,19 @@ impl<S> ConnectionService<S> {
             connection_in_flight,
             request_body_unfinished,
             receipts,
+            background_tasks: TaskTracker::default(),
         }
     }
 
     /// Shares write receipts with the transport that confirms this connection's writes.
     pub(crate) fn confirm_writes_into(mut self, receipts: Arc<WriteReceipts>) -> Self {
         self.receipts = receipts;
+        self
+    }
+
+    /// Tracks detached peer-loss cleanup tasks inside the listener's shutdown tracker.
+    pub(crate) fn track_background_tasks(mut self, background_tasks: TaskTracker) -> Self {
+        self.background_tasks = background_tasks;
         self
     }
 }
@@ -283,6 +292,7 @@ where
         let in_flight = InFlight::new(Arc::clone(&self.connection_in_flight), Arc::clone(&self.request_seen));
         let request_body_unfinished = Arc::clone(&self.request_body_unfinished);
         let receipts = Arc::clone(&self.receipts);
+        let background_tasks = self.background_tasks.clone();
         let http2 = request.version() == http::Version::HTTP_2;
         Box::pin(async move {
             // Present only when an HTTP/2 stream task is polling this future (`send_deadline`).
@@ -312,6 +322,7 @@ where
                 },
                 cancellation_source,
                 force_abort,
+                background_tasks,
             )
             .await?;
             if response.extensions().get::<UnfinishedRequestBody>().is_some() {

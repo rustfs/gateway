@@ -30,6 +30,7 @@ use thiserror::Error;
 
 use crate::config::ServerConfig;
 use crate::send_deadline::StreamExecutor;
+use crate::task_tracker::TaskTracker;
 
 /// The ALPN protocols a listener advertises unless configured otherwise, in server preference
 /// order: HTTP/2 over TLS is identified only by `h2` (RFC 9113 section 3.2).
@@ -157,8 +158,12 @@ pub enum TlsReloadError {
 ///
 /// Every HTTP/2 stream runs under its send-progress deadline of
 /// [`ServerConfig::write_progress_timeout`] (`crate::send_deadline`).
-pub(crate) fn protocol_builder(negotiated: Option<&[u8]>, config: &ServerConfig) -> auto::Builder<StreamExecutor> {
-    let builder = auto::Builder::new(StreamExecutor::new(config.write_progress_timeout));
+pub(crate) fn protocol_builder(
+    negotiated: Option<&[u8]>,
+    config: &ServerConfig,
+    background_tasks: TaskTracker,
+) -> auto::Builder<StreamExecutor> {
+    let builder = auto::Builder::new(StreamExecutor::new(config.write_progress_timeout, background_tasks));
     match negotiated {
         Some(b"h2") => builder.http2_only(),
         Some(b"http/1.1") => builder.http1_only(),

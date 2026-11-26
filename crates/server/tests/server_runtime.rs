@@ -41,6 +41,8 @@ mod global_admission;
 mod listener_stop;
 #[path = "server_runtime/shutdown_drain.rs"]
 pub(crate) mod shutdown_drain;
+#[path = "server_runtime/shutdown_tracking.rs"]
+mod shutdown_tracking;
 #[path = "server_runtime/task_reaping.rs"]
 mod task_reaping;
 #[path = "server_runtime/unbounded_timeouts.rs"]

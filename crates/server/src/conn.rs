@@ -46,6 +46,7 @@ use crate::tls::TlsHandle;
 
 use crate::request_capacity::RequestCapacity;
 use crate::sendfile_task::BlockingFileTransferExecutor;
+use crate::task_tracker::TaskTracker;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only synchronization failures terminate the scenario; no value comes from external input.
@@ -201,6 +202,7 @@ where
     } = task;
     let semaphore = Arc::new(Semaphore::new(config.max_connections));
     let file_transfer_executor = BlockingFileTransferExecutor::for_listener();
+    let background_tasks = TaskTracker::default();
     let (request_capacity, mut request_capacity_receiver) = RequestCapacity::new(config.max_global_inflight_requests);
     let ip_counts = Arc::new(IpCounts::new(config.max_connections_per_ip));
     let request_stats = Arc::new(RequestStats::default());
@@ -366,6 +368,7 @@ where
                 metrics: Arc::clone(&metrics.inner),
                 lifecycle: active.clone(),
                 file_transfer_executor: file_transfer_executor.clone(),
+                background_tasks: background_tasks.clone(),
                 #[cfg(test)]
                 deadline_observer: deadline_observer
                     .as_ref()
@@ -388,12 +391,20 @@ where
     drop(listener);
     let Some(command) = command else {
         abort_connections(&mut connections).await;
+        background_tasks.abort_all().await;
         return Ok(());
     };
 
     request_stats.begin_shutdown();
     let _ = shutdown_sender.send(true);
-    finish_shutdown(&mut connections, &file_transfer_executor, &request_stats, command.grace).await;
+    finish_shutdown(
+        &mut connections,
+        &background_tasks,
+        &file_transfer_executor,
+        &request_stats,
+        command.grace,
+    )
+    .await;
     let report = ShutdownReport {
         drained: request_stats.drained(),
         aborted: request_stats.aborted(),
@@ -434,22 +445,26 @@ fn reap_finished(connections: &mut JoinSet<()>, metrics: &MetricsInner) {
 
 async fn drain_connections_and_file_transfers(
     connections: &mut JoinSet<()>,
+    background_tasks: &TaskTracker,
     file_transfer_executor: &BlockingFileTransferExecutor,
 ) {
     drain_connections(connections).await;
+    background_tasks.wait_idle().await;
     file_transfer_executor.wait_idle().await;
 }
 
 async fn finish_shutdown(
     connections: &mut JoinSet<()>,
+    background_tasks: &TaskTracker,
     file_transfer_executor: &BlockingFileTransferExecutor,
     request_stats: &RequestStats,
     grace: std::time::Duration,
 ) {
-    let drained = drain_connections_and_file_transfers(connections, file_transfer_executor);
+    let drained = drain_connections_and_file_transfers(connections, background_tasks, file_transfer_executor);
     if tokio::time::timeout(grace, drained).await.is_err() {
         request_stats.force_abort();
         abort_connections(connections).await;
+        background_tasks.abort_all().await;
     }
 }
 
@@ -479,6 +494,7 @@ pub(crate) struct ConnectionState {
     pub(crate) metrics: Arc<MetricsInner>,
     pub(crate) lifecycle: ConnectionLifecycle,
     pub(crate) file_transfer_executor: BlockingFileTransferExecutor,
+    pub(crate) background_tasks: TaskTracker,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
 }
@@ -507,6 +523,7 @@ where
         metrics,
         lifecycle: _lifecycle,
         file_transfer_executor: _file_transfer_executor,
+        background_tasks,
         #[cfg(test)]
         deadline_observer,
     } = state;
@@ -574,8 +591,9 @@ where
         connection_in_flight,
         request_body_unfinished,
     )
-    .confirm_writes_into(Arc::clone(&receipts));
-    let mut builder = crate::tls::protocol_builder(negotiated.as_deref(), &config);
+    .confirm_writes_into(Arc::clone(&receipts))
+    .track_background_tasks(background_tasks.clone());
+    let mut builder = crate::tls::protocol_builder(negotiated.as_deref(), &config, background_tasks);
     #[cfg(test)]
     match &deadline_observer {
         Some(observer) => {

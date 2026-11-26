@@ -503,7 +503,8 @@ impl<S> AcceptedConnection<S> {
             Arc::clone(&self.state.connection_in_flight),
             Arc::clone(&self.state.request_body_unfinished),
         )
-        .confirm_writes_into(Arc::clone(&receipts));
+        .confirm_writes_into(Arc::clone(&receipts))
+        .track_background_tasks(self.state.background_tasks);
         let inner = ProgressIo::new(
             self.state.stream,
             Arc::clone(&self.state.connection_in_flight),

@@ -24,6 +24,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/sendfile.rs` | Safe Linux/Apple file-to-socket syscall signature normalization | A self-held driver reports wrong sendfile progress or platform errors |
 | `src/sendfile_task.rs` | Bounded blocking handoff for file-transfer syscalls | A cold file stalls Tokio workers or blocking file work grows without a ceiling |
 | `src/shutdown.rs` | Trigger, report and metrics | Drain or abort counts are wrong |
+| `src/task_tracker.rs` | Listener-scoped tracker for detached peer-loss cleanup and HTTP/2 stream tasks | Detached cleanup or HTTP/2 streams escape shutdown drain or leak handles |
 | `src/write_receipt.rs` | Counts a response drained only after the transport confirms its bytes were written (flush, half-close or clean connection end) | Shutdown reports drained for a response the peer never received |
 | `src/dispatch.rs` | Generic path-prefix selection | A route reaches the fallback unexpectedly |
 | `src/layers.rs` | General tower layer attachment points | Wiring panic, request ID, trace or compression |
@@ -35,6 +36,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/server_runtime/listener_stop.rs` | Shared listener-stop probes and adversarial observer controls | A stalled connect hides listener stop or a probe reports closure without a real connection error |
 | `tests/server_runtime/drain_fixture.rs` | Healthy 8 MiB shutdown drain, in flight when shutdown begins, with lease checkpoints | Changing the full-body drain or its resource-isolation controls |
 | `tests/server_runtime/shutdown_drain.rs` | A final frame blocked on the socket is aborted at the grace; the same frame written after shutdown began is drained | Drained/aborted accounting diverges from what reached the socket |
+| `tests/server_runtime/shutdown_tracking.rs` | Shutdown drain and grace-abort controls for detached peer-loss cleanup and HTTP/2 stream tasks | Detached cleanup or HTTP/2 streams escape shutdown |
 | `tests/server_runtime/client_ceiling.rs` | IPv4 and IPv6 loopback clients on one dual-stack listener at a ceiling of one | Dual-stack peers are keyed into the wrong client |
 | `tests/server_runtime/connection_driver.rs` | Live custom-driver ownership, managed-service and shutdown controls | `serve_with` releases admission or bypasses request lifecycle |
 | `tests/server_runtime/frozen_clock.rs` | Frozen fixture-clock polling with an independent watchdog | Slow-header setup races deadlines under host load |
