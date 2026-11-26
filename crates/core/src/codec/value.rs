@@ -614,11 +614,7 @@ pub(crate) fn checksum_spec_of_fields<'a>(
         if ignore_unknown && ChecksumAlgorithm::from_header_name(&name).is_none() {
             continue;
         }
-        // Refused, never skipped. Skipping a value this binder cannot read means the input reaches
-        // the handler with no checksum at all, so the caller's claim is dropped on the floor and
-        // the object is stored as though none had been made. The head-level arbitration in
-        // `rustfs-gateway-http` has already applied the identical rule above the body read; this
-        // agreeing with it is what makes the two one decision instead of two.
+        // Refused, never skipped: head-level arbitration applies the same rule above the body read.
         let Ok(spec) = ChecksumSpec::parse_header(&name, value) else {
             return Err(CodecError::invalid_request(
                 "the request carries a checksum value that is not valid for the algorithm its header names",
@@ -626,12 +622,14 @@ pub(crate) fn checksum_spec_of_fields<'a>(
             .about(member));
         };
         if let Some(existing) = &found
-            && existing.algorithm() != spec.algorithm()
+            && existing != &spec
         {
-            return Err(CodecError::invalid_request(
-                "the request carries more than one checksum algorithm, which is a contradiction rather than a choice",
-            )
-            .about(member));
+            let message = if existing.algorithm() != spec.algorithm() {
+                "the request carries more than one checksum algorithm, which is a contradiction rather than a choice"
+            } else {
+                "the request carries conflicting checksum values for the same algorithm"
+            };
+            return Err(CodecError::invalid_request(message).about(member));
         }
         found = Some(spec);
     }

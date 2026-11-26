@@ -183,4 +183,32 @@ mod tests {
         assert_eq!(code, ErrorCode::INVALID_REQUEST);
         assert!(message.contains("more than one checksum algorithm"), "{message}");
     }
+
+    /// Negative — two conflicting digests for the same algorithm are refused rather than overwritten.
+    #[test]
+    fn n_conflicting_same_algorithm_digests_are_refused() {
+        let first = crc32_of(b"part-one");
+        let second = crc32_of(b"part-two");
+        assert_ne!(first, second);
+        let (code, message) = refusal(request_checksum(
+            None,
+            &trailers(&[
+                ("x-amz-checksum-crc32", first.render_base64().as_bytes()),
+                ("x-amz-checksum-crc32", second.render_base64().as_bytes()),
+            ]),
+        ));
+        assert_eq!(code, ErrorCode::INVALID_REQUEST);
+        assert!(message.contains("conflicting checksum values"), "{message}");
+
+        // Positive control: identical duplicate digest for the same algorithm stays accepted.
+        let identical = request_checksum(
+            None,
+            &trailers(&[
+                ("x-amz-checksum-crc32", first.render_base64().as_bytes()),
+                ("x-amz-checksum-crc32", first.render_base64().as_bytes()),
+            ]),
+        )
+        .expect("identical duplicate digest is not a conflict");
+        assert_eq!(identical, Some(first));
+    }
 }
