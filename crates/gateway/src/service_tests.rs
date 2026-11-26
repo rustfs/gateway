@@ -77,7 +77,14 @@ mod server_connection_security {
     struct CountingPut(Arc<AtomicUsize>);
 
     impl Handler<dto::PutObject> for CountingPut {
-        async fn call(&self, _request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
+        async fn call(&self, request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
+            use http_body_util::BodyExt as _;
+            if let Some(body) = request.into_input().body {
+                body.into_body()
+                    .collect()
+                    .await
+                    .map_err(|_| crate::HandlerError::internal_error("body stream failed"))?;
+            }
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(Resp::new(dto::PutObjectOutput::default()))
         }
@@ -196,6 +203,78 @@ mod server_connection_security {
             "SSE-C over server plaintext ConnectionInfo must be refused, got: {response}"
         );
         assert_eq!(handled.load(Ordering::SeqCst), 0);
+
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    fn raw_signed_put_without_content_sha256(body: &[u8]) -> Vec<u8> {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+        let length = body.len().to_string();
+        headers.insert(
+            http::header::CONTENT_LENGTH,
+            http::HeaderValue::from_str(&length).expect("decimal content-length"),
+        );
+        let stamp = AmzDate::parse(SIGNED_AT_STAMP).expect("valid stamp");
+        let scope = SigningScope::new(stamp.day(), "us-east-1", rustfs_gateway_sig::SigService::S3).expect("valid scope");
+        let mut signer = SigV4Signer::new(SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid creds"), scope);
+        let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("valid host");
+        let request = SigningRequest::new(&http::Method::PUT, "/bucket/key", "", &headers, &host, PayloadMode::Empty, stamp)
+            .with_wire_content_length(body.len() as u64);
+        let signed = signer.sign_headers(&request).expect("request signs");
+        let mut wire = Vec::from("PUT /bucket/key HTTP/1.1\r\n");
+        for (name, value) in signed.headers() {
+            wire.extend_from_slice(format!("{name}: {}\r\n", value.to_str().expect("ascii")).as_bytes());
+        }
+        wire.extend_from_slice(b"connection: close\r\n\r\n");
+        wire.extend_from_slice(body);
+        wire
+    }
+
+    /// Negative — omitting `x-amz-content-sha256` on a header-signed SigV4 upload signs the empty
+    /// payload digest and must refuse any non-empty body rather than accepting unsigned bytes.
+    #[tokio::test]
+    async fn n_absent_header_content_sha256_refuses_non_empty_unsigned_body() {
+        let (service, handled) = sse_c_service();
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            ..ServerConfig::default()
+        };
+        let running = Server::new(config, service).serve().expect("plaintext server starts");
+
+        let tcp = TcpStream::connect(running.local_addr).await.expect("TCP connects");
+        let response = exchange_raw(tcp, &raw_signed_put_without_content_sha256(b"smuggled")).await;
+        assert!(
+            response.starts_with("HTTP/1.1 400") && response.contains("<Code>XAmzContentSHA256Mismatch</Code>"),
+            "non-empty body without x-amz-content-sha256 must fail digest check, got: {response}"
+        );
+        assert_eq!(handled.load(Ordering::SeqCst), 0);
+
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    /// Positive — omitting `x-amz-content-sha256` on a header-signed SigV4 upload with an empty
+    /// body matches the signed empty-payload digest and succeeds.
+    #[tokio::test]
+    async fn absent_header_content_sha256_allows_empty_body() {
+        let (service, handled) = sse_c_service();
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            ..ServerConfig::default()
+        };
+        let running = Server::new(config, service).serve().expect("plaintext server starts");
+
+        let tcp = TcpStream::connect(running.local_addr).await.expect("TCP connects");
+        let response = exchange_raw(tcp, &raw_signed_put_without_content_sha256(b"")).await;
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "empty body without x-amz-content-sha256 should match empty digest, got: {response}"
+        );
+        assert_eq!(handled.load(Ordering::SeqCst), 1);
 
         let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
         assert!(running.task.await.expect("server task joins").is_ok());

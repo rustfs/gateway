@@ -63,6 +63,20 @@ impl BodylessDigest {
             _ => digest,
         }
     }
+
+    /// Replaces the preliminary body digest obligation when STS or S3 Vectors authentication
+    /// verified the signature over the body's actual SHA-256 digest.
+    pub(crate) fn settle(
+        self,
+        mode: RequestBodyMode,
+        current: BodyDigestObligation,
+        question: &crate::ext::Authentication<'_>,
+    ) -> BodyDigestObligation {
+        match question.signed_sts_body_digest() {
+            Some(digest) => self.apply(mode, BodyDigestObligation::Sha256(digest)),
+            None => current,
+        }
+    }
 }
 
 impl ServiceBuilder {

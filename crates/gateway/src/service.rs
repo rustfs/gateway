@@ -842,6 +842,7 @@ impl S3Service {
                     .with_sts_body_reader(routed_body.sts_body_reader(), operation, config.config());
                     let result = self.inner.authenticator.authenticate(&question).await;
                     signed_body = question.signs_its_body();
+                    body_digest = self.settle_body_digest(request_body_mode, body_digest, &question);
                     let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
                     legacy = published_legacy;
                     if let Some(refusal) = body_refusal {

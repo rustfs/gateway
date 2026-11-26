@@ -38,6 +38,17 @@ impl S3Service {
         Self { inner: Arc::new(inner) }
     }
 
+    /// Updates the preliminary body digest obligation when STS or S3 Vectors authentication
+    /// verified the signature over the body's actual SHA-256 digest.
+    pub(crate) fn settle_body_digest(
+        &self,
+        mode: RequestBodyMode,
+        current: BodyDigestObligation,
+        question: &crate::ext::Authentication<'_>,
+    ) -> BodyDigestObligation {
+        self.inner.view_policy.bodyless_digest.settle(mode, current, question)
+    }
+
     /// The acceptance ceilings in force.
     #[must_use]
     pub fn limits(&self) -> &Limits {

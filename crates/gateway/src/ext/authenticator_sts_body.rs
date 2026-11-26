@@ -33,11 +33,11 @@ pub(super) struct StsBodyReading<'a> {
     ceilings: BodyCeilings,
     timeouts: BodyTimeouts,
     /// Set once the body's own digest became the payload token a comparison runs over.
-    digested: OnceLock<()>,
+    digested: OnceLock<[u8; 32]>,
     /// Set once a comparison over that digest succeeded: only then does the signature cover the
     /// body. A rejected comparison leaves it unset, so an authenticator that falls back to another
     /// verification after this one refused cannot inherit a signed body.
-    signed: OnceLock<()>,
+    signed: OnceLock<[u8; 32]>,
 }
 
 impl<'a> Authentication<'a> {
@@ -69,6 +69,11 @@ impl<'a> Authentication<'a> {
                 || self.payload().digest().is_some()
                 || matches!(self.payload(), PayloadMode::StreamingSigned { .. }))
     }
+    /// The verified SHA-256 digest of a bounded STS or S3 Vectors body hashed when
+    /// `x-amz-content-sha256` was absent, once the signature comparison over that digest succeeded.
+    pub(crate) fn signed_sts_body_digest(&self) -> Option<[u8; 32]> {
+        self.sts_body.as_ref().and_then(|reading| reading.signed.get().copied())
+    }
 }
 
 impl SigV4Authenticator {
@@ -77,9 +82,9 @@ impl SigV4Authenticator {
             Ok((verdict, secret)) => {
                 // The comparison succeeded, over the body's digest if one was the token.
                 if let Some(reading) = &request.sts_body
-                    && reading.digested.get().is_some()
+                    && let Some(&digest) = reading.digested.get()
                 {
-                    let _ = reading.signed.set(());
+                    let _ = reading.signed.set(digest);
                 }
                 Ok(AuthenticationOutcome::authenticated(verdict, secret))
             }
@@ -126,7 +131,7 @@ impl SigV4Authenticator {
             .digest(reading.timeouts, vectors.then_some(reading.ceilings))
             .await
             .map_err(VerificationFailure::Body)?;
-        let _ = reading.digested.set(());
+        let _ = reading.digested.set(digest);
         Ok(Some(PayloadMode::ExactSha256(digest)))
     }
 }

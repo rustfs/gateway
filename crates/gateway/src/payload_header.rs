@@ -215,20 +215,33 @@ pub(crate) fn anonymous_framing(headers: &HeaderMap, decode: bool) -> Result<Opt
     }
 }
 
+/// The SHA-256 digest of an empty payload (`e3b0c442...`), used when a header-signed request omits
+/// `x-amz-content-sha256` so the body reader rejects any non-empty unsigned body.
+const EMPTY_PAYLOAD_SHA256: [u8; 32] = [
+    0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64,
+    0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+];
+
 /// The body-integrity work a signed payload declaration leaves for the body reader.
 ///
 /// An exact digest is an obligation wherever the signature travels: the signature covers
 /// `x-amz-content-sha256`, and only comparing that declaration with the body makes it cover the
 /// body. A header-signed digest that went uncompared authenticated the head and not the payload, so
-/// a replayed head carried any body (c-sig-0596, beside the presigned c-sig-0430). A framed payload
-/// declares no digest — its chain of chunk signatures covers it — and a presigned query cannot seed
-/// that chain, so the presigned streaming form is refused.
+/// a replayed head carried any body (c-sig-0596, beside the presigned c-sig-0430). When a header
+/// signature omits `x-amz-content-sha256`, SigV4 verifies against the empty-payload SHA-256, so the
+/// body reader holds the body to that same empty digest unless STS/S3 Vectors body hashing verified
+/// the actual body digest instead. A framed payload declares no digest — its chain of chunk
+/// signatures covers it — and a presigned query cannot seed that chain, so the presigned streaming
+/// form is refused.
 pub(crate) fn body_digest_obligation(
     payload: &PayloadMode,
     location: SigLocation,
 ) -> Result<BodyDigestObligation, StreamingPresignedUnsupported> {
     if let Some(digest) = payload.digest() {
         return Ok(BodyDigestObligation::Sha256(*digest));
+    }
+    if *payload == PayloadMode::Empty && location == SigLocation::Header {
+        return Ok(BodyDigestObligation::Sha256(EMPTY_PAYLOAD_SHA256));
     }
     if location.is_presigned() && payload.is_framed() {
         return Err(StreamingPresignedUnsupported);
@@ -364,5 +377,21 @@ mod tests {
             http::HeaderValue::from_static("STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"),
         );
         assert!(payload_mode(&headers, SigLocation::Header).is_err());
+    }
+
+    #[test]
+    fn n_absent_header_content_sha256_requires_empty_body_digest() {
+        let expected = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae, 0x41,
+            0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ];
+        assert!(matches!(
+            signed_payload(&HeaderMap::new(), SigLocation::Header, false),
+            Ok((PayloadMode::Empty, BodyDigestObligation::Sha256(digest))) if digest == expected
+        ));
+        assert!(matches!(
+            signed_payload(&HeaderMap::new(), SigLocation::Query, false),
+            Ok((PayloadMode::Unsigned, BodyDigestObligation::None))
+        ));
     }
 }
