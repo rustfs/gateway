@@ -181,6 +181,8 @@ pub struct Output {
     pub bucket_key_enabled: Option<bool>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
+    /// Wire `x-amz-version-id`, bound as Header. Optional.
+    pub version_id: Option<String>,
     /// Wire `ETag`, bound as BodyXml. Required.
     pub e_tag: crate::ETag,
     /// Wire `LastModified`, bound as BodyXml. Optional.
@@ -242,6 +244,7 @@ impl std::fmt::Debug for Output {
             .field("ssekms_key_id", &redact(&self.ssekms_key_id))
             .field("bucket_key_enabled", &self.bucket_key_enabled)
             .field("request_charged", &self.request_charged)
+            .field("version_id", &self.version_id)
             .field("e_tag", &self.e_tag)
             .field("last_modified", &self.last_modified)
             .field("checksum_crc32", &self.checksum_crc32)

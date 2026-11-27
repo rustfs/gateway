@@ -110,6 +110,11 @@ impl OperationCodec for dto::ListParts {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        // VersionId — header `x-amz-version-id`.
+        if let Some(v) = output.version_id.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-version-id", rendered);
+        }
         let force_url_encoding = value::requires_url_encoding(request, &output.key);
         let url_encoding = value::url_encoding_for_response(request, force_url_encoding);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();

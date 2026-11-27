@@ -27,6 +27,9 @@ use crate::compat::ConversionError;
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn replication_rule_filter_to_s3s(value: crate::ops::shapes::ReplicationRuleFilter) -> Result<s3s::dto::ReplicationRuleFilter, ConversionError> {
+    if value.not.is_some() {
+        return Err(ConversionError { field: "not", reason: "a replication filter negation or multi-region KMS setting, which no pinned s3s shape holds and RustFS does not store" });
+    }
     Ok(s3s::dto::ReplicationRuleFilter {
         and: value.and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_and_operator::replication_rule_and_operator_to_s3s(x)?) }).transpose()?,
         cached_tags: Default::default(),
@@ -52,6 +55,7 @@ pub fn replication_rule_filter_input_from_s3s(value: s3s::dto::ReplicationRuleFi
         prefix,
         tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_input_from_s3s(x)?) }).transpose()?,
         and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_and_operator::replication_rule_and_operator_input_from_s3s(x)?) }).transpose()?,
+        not: Default::default(),
     })
 }
 
@@ -72,5 +76,6 @@ pub fn replication_rule_filter_output_from_s3s(value: s3s::dto::ReplicationRuleF
         prefix,
         tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(x)?) }).transpose()?,
         and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_and_operator::replication_rule_and_operator_output_from_s3s(x)?) }).transpose()?,
+        not: Default::default(),
     })
 }

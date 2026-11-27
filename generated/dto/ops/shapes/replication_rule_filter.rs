@@ -35,6 +35,8 @@ pub struct ReplicationRuleFilter {
     pub tag: Option<crate::ops::shapes::Tag>,
     /// Wire `And`, bound as BodyXml. Optional.
     pub and: Option<crate::ops::shapes::ReplicationRuleAndOperator>,
+    /// Wire `Not`, bound as BodyXml. Optional.
+    pub not: Option<crate::ops::shapes::ReplicationRuleNotOperator>,
 }
 
 impl ReplicationRuleFilter {

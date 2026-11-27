@@ -400,6 +400,15 @@
                                                          },
                                                  "hot": false,
                                                  "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "VersionId",
+                                                 "wire_name": "VersionId",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "String" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
                                                }
                                              ],
                                    "xml": {
@@ -411,7 +420,8 @@
                                                                "Owner",
                                                                "Initiator",
                                                                "ChecksumAlgorithm",
-                                                               "ChecksumType"
+                                                               "ChecksumType",
+                                                               "VersionId"
                                                              ],
                                             "empty_value_policy": {
                                                                     "UploadId": "emit",
@@ -421,7 +431,8 @@
                                                                     "Owner": "emit",
                                                                     "Initiator": "emit",
                                                                     "ChecksumAlgorithm": "emit",
-                                                                    "ChecksumType": "emit"
+                                                                    "ChecksumType": "emit",
+                                                                    "VersionId": "emit"
                                                                   },
                                             "attributes": []
                                           }

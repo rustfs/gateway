@@ -146,7 +146,12 @@ fn required_text_guard_is_the_tree_readings_alone() {
     let mut lifted = artifacts.codec_rules.clone();
     let mutation = plan_codec(RULE, &lifted[RULE]).expect("typed rule is mutable");
     apply_codec(&mut lifted, &mutation).expect("the mutation writes");
-    for (name, guards, readers) in [("PutBucketLifecycleConfiguration", 1, 5), ("PutBucketReplication", 7, 13)] {
+    for (name, guards, readers, lifted_readers) in [
+        ("PutBucketLifecycleConfiguration", 1, 5, 5),
+        // PutBucketReplication includes ReplicationRuleNotOperator and ReplicationRuleOrOperator
+        // from the 2026-11-21 model (rustfs/gateway#1623), both of which reach Tag.
+        ("PutBucketReplication", 7, 15, 7),
+    ] {
         let op = artifacts
             .operations
             .iter()
@@ -169,7 +174,7 @@ fn required_text_guard_is_the_tree_readings_alone() {
                 mutant.matches("reading: crate::codec::DocumentReading").count(),
                 mutant.matches("request.document_reading())").count(),
             ),
-            (readers, 1, 5, 1),
+            (readers, 1, lifted_readers, 1),
             "{name}: lifting the text rule must retain the Tag reading"
         );
     }
@@ -182,7 +187,7 @@ fn only_readers_with_conditional_members_take_the_reading() {
     for op in &artifacts.operations {
         let expected = match op.operation.as_str() {
             "PutBucketLifecycleConfiguration" | "RestoreObject" => 5,
-            "PutBucketReplication" => 13,
+            "PutBucketReplication" => 15,
             "PutBucketAnalyticsConfiguration" | "PutBucketIntelligentTieringConfiguration" | "PutBucketMetricsConfiguration" => 4,
             "CompleteMultipartUpload" | "PutBucketTagging" | "PutObjectTagging" => 2,
             _ => 0,

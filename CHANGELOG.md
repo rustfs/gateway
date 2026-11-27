@@ -1,5 +1,36 @@
 # Changelog
 
+## Pin AWS models to 3678d8a26 (2026-11-21) (types 0.45.0+aws.2026-11-21, codegen 0.23.0, core 0.68.0, gateway 0.71.0, difftest 0.3.0)
+
+BREAKING: re-pins `model/s3.json`, `model/sts.json`, their `.sha256` sidecars, and
+`model/PROVENANCE.md` to upstream `aws/api-models-aws` commit
+`3678d8a26e38bf4855aff5bae7be447ca52e63a0` (2026-11-21, rustfs/gateway#1623), updating
+`generated/dto/field_counts.txt` and generated DTO/codec/seam artifacts for 8 S3 operations.
+Because generated DTO structs carry no `#[non_exhaustive]` (ADR-0004), exhaustive struct literals
+constructing `AbortMultipartUploadOutput`, `CreateMultipartUploadOutput`, `ListPartsOutput`,
+`MultipartUpload`, `UploadPartOutput`, `UploadPartCopyOutput`, `EncryptionConfiguration`,
+`ReplicationRuleAndOperator`, or `ReplicationRuleFilter` must add the new optional fields
+(`version_id: None`, `use_source_multi_region_key: None`, or `not: None`, or `..Default::default()`).
+Migration: update the git revision and `Cargo.lock` together, and add the new `None` fields (or
+`..Default::default()`) to any exhaustive struct literals of those nine DTO types; no wire break or
+data migration is required. Existing persisted replication XML remains readable (`not` and
+`use_source_multi_region_key` decode as `None`), and `serialize_replication_dto` fails closed with
+`PersistenceBridgeError::UnsupportedMember` if a caller attempts to serialize a present
+`UseSourceMultiRegionKey`, `Filter.Not`, or `Filter.And.Not` into the historical persistence format.
+The `compat-s3s` seam similarly fails closed on those three replication request members (`sd-0059`,
+`sd-0060`) and leaves the six new multipart output `version_id` members absent when converting from
+legacy `s3s`.
+
+Additive / validation: `rule_filter::replication` counts `Filter.Not` as a direct filter child and
+`And.Not` as a condition inside `<And>`. `model/tools/drift.py` classifies the previously
+unclassified Smithy traits (`aws.protocols#awsQueryError`, `aws.protocols#awsQuery`,
+`aws.auth#sigv4a`, `smithy.api#eventPayload`, and `smithy.api#sensitive` in `WIRE_TRAITS`, with
+`aws.protocols#awsQueryError` in `HTTP_TRAITS`; `smithy.api#input` and `smithy.api#output` in
+`IGNORED_TRAITS`), verified by `model/tools/verify.py` and `model/tools/test_drift.py`. The two
+breaking-flagged STS length widenings (`contextAssertionType` 2048->3072, `sourceIdentityType`
+64->256) strictly relax upper bounds and `model/sts.json` is not yet consumed by codegen, so no new
+ADR is needed.
+
 ## Seal bearer and header-token verdict and receipt construction (sig 0.18.0, core 0.67.0, dialect-rustfs-admin 0.15.0, gateway 0.70.0)
 
 BREAKING: removes the public inherent methods `BearerAdmission::verify`,

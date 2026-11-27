@@ -298,6 +298,8 @@ pub(crate) fn list_multipart_uploads(output: oracle::ListMultipartUploadsOutput)
                     initiator: initiator(upload_initiator),
                     checksum_algorithm: enumeration(checksum_algorithm),
                     checksum_type: enumeration(checksum_type),
+                    // Added in the 2026-11-21 S3 model (rustfs/gateway#1623); pinned s3s omits it.
+                    version_id: None,
                 })
             },
         )

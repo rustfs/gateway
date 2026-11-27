@@ -205,16 +205,26 @@ quirks = []
 
 [shape.EncryptionConfiguration]
 kind = "Structure"
-element_order = ["ReplicaKmsKeyID"]
+element_order = ["ReplicaKmsKeyID", "UseSourceMultiRegionKey"]
 
 [shape.EncryptionConfiguration.empty_value]
 ReplicaKmsKeyID = "emit"
+UseSourceMultiRegionKey = "emit"
 
 [[shape.EncryptionConfiguration.field]]
 name = "ReplicaKmsKeyID"
 wire_name = "ReplicaKmsKeyID"
 binding = "BodyXml"
 type = "String"
+required = false
+hot = false
+quirks = []
+
+[[shape.EncryptionConfiguration.field]]
+name = "UseSourceMultiRegionKey"
+wire_name = "UseSourceMultiRegionKey"
+binding = "BodyXml"
+type = "Structure(UseSourceMultiRegionKey)"
 required = false
 hot = false
 quirks = []
@@ -415,11 +425,12 @@ quirks = []
 
 [shape.ReplicationRuleAndOperator]
 kind = "Structure"
-element_order = ["Prefix", "Tags"]
+element_order = ["Prefix", "Tags", "Not"]
 
 [shape.ReplicationRuleAndOperator.empty_value]
 Prefix = "emit"
 Tags = "emit"
+Not = "emit"
 
 [[shape.ReplicationRuleAndOperator.field]]
 name = "Prefix"
@@ -439,14 +450,24 @@ required = false
 hot = false
 quirks = []
 
+[[shape.ReplicationRuleAndOperator.field]]
+name = "Not"
+wire_name = "Not"
+binding = "BodyXml"
+type = "Structure(ReplicationRuleNotOperator)"
+required = false
+hot = false
+quirks = []
+
 [shape.ReplicationRuleFilter]
 kind = "Structure"
-element_order = ["Prefix", "Tag", "And"]
+element_order = ["Prefix", "Tag", "And", "Not"]
 
 [shape.ReplicationRuleFilter.empty_value]
 Prefix = "emit"
 Tag = "emit"
 And = "emit"
+Not = "emit"
 
 [[shape.ReplicationRuleFilter.field]]
 name = "Prefix"
@@ -471,6 +492,77 @@ name = "And"
 wire_name = "And"
 binding = "BodyXml"
 type = "Structure(ReplicationRuleAndOperator)"
+required = false
+hot = false
+quirks = []
+
+[[shape.ReplicationRuleFilter.field]]
+name = "Not"
+wire_name = "Not"
+binding = "BodyXml"
+type = "Structure(ReplicationRuleNotOperator)"
+required = false
+hot = false
+quirks = []
+
+[shape.ReplicationRuleNotOperator]
+kind = "Structure"
+element_order = ["Prefix", "Tag", "Or"]
+
+[shape.ReplicationRuleNotOperator.empty_value]
+Prefix = "emit"
+Tag = "emit"
+Or = "emit"
+
+[[shape.ReplicationRuleNotOperator.field]]
+name = "Prefix"
+wire_name = "Prefix"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[shape.ReplicationRuleNotOperator.field]]
+name = "Tag"
+wire_name = "Tag"
+binding = "BodyXml"
+type = "Structure(Tag)"
+required = false
+hot = false
+quirks = []
+
+[[shape.ReplicationRuleNotOperator.field]]
+name = "Or"
+wire_name = "Or"
+binding = "BodyXml"
+type = "Structure(ReplicationRuleOrOperator)"
+required = false
+hot = false
+quirks = []
+
+[shape.ReplicationRuleOrOperator]
+kind = "Structure"
+element_order = ["Prefixes", "Tags"]
+
+[shape.ReplicationRuleOrOperator.empty_value]
+Prefixes = "emit"
+Tags = "emit"
+
+[[shape.ReplicationRuleOrOperator.field]]
+name = "Prefixes"
+wire_name = "Prefix"
+binding = "BodyXml"
+type = "List<String>(flattened)"
+required = false
+hot = false
+quirks = []
+
+[[shape.ReplicationRuleOrOperator.field]]
+name = "Tags"
+wire_name = "Tag"
+binding = "BodyXml"
+type = "List<Structure(Tag)>(flattened)"
 required = false
 hot = false
 quirks = []
@@ -585,4 +677,21 @@ binding = "BodyXml"
 type = "String"
 required = true
 hot = true
+quirks = []
+
+[shape.UseSourceMultiRegionKey]
+kind = "Structure"
+element_order = ["Status"]
+
+[shape.UseSourceMultiRegionKey.empty_value]
+Status = "emit"
+
+[[shape.UseSourceMultiRegionKey.field]]
+name = "Status"
+wire_name = "Status"
+binding = "BodyXml"
+type = "StringEnum"
+required = true
+hot = false
+values = ["Enabled", "Disabled"]
 quirks = []

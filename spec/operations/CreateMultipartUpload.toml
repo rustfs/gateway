@@ -498,3 +498,12 @@ required = false
 hot = false
 values = ["COMPOSITE", "FULL_OBJECT"]
 quirks = []
+
+[[output]]
+name = "VersionId"
+wire_name = "x-amz-version-id"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = []

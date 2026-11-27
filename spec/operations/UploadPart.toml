@@ -251,3 +251,12 @@ required = false
 hot = false
 values = ["requester"]
 quirks = []
+
+[[output]]
+name = "VersionId"
+wire_name = "x-amz-version-id"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = []

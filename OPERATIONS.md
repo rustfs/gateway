@@ -204,7 +204,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-tagging-count` | [GetObject](#getobject), [HeadObject](#headobject) |
 | `x-amz-tagging-directive` | [CopyObject](#copyobject) |
 | `x-amz-transition-default-minimum-object-size` | [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration) |
-| `x-amz-version-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging) |
+| `x-amz-version-id` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [ListParts](#listparts), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `x-amz-website-redirect-location` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-write-offset-bytes` | [PutObject](#putobject) |
 | `x-rustfs-on-demand-migration` | [GetObject](#getobject), [HeadObject](#headobject) |
@@ -545,7 +545,7 @@ First match wins; lower precedence is tried first.
 **Headers**
 
 - request: `x-amz-expected-bucket-owner`, `x-amz-if-match-initiated-time`, `x-amz-request-payer`
-- response: `x-amz-request-charged`
+- response: `x-amz-request-charged`, `x-amz-version-id`
 - required: —
 
 **Body**
@@ -860,7 +860,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-type`, `expires`, `x-amz-acl`, `x-amz-checksum-algorithm`, `x-amz-checksum-type`, `x-amz-expected-bucket-owner`, `x-amz-grant-full-control`, `x-amz-grant-read`, `x-amz-grant-read-acp`, `x-amz-grant-write-acp`, `x-amz-meta-`, `x-amz-object-lock-event-hold`, `x-amz-object-lock-event-hold-duration-days`, `x-amz-object-lock-event-hold-duration-years`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-request-payer`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging`, `x-amz-website-redirect-location`
-- response: `x-amz-abort-date`, `x-amz-abort-rule-id`, `x-amz-checksum-algorithm`, `x-amz-checksum-type`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`
+- response: `x-amz-abort-date`, `x-amz-abort-rule-id`, `x-amz-checksum-algorithm`, `x-amz-checksum-type`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-context`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-version-id`
 - required: —
 
 **Body**
@@ -2516,19 +2516,22 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `DeleteMarkerReplication` (Structure) — `Status: StringEnum`
 - `DeleteReplication` (Structure) — `Status: StringEnum`
 - `Destination` (Structure) — `Bucket: String`, `Account: String`, `StorageClass: StringEnum`, `AccessControlTranslation: Structure(AccessControlTranslation)`, `EncryptionConfiguration: Structure(EncryptionConfiguration)`, `ReplicationTime: Structure(ReplicationTime)`, `Metrics: Structure(Metrics)`
-- `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`
+- `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`, `UseSourceMultiRegionKey: Structure(UseSourceMultiRegionKey)`
 - `ExistingObjectReplication` (Structure) — `Status: StringEnum`
 - `Metrics` (Structure) — `Status: StringEnum`, `EventThreshold: Structure(ReplicationTimeValue)`
 - `ReplicaModifications` (Structure) — `Status: StringEnum`
 - `ReplicationConfiguration` (Structure) — `Role: String`, `Rules: List<Structure(ReplicationRule)>(flattened)`
 - `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`, `DeleteReplication: Structure(DeleteReplication)`
-- `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
-- `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`
+- `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `Not: Structure(ReplicationRuleNotOperator)`
+- `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`, `Not: Structure(ReplicationRuleNotOperator)`
+- `ReplicationRuleNotOperator` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `Or: Structure(ReplicationRuleOrOperator)`
+- `ReplicationRuleOrOperator` (Structure) — `Prefixes: List<String>(flattened)`, `Tags: List<Structure(Tag)>(flattened)`
 - `ReplicationTime` (Structure) — `Status: StringEnum`, `Time: Structure(ReplicationTimeValue)`
 - `ReplicationTimeValue` (Structure) — `Minutes: Integer`
 - `SourceSelectionCriteria` (Structure) — `SseKmsEncryptedObjects: Structure(SseKmsEncryptedObjects)`, `ReplicaModifications: Structure(ReplicaModifications)`
 - `SseKmsEncryptedObjects` (Structure) — `Status: StringEnum`
 - `Tag` (Structure) — `Key: String`, `Value: String`
+- `UseSourceMultiRegionKey` (Structure) — `Status: StringEnum`
 
 ### GetBucketRequestPayment
 
@@ -3563,7 +3566,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `CommonPrefix` (Structure) — `Prefix: String`
 - `Initiator` (Structure) — `ID: String`, `DisplayName: String`
-- `MultipartUpload` (Structure) — `UploadId: String`, `Key: ObjectKey`, `Initiated: Timestamp(Iso8601)`, `StorageClass: StringEnum`, `Owner: Structure(Owner)`, `Initiator: Structure(Initiator)`, `ChecksumAlgorithm: StringEnum`, `ChecksumType: StringEnum`
+- `MultipartUpload` (Structure) — `UploadId: String`, `Key: ObjectKey`, `Initiated: Timestamp(Iso8601)`, `StorageClass: StringEnum`, `Owner: Structure(Owner)`, `Initiator: Structure(Initiator)`, `ChecksumAlgorithm: StringEnum`, `ChecksumType: StringEnum`, `VersionId: String`
 - `Owner` (Structure) — `DisplayName: String`, `ID: String`
 
 ### ListObjectAnnotations
@@ -3810,7 +3813,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
-- response: `x-amz-abort-date`, `x-amz-abort-rule-id`, `x-amz-request-charged`
+- response: `x-amz-abort-date`, `x-amz-abort-rule-id`, `x-amz-request-charged`, `x-amz-version-id`
 - required: —
 
 **Body**
@@ -4591,19 +4594,22 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `DeleteMarkerReplication` (Structure) — `Status: StringEnum`
 - `DeleteReplication` (Structure) — `Status: StringEnum`
 - `Destination` (Structure) — `Bucket: String`, `Account: String`, `StorageClass: StringEnum`, `AccessControlTranslation: Structure(AccessControlTranslation)`, `EncryptionConfiguration: Structure(EncryptionConfiguration)`, `ReplicationTime: Structure(ReplicationTime)`, `Metrics: Structure(Metrics)`
-- `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`
+- `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`, `UseSourceMultiRegionKey: Structure(UseSourceMultiRegionKey)`
 - `ExistingObjectReplication` (Structure) — `Status: StringEnum`
 - `Metrics` (Structure) — `Status: StringEnum`, `EventThreshold: Structure(ReplicationTimeValue)`
 - `ReplicaModifications` (Structure) — `Status: StringEnum`
 - `ReplicationConfiguration` (Structure) — `Role: String`, `Rules: List<Structure(ReplicationRule)>(flattened)`
 - `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`, `DeleteReplication: Structure(DeleteReplication)`
-- `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
-- `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`
+- `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `Not: Structure(ReplicationRuleNotOperator)`
+- `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`, `Not: Structure(ReplicationRuleNotOperator)`
+- `ReplicationRuleNotOperator` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `Or: Structure(ReplicationRuleOrOperator)`
+- `ReplicationRuleOrOperator` (Structure) — `Prefixes: List<String>(flattened)`, `Tags: List<Structure(Tag)>(flattened)`
 - `ReplicationTime` (Structure) — `Status: StringEnum`, `Time: Structure(ReplicationTimeValue)`
 - `ReplicationTimeValue` (Structure) — `Minutes: Integer`
 - `SourceSelectionCriteria` (Structure) — `SseKmsEncryptedObjects: Structure(SseKmsEncryptedObjects)`, `ReplicaModifications: Structure(ReplicaModifications)`
 - `SseKmsEncryptedObjects` (Structure) — `Status: StringEnum`
 - `Tag` (Structure) — `Key: String`, `Value: String`
+- `UseSourceMultiRegionKey` (Structure) — `Status: StringEnum`
 
 ### PutBucketRequestPayment
 
@@ -5605,7 +5611,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `content-length`, `content-md5`, `x-amz-checksum-`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-sdk-checksum-algorithm`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
-- response: `etag`, `x-amz-checksum-`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`
+- response: `etag`, `x-amz-checksum-`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-version-id`
 - required: `content-length`
 
 **Body**
@@ -5657,7 +5663,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `x-amz-copy-source`, `x-amz-copy-source-if-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-unmodified-since`, `x-amz-copy-source-range`, `x-amz-copy-source-server-side-encryption-customer-algorithm`, `x-amz-copy-source-server-side-encryption-customer-key`, `x-amz-copy-source-server-side-encryption-customer-key-md5`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-source-expected-bucket-owner`
-- response: `x-amz-copy-source-version-id`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`
+- response: `x-amz-copy-source-version-id`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-version-id`
 - required: `x-amz-copy-source`
 
 **Body**

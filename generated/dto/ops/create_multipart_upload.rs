@@ -240,6 +240,8 @@ pub struct Output {
     pub checksum_algorithm: Option<crate::ops::enums::ChecksumAlgorithm>,
     /// Wire `x-amz-checksum-type`, bound as Header. Optional.
     pub checksum_type: Option<crate::ops::enums::ChecksumType>,
+    /// Wire `x-amz-version-id`, bound as Header. Optional.
+    pub version_id: Option<String>,
 }
 
 impl Output {
@@ -286,6 +288,7 @@ impl std::fmt::Debug for Output {
             .field("request_charged", &self.request_charged)
             .field("checksum_algorithm", &self.checksum_algorithm)
             .field("checksum_type", &self.checksum_type)
+            .field("version_id", &self.version_id)
             .finish()
     }
 }

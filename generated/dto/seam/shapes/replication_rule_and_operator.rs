@@ -27,6 +27,9 @@ use crate::compat::ConversionError;
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn replication_rule_and_operator_to_s3s(value: crate::ops::shapes::ReplicationRuleAndOperator) -> Result<s3s::dto::ReplicationRuleAndOperator, ConversionError> {
+    if value.not.is_some() {
+        return Err(ConversionError { field: "not", reason: "a replication filter negation or multi-region KMS setting, which no pinned s3s shape holds and RustFS does not store" });
+    }
     Ok(s3s::dto::ReplicationRuleAndOperator {
         prefix: value.prefix,
         tags: if value.tags.is_empty() { None } else { Some({ let x = value.tags; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
@@ -47,6 +50,7 @@ pub fn replication_rule_and_operator_input_from_s3s(value: s3s::dto::Replication
     Ok(crate::ops::shapes::ReplicationRuleAndOperator {
         prefix,
         tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        not: Default::default(),
     })
 }
 
@@ -64,5 +68,6 @@ pub fn replication_rule_and_operator_output_from_s3s(value: s3s::dto::Replicatio
     Ok(crate::ops::shapes::ReplicationRuleAndOperator {
         prefix,
         tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        not: Default::default(),
     })
 }

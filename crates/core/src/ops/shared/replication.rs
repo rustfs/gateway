@@ -255,6 +255,7 @@ mod tests {
             account: Some(ACCOUNT.to_owned()),
             encryption_configuration: Some(EncryptionConfiguration {
                 replica_kms_key_id: Some(KEY_ARN.to_owned()),
+                ..EncryptionConfiguration::default()
             }),
             ..Destination::default()
         }
@@ -355,6 +356,7 @@ mod tests {
             and: Some(ReplicationRuleAndOperator {
                 prefix: Some("logs/".to_owned()),
                 tags: vec![tag("env", "prod")],
+                ..ReplicationRuleAndOperator::default()
             }),
             ..ReplicationRuleFilter::default()
         };
@@ -367,6 +369,7 @@ mod tests {
             and: Some(ReplicationRuleAndOperator {
                 prefix: None,
                 tags: vec![tag("env", "prod"), tag("team", "storage")],
+                ..ReplicationRuleAndOperator::default()
             }),
             ..ReplicationRuleFilter::default()
         };
@@ -503,10 +506,12 @@ mod tests {
             ReplicationRuleAndOperator {
                 prefix: Some("logs/".to_owned()),
                 tags: Vec::new(),
+                ..ReplicationRuleAndOperator::default()
             },
             ReplicationRuleAndOperator {
                 prefix: None,
                 tags: vec![tag("env", "prod")],
+                ..ReplicationRuleAndOperator::default()
             },
             ReplicationRuleAndOperator::default(),
         ] {

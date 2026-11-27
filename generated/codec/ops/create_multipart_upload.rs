@@ -262,6 +262,11 @@ impl OperationCodec for dto::CreateMultipartUpload {
             let rendered = v.as_str();
             response.set_header("x-amz-checksum-type", rendered);
         }
+        // VersionId — header `x-amz-version-id`.
+        if let Some(v) = output.version_id.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-version-id", rendered);
+        }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("InitiateMultipartUploadResult", Some(rustfs_gateway_xml::S3_XMLNS));

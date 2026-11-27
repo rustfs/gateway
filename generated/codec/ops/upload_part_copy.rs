@@ -228,6 +228,11 @@ impl OperationCodec for dto::UploadPartCopy {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        // VersionId — header `x-amz-version-id`.
+        if let Some(v) = output.version_id.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-version-id", rendered);
+        }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         let xmlns = if request.rustfs_response_layout() {
@@ -296,6 +301,7 @@ impl crate::handler::DeferredOperation for dto::UploadPartCopy {
         "x-amz-server-side-encryption-bucket-key-enabled",
         "x-amz-server-side-encryption-customer-algorithm",
         "x-amz-server-side-encryption-customer-key-md5",
+        "x-amz-version-id",
     ];
     const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = &[];
 }

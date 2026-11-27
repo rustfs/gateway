@@ -240,11 +240,26 @@
                                                          "type": { "kind": "String" },
                                                          "hot": false,
                                                          "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "UseSourceMultiRegionKey",
+                                                         "wire_name": "UseSourceMultiRegionKey",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "Structure",
+                                                                   "shape": "UseSourceMultiRegionKey"
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
                                                        }
                                                      ],
                                            "xml": {
-                                                    "element_order": ["ReplicaKmsKeyID"],
-                                                    "empty_value_policy": { "ReplicaKmsKeyID": "emit" },
+                                                    "element_order": ["ReplicaKmsKeyID", "UseSourceMultiRegionKey"],
+                                                    "empty_value_policy": {
+                                                                            "ReplicaKmsKeyID": "emit",
+                                                                            "UseSourceMultiRegionKey": "emit"
+                                                                          },
                                                     "attributes": []
                                                   }
                                          },
@@ -503,11 +518,27 @@
                                                                     },
                                                             "hot": false,
                                                             "quirk_refs": []
+                                                          },
+                                                          {
+                                                            "name": "Not",
+                                                            "wire_name": "Not",
+                                                            "required": false,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": {
+                                                                      "kind": "Structure",
+                                                                      "shape": "ReplicationRuleNotOperator"
+                                                                    },
+                                                            "hot": false,
+                                                            "quirk_refs": []
                                                           }
                                                         ],
                                               "xml": {
-                                                       "element_order": ["Prefix", "Tags"],
-                                                       "empty_value_policy": { "Prefix": "emit", "Tags": "emit" },
+                                                       "element_order": ["Prefix", "Tags", "Not"],
+                                                       "empty_value_policy": {
+                                                                               "Prefix": "emit",
+                                                                               "Tags": "emit",
+                                                                               "Not": "emit"
+                                                                             },
                                                        "attributes": []
                                                      }
                                             },
@@ -543,18 +574,113 @@
                                                                },
                                                        "hot": false,
                                                        "quirk_refs": []
+                                                     },
+                                                     {
+                                                       "name": "Not",
+                                                       "wire_name": "Not",
+                                                       "required": false,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": {
+                                                                 "kind": "Structure",
+                                                                 "shape": "ReplicationRuleNotOperator"
+                                                               },
+                                                       "hot": false,
+                                                       "quirk_refs": []
                                                      }
                                                    ],
                                          "xml": {
-                                                  "element_order": ["Prefix", "Tag", "And"],
+                                                  "element_order": ["Prefix", "Tag", "And", "Not"],
                                                   "empty_value_policy": {
                                                                           "Prefix": "emit",
                                                                           "Tag": "emit",
-                                                                          "And": "emit"
+                                                                          "And": "emit",
+                                                                          "Not": "emit"
                                                                         },
                                                   "attributes": []
                                                 }
                                        },
+              "ReplicationRuleNotOperator": {
+                                              "kind": "Structure",
+                                              "fields": [
+                                                          {
+                                                            "name": "Prefix",
+                                                            "wire_name": "Prefix",
+                                                            "required": false,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": { "kind": "String" },
+                                                            "hot": false,
+                                                            "quirk_refs": []
+                                                          },
+                                                          {
+                                                            "name": "Tag",
+                                                            "wire_name": "Tag",
+                                                            "required": false,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": { "kind": "Structure", "shape": "Tag" },
+                                                            "hot": false,
+                                                            "quirk_refs": []
+                                                          },
+                                                          {
+                                                            "name": "Or",
+                                                            "wire_name": "Or",
+                                                            "required": false,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": {
+                                                                      "kind": "Structure",
+                                                                      "shape": "ReplicationRuleOrOperator"
+                                                                    },
+                                                            "hot": false,
+                                                            "quirk_refs": []
+                                                          }
+                                                        ],
+                                              "xml": {
+                                                       "element_order": ["Prefix", "Tag", "Or"],
+                                                       "empty_value_policy": {
+                                                                               "Prefix": "emit",
+                                                                               "Tag": "emit",
+                                                                               "Or": "emit"
+                                                                             },
+                                                       "attributes": []
+                                                     }
+                                            },
+              "ReplicationRuleOrOperator": {
+                                             "kind": "Structure",
+                                             "fields": [
+                                                         {
+                                                           "name": "Prefixes",
+                                                           "wire_name": "Prefix",
+                                                           "required": false,
+                                                           "binding": { "kind": "BodyXml" },
+                                                           "type": {
+                                                                     "kind": "List",
+                                                                     "member": { "kind": "String" },
+                                                                     "flattened": true,
+                                                                     "member_name": null
+                                                                   },
+                                                           "hot": false,
+                                                           "quirk_refs": []
+                                                         },
+                                                         {
+                                                           "name": "Tags",
+                                                           "wire_name": "Tag",
+                                                           "required": false,
+                                                           "binding": { "kind": "BodyXml" },
+                                                           "type": {
+                                                                     "kind": "List",
+                                                                     "member": { "kind": "Structure", "shape": "Tag" },
+                                                                     "flattened": true,
+                                                                     "member_name": null
+                                                                   },
+                                                           "hot": false,
+                                                           "quirk_refs": []
+                                                         }
+                                                       ],
+                                             "xml": {
+                                                      "element_order": ["Prefixes", "Tags"],
+                                                      "empty_value_policy": { "Prefixes": "emit", "Tags": "emit" },
+                                                      "attributes": []
+                                                    }
+                                           },
               "ReplicationTime": {
                                    "kind": "Structure",
                                    "fields": [
@@ -688,7 +814,29 @@
                                 "empty_value_policy": { "Key": "emit", "Value": "emit" },
                                 "attributes": []
                               }
-                     }
+                     },
+              "UseSourceMultiRegionKey": {
+                                           "kind": "Structure",
+                                           "fields": [
+                                                       {
+                                                         "name": "Status",
+                                                         "wire_name": "Status",
+                                                         "required": true,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "StringEnum",
+                                                                   "values": ["Enabled", "Disabled"]
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       }
+                                                     ],
+                                           "xml": {
+                                                    "element_order": ["Status"],
+                                                    "empty_value_policy": { "Status": "emit" },
+                                                    "attributes": []
+                                                  }
+                                         }
             },
   "xml": {
            "request_root": null,

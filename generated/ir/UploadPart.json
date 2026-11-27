@@ -257,6 +257,15 @@
                             "type": { "kind": "StringEnum", "values": ["requester"] },
                             "hot": false,
                             "quirk_refs": []
+                          },
+                          {
+                            "name": "VersionId",
+                            "wire_name": "x-amz-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
                           }
                         ]
             },

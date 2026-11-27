@@ -153,6 +153,11 @@ fn write_encryption_configuration(
     if let Some(v) = value.replica_kms_key_id.as_ref() {
         writer.element("ReplicaKmsKeyID", v.as_str());
     }
+    if let Some(v) = value.use_source_multi_region_key.as_ref() {
+        writer.open("UseSourceMultiRegionKey", None);
+        write_use_source_multi_region_key(writer, v)?;
+        writer.close();
+    }
     Ok(())
 }
 
@@ -275,6 +280,11 @@ fn write_replication_rule_and_operator(
         write_tag(writer, item)?;
         writer.close();
     }
+    if let Some(v) = value.not.as_ref() {
+        writer.open("Not", None);
+        write_replication_rule_not_operator(writer, v)?;
+        writer.close();
+    }
     Ok(())
 }
 
@@ -295,6 +305,48 @@ fn write_replication_rule_filter(
     if let Some(v) = value.and.as_ref() {
         writer.open("And", None);
         write_replication_rule_and_operator(writer, v)?;
+        writer.close();
+    }
+    if let Some(v) = value.not.as_ref() {
+        writer.open("Not", None);
+        write_replication_rule_not_operator(writer, v)?;
+        writer.close();
+    }
+    Ok(())
+}
+
+/// Writes one `ReplicationRuleNotOperator` element's children, in the wire order the IR records.
+fn write_replication_rule_not_operator(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::ReplicationRuleNotOperator,
+) -> Result<(), CodecError> {
+    if let Some(v) = value.prefix.as_ref() {
+        writer.element("Prefix", v.as_str());
+    }
+    if let Some(v) = value.tag.as_ref() {
+        writer.open("Tag", None);
+        write_tag(writer, v)?;
+        writer.close();
+    }
+    if let Some(v) = value.or.as_ref() {
+        writer.open("Or", None);
+        write_replication_rule_or_operator(writer, v)?;
+        writer.close();
+    }
+    Ok(())
+}
+
+/// Writes one `ReplicationRuleOrOperator` element's children, in the wire order the IR records.
+fn write_replication_rule_or_operator(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::ReplicationRuleOrOperator,
+) -> Result<(), CodecError> {
+    for v in &value.prefixes {
+        writer.element("Prefix", v.as_str());
+    }
+    for item in &value.tags {
+        writer.open("Tag", None);
+        write_tag(writer, item)?;
         writer.close();
     }
     Ok(())
@@ -368,6 +420,18 @@ fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Re
     Ok(())
 }
 
+/// Writes one `UseSourceMultiRegionKey` element's children, in the wire order the IR records.
+fn write_use_source_multi_region_key(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::UseSourceMultiRegionKey,
+) -> Result<(), CodecError> {
+    {
+        let v = &value.status;
+        writer.element("Status", v.as_str());
+    }
+    Ok(())
+}
+
 /// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
 /// the order the legacy stack's structure declares its fields in.
 /// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
@@ -376,6 +440,6 @@ mod rustfs_order {
     pub(super) const DESTINATION: &[&str] = &["AccessControlTranslation", "Account", "Bucket", "EncryptionConfiguration", "Metrics", "ReplicationTime", "StorageClass"];
     pub(super) const METRICS: &[&str] = &["EventThreshold", "Status"];
     pub(super) const REPLICATION_RULE: &[&str] = &["DeleteMarkerReplication", "DeleteReplication", "Destination", "ExistingObjectReplication", "Filter", "ID", "Prefix", "Priority", "SourceSelectionCriteria", "Status"];
-    pub(super) const REPLICATION_RULE_FILTER: &[&str] = &["And", "Prefix", "Tag"];
+    pub(super) const REPLICATION_RULE_FILTER: &[&str] = &["And", "Prefix", "Tag", "Not"];
     pub(super) const SOURCE_SELECTION_CRITERIA: &[&str] = &["ReplicaModifications", "SseKmsEncryptedObjects"];
 }

@@ -310,7 +310,7 @@ quirks = []
 
 [shape.MultipartUpload]
 kind = "Structure"
-element_order = ["UploadId", "Key", "Initiated", "StorageClass", "Owner", "Initiator", "ChecksumAlgorithm", "ChecksumType"]
+element_order = ["UploadId", "Key", "Initiated", "StorageClass", "Owner", "Initiator", "ChecksumAlgorithm", "ChecksumType", "VersionId"]
 
 [shape.MultipartUpload.empty_value]
 UploadId = "emit"
@@ -321,6 +321,7 @@ Owner = "emit"
 Initiator = "emit"
 ChecksumAlgorithm = "emit"
 ChecksumType = "emit"
+VersionId = "emit"
 
 [[shape.MultipartUpload.field]]
 name = "UploadId"
@@ -395,6 +396,15 @@ type = "StringEnum"
 required = false
 hot = false
 values = ["COMPOSITE", "FULL_OBJECT"]
+quirks = []
+
+[[shape.MultipartUpload.field]]
+name = "VersionId"
+wire_name = "VersionId"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
 quirks = []
 
 [shape.Owner]

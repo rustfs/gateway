@@ -80,6 +80,7 @@ pub fn output_from_s3s(output: s3s::dto::AbortMultipartUploadOutput) -> Result<c
     } = output;
     Ok(crate::ops::abort_multipart_upload::Output {
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
+        version_id: Default::default(),
     })
 }
 
@@ -91,6 +92,9 @@ pub fn output_from_s3s(output: s3s::dto::AbortMultipartUploadOutput) -> Result<c
 /// [`ConversionError`] naming a member the s3s output cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_to_s3s(output: crate::ops::abort_multipart_upload::Output) -> Result<s3s::dto::AbortMultipartUploadOutput, ConversionError> {
+    if output.version_id.is_some() {
+        return Err(ConversionError { field: "version_id", reason: "a multipart upload version id, which no pinned s3s output shape carries" });
+    }
     Ok(s3s::dto::AbortMultipartUploadOutput {
         request_charged: output.request_charged.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestCharged::from(x.as_str().to_owned())) }).transpose()?,
     })

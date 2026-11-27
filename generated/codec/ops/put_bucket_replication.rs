@@ -170,6 +170,9 @@ fn read_encryption_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<d
     if let Some(raw) = node.child_text("ReplicaKmsKeyID") {
         shape.replica_kms_key_id = Some(raw.to_owned());
     }
+    if let Some(child) = node.child("UseSourceMultiRegionKey") {
+        shape.use_source_multi_region_key = Some(read_use_source_multi_region_key(child)?);
+    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }
@@ -270,7 +273,7 @@ fn read_replication_rule(
         shape.prefix = Some(raw.to_owned());
     }
     if let Some(child) = node.child("Filter") {
-        let recognized = ["And", "Prefix", "Tag"];
+        let recognized = ["And", "Not", "Prefix", "Tag"];
         if !child.children.is_empty() && !child.children.iter().any(|nested| recognized.contains(&nested.name.as_str())) {
             return Err(CodecError::malformed_xml("a non-empty structure contains no recognized child element").about("Filter"));
         }
@@ -318,6 +321,9 @@ fn read_replication_rule_and_operator(
     for item in node.children_named("Tag") {
         shape.tags.push(read_tag(item, reading)?);
     }
+    if let Some(child) = node.child("Not") {
+        shape.not = Some(read_replication_rule_not_operator(child, reading)?);
+    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }
@@ -337,6 +343,47 @@ fn read_replication_rule_filter(
     }
     if let Some(child) = node.child("And") {
         shape.and = Some(read_replication_rule_and_operator(child, reading)?);
+    }
+    if let Some(child) = node.child("Not") {
+        shape.not = Some(read_replication_rule_not_operator(child, reading)?);
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
+/// Reads one `ReplicationRuleNotOperator` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_replication_rule_not_operator(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationRuleNotOperator, CodecError> {
+    let mut shape = dto::ReplicationRuleNotOperator { ..Default::default() };
+    if let Some(raw) = node.child_text("Prefix") {
+        shape.prefix = Some(raw.to_owned());
+    }
+    if let Some(child) = node.child("Tag") {
+        shape.tag = Some(read_tag(child, reading)?);
+    }
+    if let Some(child) = node.child("Or") {
+        shape.or = Some(read_replication_rule_or_operator(child, reading)?);
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
+/// Reads one `ReplicationRuleOrOperator` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_replication_rule_or_operator(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationRuleOrOperator, CodecError> {
+    let mut shape = dto::ReplicationRuleOrOperator { ..Default::default() };
+    for item in node.children_named("Prefix") {
+        let raw = item.text.as_str();
+        shape.prefixes.push(raw.to_owned());
+    }
+    for item in node.children_named("Tag") {
+        shape.tags.push(read_tag(item, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -431,6 +478,19 @@ fn read_tag(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentR
     Ok(shape)
 }
 
+/// Reads one `UseSourceMultiRegionKey` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_use_source_multi_region_key(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::UseSourceMultiRegionKey, CodecError> {
+    let mut shape = dto::UseSourceMultiRegionKey { ..Default::default() };
+    if let Some(raw) = node.child_text("Status") {
+        shape.status = dto::Status::custom(raw.to_owned());
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
 /// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
 /// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
 /// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
@@ -459,10 +519,11 @@ mod document {
             Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
             Member { element: "Tag", arity: Arity::One, value: Value::Shape(8), required: false, kept: true },
             Member { element: "And", arity: Arity::One, value: Value::Shape(9), required: false, kept: true },
+            Member { element: "Not", arity: Arity::One, value: Value::Shape(10), required: false, kept: true },
         ] } },
         Shape { name: "SourceSelectionCriteria", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
-            Member { element: "SseKmsEncryptedObjects", arity: Arity::One, value: Value::Shape(10), required: false, kept: true },
-            Member { element: "ReplicaModifications", arity: Arity::One, value: Value::Shape(11), required: false, kept: true },
+            Member { element: "SseKmsEncryptedObjects", arity: Arity::One, value: Value::Shape(11), required: false, kept: true },
+            Member { element: "ReplicaModifications", arity: Arity::One, value: Value::Shape(12), required: false, kept: true },
         ] } },
         Shape { name: "ExistingObjectReplication", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
@@ -471,10 +532,10 @@ mod document {
             Member { element: "Bucket", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
             Member { element: "Account", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
             Member { element: "StorageClass", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
-            Member { element: "AccessControlTranslation", arity: Arity::One, value: Value::Shape(12), required: false, kept: true },
-            Member { element: "EncryptionConfiguration", arity: Arity::One, value: Value::Shape(13), required: false, kept: true },
-            Member { element: "ReplicationTime", arity: Arity::One, value: Value::Shape(14), required: false, kept: true },
-            Member { element: "Metrics", arity: Arity::One, value: Value::Shape(15), required: false, kept: true },
+            Member { element: "AccessControlTranslation", arity: Arity::One, value: Value::Shape(13), required: false, kept: true },
+            Member { element: "EncryptionConfiguration", arity: Arity::One, value: Value::Shape(14), required: false, kept: true },
+            Member { element: "ReplicationTime", arity: Arity::One, value: Value::Shape(15), required: false, kept: true },
+            Member { element: "Metrics", arity: Arity::One, value: Value::Shape(16), required: false, kept: true },
         ] } },
         Shape { name: "DeleteMarkerReplication", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
@@ -489,6 +550,12 @@ mod document {
         Shape { name: "ReplicationRuleAndOperator", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
             Member { element: "Tag", arity: Arity::Repeated, value: Value::Shape(8), required: false, kept: true },
+            Member { element: "Not", arity: Arity::One, value: Value::Shape(10), required: false, kept: true },
+        ] } },
+        Shape { name: "ReplicationRuleNotOperator", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tag", arity: Arity::One, value: Value::Shape(8), required: false, kept: true },
+            Member { element: "Or", arity: Arity::One, value: Value::Shape(17), required: false, kept: true },
         ] } },
         Shape { name: "SseKmsEncryptedObjects", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
@@ -501,14 +568,22 @@ mod document {
         ] } },
         Shape { name: "EncryptionConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "ReplicaKmsKeyID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "UseSourceMultiRegionKey", arity: Arity::One, value: Value::Shape(18), required: false, kept: true },
         ] } },
         Shape { name: "ReplicationTime", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
-            Member { element: "Time", arity: Arity::One, value: Value::Shape(16), required: true, kept: true },
+            Member { element: "Time", arity: Arity::One, value: Value::Shape(19), required: true, kept: true },
         ] } },
         Shape { name: "Metrics", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
-            Member { element: "EventThreshold", arity: Arity::One, value: Value::Shape(16), required: false, kept: true },
+            Member { element: "EventThreshold", arity: Arity::One, value: Value::Shape(19), required: false, kept: true },
+        ] } },
+        Shape { name: "ReplicationRuleOrOperator", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::Repeated, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tag", arity: Arity::Repeated, value: Value::Shape(8), required: false, kept: true },
+        ] } },
+        Shape { name: "UseSourceMultiRegionKey", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
         ] } },
         Shape { name: "ReplicationTimeValue", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
             Member { element: "Minutes", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },

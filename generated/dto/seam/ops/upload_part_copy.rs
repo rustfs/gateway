@@ -133,6 +133,7 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartCopyOutput) -> Result<crate::
         ssekms_key_id,
         bucket_key_enabled,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
+        version_id: Default::default(),
         e_tag: match copy_part_result.e_tag { Some(x) => leaf::stored_etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
         last_modified: copy_part_result.last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
         checksum_crc32: copy_part_result.checksum_crc32,
@@ -156,6 +157,9 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartCopyOutput) -> Result<crate::
 /// [`ConversionError`] naming a member the s3s output cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_to_s3s(output: crate::ops::upload_part_copy::Output) -> Result<s3s::dto::UploadPartCopyOutput, ConversionError> {
+    if output.version_id.is_some() {
+        return Err(ConversionError { field: "version_id", reason: "a multipart upload version id, which no pinned s3s output shape carries" });
+    }
     Ok(s3s::dto::UploadPartCopyOutput {
         bucket_key_enabled: output.bucket_key_enabled,
         copy_part_result: Some(s3s::dto::CopyPartResult {

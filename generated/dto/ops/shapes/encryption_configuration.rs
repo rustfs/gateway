@@ -31,6 +31,8 @@
 pub struct EncryptionConfiguration {
     /// Wire `ReplicaKmsKeyID`, bound as BodyXml. Optional. Secret: `Debug` prints a placeholder.
     pub replica_kms_key_id: Option<String>,
+    /// Wire `UseSourceMultiRegionKey`, bound as BodyXml. Optional.
+    pub use_source_multi_region_key: Option<crate::ops::shapes::UseSourceMultiRegionKey>,
 }
 
 impl EncryptionConfiguration {
@@ -61,6 +63,7 @@ impl std::fmt::Debug for EncryptionConfiguration {
 
         f.debug_struct("EncryptionConfiguration")
             .field("replica_kms_key_id", &redact(&self.replica_kms_key_id))
+            .field("use_source_multi_region_key", &self.use_source_multi_region_key)
             .finish()
     }
 }

@@ -96,6 +96,7 @@ WIRE_TRAITS = frozenset(
         "smithy.api#xmlNamespace",
         # payload semantics
         "smithy.api#streaming",
+        "smithy.api#eventPayload",
         "smithy.api#requiresLength",
         "smithy.api#mediaType",
         "smithy.api#timestampFormat",
@@ -103,16 +104,20 @@ WIRE_TRAITS = frozenset(
         "smithy.api#enum",
         "smithy.api#error",
         "smithy.api#idempotencyToken",
-        # validation that a server must enforce
+        # validation and redaction that a server must enforce
         "smithy.api#length",
         "smithy.api#pattern",
         "smithy.api#range",
         "smithy.api#uniqueItems",
+        "smithy.api#sensitive",
         # AWS protocol traits
         "aws.protocols#restXml",
+        "aws.protocols#awsQuery",
+        "aws.protocols#awsQueryError",
         "aws.protocols#httpChecksum",
         "aws.api#service",
         "aws.auth#sigv4",
+        "aws.auth#sigv4a",
         "aws.auth#unsignedPayload",
         "aws.customizations#s3UnwrappedXmlOutput",
     }
@@ -137,6 +142,8 @@ IGNORED_TRAITS = frozenset(
         "smithy.api#paginated",
         "smithy.api#readonly",
         "smithy.api#idempotent",
+        "smithy.api#input",
+        "smithy.api#output",
         "smithy.api#auth",
         "smithy.api#optionalAuth",
         "smithy.rules#endpointRuleSet",
@@ -361,6 +368,7 @@ HTTP_TRAITS = {
     "smithy.api#httpError",
     "smithy.api#httpChecksumRequired",
     "smithy.api#hostLabel",
+    "aws.protocols#awsQueryError",
 }
 XML_TRAITS = {
     "smithy.api#xmlName",

@@ -173,6 +173,8 @@ pub struct Output {
     pub checksum_algorithm: Option<crate::ops::enums::ChecksumAlgorithm>,
     /// Wire `ChecksumType`, bound as BodyXml. Optional.
     pub checksum_type: Option<crate::ops::enums::ChecksumType>,
+    /// Wire `x-amz-version-id`, bound as Header. Optional.
+    pub version_id: Option<String>,
 }
 
 impl Output {

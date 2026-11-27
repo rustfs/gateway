@@ -21,14 +21,14 @@ place; the only legal change is a reviewed bump (see [Bumping](#bumping)).
 | Upstream branch | main |
 | License | Apache-2.0 |
 | Upstream copyright line | `Copyright Amazon.com, Inc. or its affiliates.` |
-| Pinned commit | `7eb6ab98cd5f1e5dc6dd90ea1bdc625f9ae308ba` |
-| Pinned commit date | 2026-10-02 |
-| Pin date | 2026-10-07 |
+| Pinned commit | `3678d8a26e38bf4855aff5bae7be447ca52e63a0` |
+| Pinned commit date | 2026-11-21 |
+| Pin date | 2026-11-27 |
 | Upstream has tags or releases | No — `git ls-remote --tags` is empty and the repository has zero releases, so a commit SHA is the only stable identifier |
 | Upstream release cadence | Roughly every 2–4 weeks; every commit message is `Release Model Changes:` |
-| Last upstream commit touching `models/s3` | `a0767ac42e279dfc8b311564c33436f8abfd3031` (2026-09-30) |
-| Last upstream commit touching `models/sts` | `fe627e6e30c7d9c80cd11d3f3985e1796d5e958a` (2026-09-14) |
-| Semantic diff for this bump | 1 wire-affecting change, 0 breaking (rustfs/gateway#1277): `com.amazonaws.s3#InventoryOptionalField` gains `IntelligentTieringReferenceDate`; upstream GetBucketInventoryConfiguration, ListBucketInventoryConfigurations and PutBucketInventoryConfiguration are affected. STS has no wire-affecting change. The gateway's existing operation scope is unchanged. |
+| Last upstream commit touching `models/s3` | `9f371492a21b16552652248af39cb2efa4abcfc0` (2026-11-18) |
+| Last upstream commit touching `models/sts` | `4abb82730f70deb8d56953c4610f09c2bfbd8861` (2026-11-19) |
+| Semantic diff for this bump | 35 wire-affecting changes, 2 breaking (rustfs/gateway#1623; 39 before classifying `aws.protocols#awsQueryError`, `smithy.api#sensitive`, `smithy.api#input`, and `smithy.api#output` in `model/tools/drift.py`): s3 has 14 additive changes, 0 breaking — optional `VersionId` (`x-amz-version-id` header / XML element) on `AbortMultipartUploadOutput`, `CreateMultipartUploadOutput`, `ListPartsOutput`, `MultipartUpload`, `UploadPartOutput`, and `UploadPartCopyOutput`, plus replication `EncryptionConfiguration.UseSourceMultiRegionKey` (`UseSourceMultiRegionKey`, `UseSourceMultiRegionKeyStatus`) and `ReplicationRuleAndOperator.Not`/`ReplicationRuleFilter.Not` (`ReplicationRuleNotOperator`, `ReplicationRuleOrOperator`, `ReplicationPrefixList`), impacting 8 S3 operations. sts has 21 changes, 2 breaking — `GetScopedCredentials` added, optional `TrustedIdentityPropagationContext` on `AssumeRoleWithSAMLResponse`/`AssumeRoleWithWebIdentityResponse`, optional `Scope`/`SubjectMode` on `GetWebIdentityTokenRequest`, `InvalidContextAssertionException` added to `AssumeRole`, and two breaking-flagged length widenings (`contextAssertionType` max 2048->3072, `sourceIdentityType` max 64->256; neither needs an ADR because both strictly widen upper bounds and `model/sts.json` is not yet consumed by codegen). The gateway's existing operation scope is unchanged. |
 
 ## Vendored files
 
@@ -36,20 +36,20 @@ place; the only legal change is a reviewed bump (see [Bumping](#bumping)).
 |---|---|
 | s3 model path | `models/s3/service/2006-03-01/s3-2006-03-01.json` |
 | s3 model file | `model/s3.json` |
-| s3 model sha256 | `73e4f75747396176053a0fcc910261cf670c7e133c1cebcfffefa703fad3ce68` |
-| s3 model bytes | 2996942 |
+| s3 model sha256 | `74ad3705b0f91751b1730cc5c84c42867aa7585e5df023f19c622697de6ad546` |
+| s3 model bytes | 2990832 |
 | s3 smithy version | 2.0 |
 | s3 service shape | `com.amazonaws.s3#AmazonS3` |
-| s3 shape count | 823 |
+| s3 shape count | 828 |
 | s3 operation count | 112 |
 | sts model path | `models/sts/service/2011-06-15/sts-2011-06-15.json` |
 | sts model file | `model/sts.json` |
-| sts model sha256 | `794c8b2142e3a65bc6cc7922005eb85d6b71b02353fef03c0f395e8f902ee2d0` |
-| sts model bytes | 263850 |
+| sts model sha256 | `ab903c79186be25fdaa9deef2c3e241a5c36dab9a1698fbb913e3d4f3e8727fa` |
+| sts model bytes | 286462 |
 | sts smithy version | 2.0 |
 | sts service shape | `com.amazonaws.sts#AWSSecurityTokenServiceV20110615` |
-| sts shape count | 113 |
-| sts operation count | 11 |
+| sts shape count | 138 |
+| sts operation count | 12 |
 
 Every number above is re-derived and asserted by `model/tools/verify.py`; the
 table is the assertion input, not documentation that can rot.
@@ -95,7 +95,7 @@ The files are byte-for-byte what upstream serves at the pinned commit. They are
 only meaningful if it can be reproduced by re-downloading from upstream:
 
 ```bash
-SHA=7eb6ab98cd5f1e5dc6dd90ea1bdc625f9ae308ba
+SHA=3678d8a26e38bf4855aff5bae7be447ca52e63a0
 curl -sSL "https://raw.githubusercontent.com/aws/api-models-aws/$SHA/models/s3/service/2006-03-01/s3-2006-03-01.json" \
   | shasum -a 256
 ```

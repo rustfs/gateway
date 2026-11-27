@@ -441,6 +441,22 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
         SeamClass::Ruled("rd-put-0002"),
         ALGORITHM_UNREAD,
     ),
+    finding(
+        "sd-0059",
+        "PutBucketReplication",
+        "use_source_multi_region_key",
+        SeamClass::FailClosed,
+        "the legacy decoder skips UseSourceMultiRegionKey and hands RustFS the rule without it, so the seam refuses rather \
+         than silently dropping the multi-region KMS option (2026-11-21 model, rustfs/gateway#1623)",
+    ),
+    finding(
+        "sd-0060",
+        "PutBucketReplication",
+        "not",
+        SeamClass::FailClosed,
+        "the legacy decoder skips the replication Filter.Not / Filter.And.Not element and hands RustFS the rule without the \
+         negation, so the seam refuses rather than widening what gets replicated (2026-11-21 model, rustfs/gateway#1623)",
+    ),
 ];
 
 /// Why a `checksum_algorithm` the two stacks hand over differently matters to no RustFS body on

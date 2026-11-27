@@ -150,6 +150,11 @@ impl OperationCodec for dto::UploadPart {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        // VersionId — header `x-amz-version-id`.
+        if let Some(v) = output.version_id.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-version-id", rendered);
+        }
         // The `response-*` overrides are applied once, after every header this operation
         // declares — so "the override wins" is true by construction and not by ordering.
         response.apply_response_overrides(request, Self::RESPONSE_OVERRIDES);

@@ -196,6 +196,24 @@ pub const MEMBERS: &[MemberOverride] = &[
     ("DefaultRetention", "default_event_hold", Rule::GatewayOnly(EVENT_HOLD)),
     ("ObjectLockRetention", "event_hold", Rule::GatewayOnly(EVENT_HOLD)),
     ("ObjectLockRetention", "event_hold_duration", Rule::GatewayOnly(EVENT_HOLD)),
+    // Multipart version-id output members and replication filter/KMS additions of the 2026-11-21
+    // model (rustfs/gateway#1623): no pinned s3s shape carries them and RustFS neither stores nor
+    // emits them, so forward conversion refuses a present value (especially a replication `<Not>`
+    // filter or multi-region KMS option, which must never be silently dropped) and backward
+    // conversion leaves them absent.
+    ("AbortMultipartUploadOutput", "version_id", Rule::GatewayOnly(MULTIPART_VERSION_ID)),
+    ("CreateMultipartUploadOutput", "version_id", Rule::GatewayOnly(MULTIPART_VERSION_ID)),
+    ("ListPartsOutput", "version_id", Rule::GatewayOnly(MULTIPART_VERSION_ID)),
+    ("MultipartUpload", "version_id", Rule::GatewayOnly(MULTIPART_VERSION_ID)),
+    ("UploadPartCopyOutput", "version_id", Rule::GatewayOnly(MULTIPART_VERSION_ID)),
+    ("UploadPartOutput", "version_id", Rule::GatewayOnly(MULTIPART_VERSION_ID)),
+    (
+        "EncryptionConfiguration",
+        "use_source_multi_region_key",
+        Rule::GatewayOnly(REPLICATION_NOV_2026),
+    ),
+    ("ReplicationRuleAndOperator", "not", Rule::GatewayOnly(REPLICATION_NOV_2026)),
+    ("ReplicationRuleFilter", "not", Rule::GatewayOnly(REPLICATION_NOV_2026)),
     // The copy source is sealed into the authorized derived resources (`seal_derived_input`).
     ("CopyObjectInput", "copy_source", Rule::Supplied(SEALED)),
     ("UploadPartCopyInput", "copy_source", Rule::Supplied(SEALED)),
@@ -334,6 +352,9 @@ pub const MEMBERS: &[MemberOverride] = &[
 
 const SEALED: &str = "the gateway authorizes the copy source as a derived resource and clears the input member";
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
+const MULTIPART_VERSION_ID: &str = "a multipart upload version id, which no pinned s3s output shape carries";
+const REPLICATION_NOV_2026: &str =
+    "a replication filter negation or multi-region KMS setting, which no pinned s3s shape holds and RustFS does not store";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";
 const UNHELD_ENTRY_FACT: &str = "a listing entry fact the RustFS host does not hold, written by the RustFS profile as no element";
 const UNDECLARED_LENGTH: &str =

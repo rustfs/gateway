@@ -266,6 +266,15 @@
                             "quirk_refs": []
                           },
                           {
+                            "name": "VersionId",
+                            "wire_name": "x-amz-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
                             "name": "ETag",
                             "wire_name": "ETag",
                             "required": true,
