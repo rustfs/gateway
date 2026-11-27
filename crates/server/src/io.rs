@@ -35,9 +35,10 @@ use tokio::io::Interest;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 use tokio::net::TcpStream;
+use tokio::sync::oneshot;
 use tokio::time::{Instant, Sleep, sleep};
 
-use crate::preface::Preface;
+use crate::preface::{H2OutboundGoAwayTracker, Preface};
 
 /// How long the drain waits for the *next* block once it has started reading.
 ///
@@ -137,6 +138,12 @@ pub(crate) struct ProgressIo<I> {
     /// Whether the connection opened with the HTTP/2 preface: its PING, SETTINGS and flow-control
     /// octets are not request activity, so they do not postpone the idle deadline.
     preface: Preface,
+    /// Whether TLS ALPN negotiated `h2` before any cleartext preface bytes were read.
+    alpn_h2: bool,
+    /// Tracks outbound HTTP/2 server frames so a connection-error `GOAWAY` gets lingering close.
+    h2_outbound: H2OutboundGoAwayTracker,
+    /// Whether the transport already reached peer EOF, a socket error, or an internal timeout.
+    peer_ended: bool,
     transport_read: Arc<AtomicU64>,
     /// Confirms handed-over responses as written; see `crate::write_receipt`.
     receipts: Option<Arc<crate::write_receipt::WriteReceipts>>,
@@ -194,6 +201,9 @@ impl<I> ProgressIo<I> {
             send_file_retry_ready: false,
             first_request_observed: false,
             preface: Preface::default(),
+            alpn_h2: false,
+            h2_outbound: H2OutboundGoAwayTracker::default(),
+            peer_ended: false,
             transport_read: Arc::new(AtomicU64::new(0)),
             receipts: None,
             linger: Linger {
@@ -232,6 +242,48 @@ impl<I> ProgressIo<I> {
     pub(crate) fn h2_header_read_timeout(mut self, timeout: Duration) -> Self {
         self.header_timeout = timeout;
         self
+    }
+
+    /// Marks TLS connections whose ALPN negotiation already selected HTTP/2 from byte zero.
+    pub(crate) fn alpn_http2(mut self, negotiated_h2: bool) -> Self {
+        self.alpn_h2 = negotiated_h2;
+        self
+    }
+
+    fn is_http2_wire(&self) -> bool {
+        self.alpn_h2 || self.preface.is_http2()
+    }
+
+    fn observe_outbound_bytes(&mut self, bytes: &[u8]) {
+        if self.is_http2_wire() {
+            self.h2_outbound.observe(bytes);
+        }
+    }
+
+    fn observe_outbound_vectored(&mut self, buffers: &[io::IoSlice<'_>], mut written: usize) {
+        if !self.is_http2_wire() {
+            return;
+        }
+        for slice in buffers {
+            if written == 0 {
+                break;
+            }
+            let take = slice.len().min(written);
+            if let Some(chunk) = slice.get(..take) {
+                self.h2_outbound.observe(chunk);
+            }
+            written -= take;
+        }
+    }
+
+    fn linger_on_pending(&self) -> bool {
+        self.linger.body_unfinished.load(Ordering::Acquire) || self.h2_outbound.error_goaway_sent()
+    }
+
+    /// Whether the connection wrote an HTTP/2 error `GOAWAY` onto a still-open peer without having
+    /// half-closed the transport yet.
+    pub(crate) fn needs_protocol_error_linger(&self) -> bool {
+        self.h2_outbound.error_goaway_sent() && !self.peer_ended && !self.linger.write_shut
     }
 
     /// Points this connection's lingering start decision at the application-owned body state.
@@ -463,7 +515,7 @@ impl<I: AsyncRead + Unpin> ProgressIo<I> {
                     self.linger.quiet.as_mut().reset(Instant::now() + LINGER_QUIET);
                 }
                 Poll::Pending => {
-                    if !self.linger.started && !self.linger.body_unfinished.load(Ordering::Acquire) {
+                    if !self.linger.started && !self.linger_on_pending() {
                         return Poll::Ready(());
                     }
                     return if self.linger.quiet.as_mut().poll(context).is_ready() {
@@ -483,14 +535,18 @@ impl<I: AsyncRead + Unpin> AsyncRead for ProgressIo<I> {
     fn poll_read(self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
         if let Err(error) = this.check_idle(context) {
+            this.peer_ended = true;
             return Poll::Ready(Err(error));
         }
         if let Err(error) = this.check_h2_header_timeout(context) {
+            this.peer_ended = true;
             return Poll::Ready(Err(error));
         }
         let before = buffer.filled().len();
         let result = ready!(Pin::new(&mut this.inner).poll_read(context, buffer));
-        if result.is_ok() && buffer.filled().len() > before {
+        if result.is_err() || buffer.filled().len() == before {
+            this.peer_ended = true;
+        } else if buffer.filled().len() > before {
             this.transport_read
                 .fetch_add((buffer.filled().len() - before) as u64, Ordering::Relaxed);
             this.preface.observe(buffer.filled().get(before..).unwrap_or_default());
@@ -508,13 +564,22 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_write(context, bytes) {
             Poll::Ready(Ok(written)) => {
+                if written > 0 {
+                    this.observe_outbound_bytes(bytes.get(..written).unwrap_or_default());
+                }
                 this.record_write_progress(written);
                 Poll::Ready(Ok(written))
             }
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Ready(Err(error)) => {
+                this.peer_ended = true;
+                Poll::Ready(Err(error))
+            }
             Poll::Pending => match this.mark_write_pending(context) {
                 Ok(()) => Poll::Pending,
-                Err(error) => Poll::Ready(Err(error)),
+                Err(error) => {
+                    this.peer_ended = true;
+                    Poll::Ready(Err(error))
+                }
             },
         }
     }
@@ -530,10 +595,16 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
                 }
                 Poll::Ready(Ok(()))
             }
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Ready(Err(error)) => {
+                this.peer_ended = true;
+                Poll::Ready(Err(error))
+            }
             Poll::Pending => match this.mark_write_pending(context) {
                 Ok(()) => Poll::Pending,
-                Err(error) => Poll::Ready(Err(error)),
+                Err(error) => {
+                    this.peer_ended = true;
+                    Poll::Ready(Err(error))
+                }
             },
         }
     }
@@ -559,7 +630,7 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
                 receipts.closed();
             }
             this.linger.deadline = deadline_after(this.linger.budget);
-            let quiet_deadline = if this.linger.body_unfinished.load(Ordering::Acquire) {
+            let quiet_deadline = if this.linger_on_pending() {
                 Instant::now() + LINGER_QUIET
             } else {
                 this.linger.deadline
@@ -582,14 +653,96 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_write_vectored(context, buffers) {
             Poll::Ready(Ok(written)) => {
+                if written > 0 {
+                    this.observe_outbound_vectored(buffers, written);
+                }
                 this.record_write_progress(written);
                 Poll::Ready(Ok(written))
             }
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Ready(Err(error)) => {
+                this.peer_ended = true;
+                Poll::Ready(Err(error))
+            }
             Poll::Pending => match this.mark_write_pending(context) {
                 Ok(()) => Poll::Pending,
-                Err(error) => Poll::Ready(Err(error)),
+                Err(error) => {
+                    this.peer_ended = true;
+                    Poll::Ready(Err(error))
+                }
             },
+        }
+    }
+}
+
+/// Returns the inner [`ProgressIo`] when Hyper drops a connection future, so a protocol error that
+/// exited after flushing `GOAWAY` without calling `poll_shutdown` can still half-close and linger.
+pub(crate) struct ReclaimableIo<I> {
+    io: Option<ProgressIo<I>>,
+    reclaim: Option<oneshot::Sender<ProgressIo<I>>>,
+}
+
+pub(crate) fn reclaimable<I>(io: ProgressIo<I>) -> (ReclaimableIo<I>, oneshot::Receiver<ProgressIo<I>>) {
+    let (sender, receiver) = oneshot::channel();
+    (
+        ReclaimableIo {
+            io: Some(io),
+            reclaim: Some(sender),
+        },
+        receiver,
+    )
+}
+
+impl<I> Drop for ReclaimableIo<I> {
+    fn drop(&mut self) {
+        if let (Some(io), Some(sender)) = (self.io.take(), self.reclaim.take()) {
+            let _ = sender.send(io);
+        }
+    }
+}
+
+impl<I: AsyncRead + Unpin> AsyncRead for ReclaimableIo<I> {
+    fn poll_read(self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut().io.as_mut() {
+            Some(io) => Pin::new(io).poll_read(context, buffer),
+            None => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "transport reclaimed"))),
+        }
+    }
+}
+
+impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ReclaimableIo<I> {
+    fn poll_write(self: Pin<&mut Self>, context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        match self.get_mut().io.as_mut() {
+            Some(io) => Pin::new(io).poll_write(context, bytes),
+            None => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "transport reclaimed"))),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut().io.as_mut() {
+            Some(io) => Pin::new(io).poll_flush(context),
+            None => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "transport reclaimed"))),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut().io.as_mut() {
+            Some(io) => Pin::new(io).poll_shutdown(context),
+            None => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "transport reclaimed"))),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.io.as_ref().is_some_and(ProgressIo::is_write_vectored)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffers: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut().io.as_mut() {
+            Some(io) => Pin::new(io).poll_write_vectored(context, buffers),
+            None => Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "transport reclaimed"))),
         }
     }
 }

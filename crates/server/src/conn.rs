@@ -659,6 +659,7 @@ where
         config.lingering_close_time,
     )
     .h2_header_read_timeout(config.header_read_timeout)
+    .alpn_http2(negotiated.as_deref() == Some(b"h2"))
     .request_body_unfinished(Arc::clone(&request_body_unfinished))
     .count_octets_into(Arc::clone(&metrics.transport_read), Arc::clone(&metrics.lingering_drained));
     let receipts = crate::write_receipt::WriteReceipts::new(Arc::clone(&request_stats));
@@ -668,6 +669,7 @@ where
         Some(observer) => io.observe_header_pending(observer.progress_callback()),
         None => io,
     };
+    let (io, mut reclaim_io) = crate::io::reclaimable(io);
     let io = TokioIo::new(io);
     let service = ConnectionService::new(
         service,
@@ -727,15 +729,22 @@ where
         .max_local_error_reset_streams(config.h2_max_local_error_reset_streams)
         .max_send_buf_size(usize::try_from(config.h2_max_send_buf_size).unwrap_or(usize::MAX));
 
-    let connection = builder.serve_connection(io, service);
-    tokio::pin!(connection);
-    tokio::select! {
-        result = &mut connection => log_connection_result(result, &receipts),
-        changed = shutdown.changed() => {
-            let _ = changed;
-            connection.as_mut().graceful_shutdown();
-            log_connection_result(connection.await, &receipts);
+    {
+        let connection = builder.serve_connection(io, service);
+        tokio::pin!(connection);
+        tokio::select! {
+            result = &mut connection => log_connection_result(result, &receipts),
+            changed = shutdown.changed() => {
+                let _ = changed;
+                connection.as_mut().graceful_shutdown();
+                log_connection_result(connection.await, &receipts);
+            }
         }
+    }
+    if let Ok(mut io) = reclaim_io.try_recv()
+        && io.needs_protocol_error_linger()
+    {
+        let _ = tokio::io::AsyncWriteExt::shutdown(&mut io).await;
     }
 }
 

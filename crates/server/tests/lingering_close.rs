@@ -689,3 +689,87 @@ async fn a_peer_that_never_stops_writing_is_let_go_at_the_linger_bound() {
     eprintln!("a-srv-0211 endless peer: retired after {retired:?} against a {ceiling:?} ceiling");
     shut_down(server).await;
 }
+
+/// **Negative (RFC 9113 §5.4.1 / rustfs/gateway#1421) — an HTTP/2 connection error followed by
+/// unread peer frames still half-closes and drains instead of dropping into a TCP reset.**
+///
+/// Hyper flushes `GOAWAY` and returns `Err` on a connection-level protocol error without calling
+/// `poll_shutdown`, so dropping the socket while trailing client frames remain unread emits `RST`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_http2_protocol_error_with_unread_trailing_frames_ends_in_a_close_and_not_a_reset() {
+    const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+    const H2_EMPTY_SETTINGS: &[u8] = &[0, 0, 0, 0x04, 0x00, 0, 0, 0, 0];
+    const H2_ZERO_WINDOW_UPDATE: &[u8] = &[0, 0, 4, 0x08, 0x00, 0, 0, 0, 0, 0, 0, 0, 0];
+    const H2_TRAILING_HEADERS: &[u8] = &[
+        0, 0, 19, 0x01, 0x05, 0, 0, 0, 1, 0x82, 0x86, 0x84, 0x41, 0x0e, b's', b'3', b'.', b'e', b'x', b'a', b'm', b'p', b'l',
+        b'e', b'.', b'c', b'o', b'm',
+    ];
+
+    let server = refusing_server(plaintext_config());
+    let stream = TcpStream::connect(server.local_addr).await.expect("the listener accepts");
+    let (mut reader, mut writer) = stream.into_split();
+
+    let mut initial = Vec::with_capacity(H2_PREFACE.len() + H2_EMPTY_SETTINGS.len() + H2_ZERO_WINDOW_UPDATE.len());
+    initial.extend_from_slice(H2_PREFACE);
+    initial.extend_from_slice(H2_EMPTY_SETTINGS);
+    initial.extend_from_slice(H2_ZERO_WINDOW_UPDATE);
+    writer.write_all(&initial).await.expect("preface and violation write");
+
+    // Read GOAWAY first, then let the peer's pipelined trailing HEADERS frame arrive right after
+    // the server half-closed — the exact interleaving `c-h2-0006` / `c-h2-0007` hit when the
+    // client's trailing write loses the race against `poll_shutdown`'s first read.
+    let mut saw_protocol_goaway = false;
+    let mut header = [0_u8; 9];
+    let read_result = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match reader.read_exact(&mut header).await {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break Ok(()),
+                Err(error) => break Err(error),
+            }
+            let [b0, b1, b2, frame_type, ..] = header;
+            let len = ((b0 as usize) << 16) | ((b1 as usize) << 8) | (b2 as usize);
+            let mut payload = vec![0_u8; len];
+            if len > 0 {
+                reader.read_exact(&mut payload).await?;
+            }
+            if frame_type == 0x07
+                && let Some(&[s0, s1, s2, s3, e0, e1, e2, e3, ..]) = payload.get(..8)
+            {
+                let last_stream_id = u32::from_be_bytes([s0, s1, s2, s3]) & 0x7fff_ffff;
+                let error_code = u32::from_be_bytes([e0, e1, e2, e3]);
+                if last_stream_id == 0 && error_code == 1 {
+                    saw_protocol_goaway = true;
+                    break Ok(());
+                }
+            }
+        }
+    })
+    .await
+    .expect("GOAWAY frame arrives inside timeout");
+
+    let owed = (initial.len() + H2_TRAILING_HEADERS.len()) as u64;
+    // Allow the server's `poll_shutdown` to enter `poll_drain` before the pipelined HEADERS lands.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let _ = writer.write_all(H2_TRAILING_HEADERS).await;
+    let _ = writer.shutdown().await;
+    let state = observe(&mut reader, Duration::from_secs(2)).await;
+    drop(reader);
+    let retired = wait_retired(&server.metrics, PATIENT_BUDGET).await;
+    let drained = server.metrics.lingering_octets_drained();
+    let accepted = server.metrics.transport_octets_read();
+
+    assert!(read_result.is_ok(), "reading GOAWAY failed: {read_result:?}");
+    assert!(saw_protocol_goaway, "peer must observe GOAWAY(0, PROTOCOL_ERROR)");
+    assert_eq!(
+        state,
+        ConnectionState::Closed,
+        "an HTTP/2 protocol error over trailing peer frames must end in FIN/EOF, not reset (accepted={accepted}/{owed}, drained={drained})"
+    );
+    assert!(retired.is_some(), "the connection must retire after lingering");
+    assert!(
+        drained >= H2_TRAILING_HEADERS.len() as u64,
+        "lingering close must drain late-arriving pipelined HTTP/2 octets rather than dropping the socket into RST (accepted={accepted}/{owed}, drained={drained})"
+    );
+    shut_down(server).await;
+}

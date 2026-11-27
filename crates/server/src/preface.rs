@@ -27,6 +27,7 @@
 /// The client connection preface.
 const HTTP2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const FRAME_TYPE_HEADERS: u8 = 0x01;
+const FRAME_TYPE_GOAWAY: u8 = 0x07;
 const FRAME_TYPE_CONTINUATION: u8 = 0x09;
 const FLAG_END_HEADERS: u8 = 0x04;
 
@@ -186,10 +187,128 @@ impl Preface {
     }
 }
 
+/// Observes outbound HTTP/2 server frames to detect an error `GOAWAY` (`error_code != 0`) without
+/// allocating.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct H2OutboundGoAwayTracker {
+    phase: OutboundFramePhase,
+    error_goaway_sent: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OutboundFramePhase {
+    Header {
+        buf: [u8; 9],
+        len: usize,
+    },
+    GoAwayPrefix {
+        buf: [u8; 8],
+        len: usize,
+        remaining_after: usize,
+    },
+    Skip {
+        remaining: usize,
+    },
+}
+
+impl Default for H2OutboundGoAwayTracker {
+    fn default() -> Self {
+        Self {
+            phase: OutboundFramePhase::Header { buf: [0_u8; 9], len: 0 },
+            error_goaway_sent: false,
+        }
+    }
+}
+
+impl H2OutboundGoAwayTracker {
+    /// Advances frame-boundary tracking over outbound HTTP/2 server bytes.
+    pub(crate) fn observe(&mut self, mut octets: &[u8]) {
+        while !octets.is_empty() && !self.error_goaway_sent {
+            match self.phase {
+                OutboundFramePhase::Header { mut buf, mut len } => {
+                    let take = (9 - len).min(octets.len());
+                    if let (Some(dst), Some(src)) = (buf.get_mut(len..len + take), octets.get(..take)) {
+                        dst.copy_from_slice(src);
+                    }
+                    len += take;
+                    octets = octets.get(take..).unwrap_or_default();
+                    if len < 9 {
+                        self.phase = OutboundFramePhase::Header { buf, len };
+                        return;
+                    }
+                    let [b0, b1, b2, frame_type, _flags, s0, s1, s2, s3] = buf;
+                    let payload_len = (usize::from(b0) << 16) | (usize::from(b1) << 8) | usize::from(b2);
+                    let stream_id = u32::from_be_bytes([s0, s1, s2, s3]) & 0x7fff_ffff;
+                    if frame_type == FRAME_TYPE_GOAWAY && stream_id == 0 && payload_len >= 8 {
+                        self.phase = OutboundFramePhase::GoAwayPrefix {
+                            buf: [0_u8; 8],
+                            len: 0,
+                            remaining_after: payload_len - 8,
+                        };
+                    } else if payload_len == 0 {
+                        self.phase = OutboundFramePhase::Header { buf: [0_u8; 9], len: 0 };
+                    } else {
+                        self.phase = OutboundFramePhase::Skip { remaining: payload_len };
+                    }
+                }
+                OutboundFramePhase::GoAwayPrefix {
+                    mut buf,
+                    mut len,
+                    remaining_after,
+                } => {
+                    let take = (8 - len).min(octets.len());
+                    if let (Some(dst), Some(src)) = (buf.get_mut(len..len + take), octets.get(..take)) {
+                        dst.copy_from_slice(src);
+                    }
+                    len += take;
+                    octets = octets.get(take..).unwrap_or_default();
+                    if len < 8 {
+                        self.phase = OutboundFramePhase::GoAwayPrefix {
+                            buf,
+                            len,
+                            remaining_after,
+                        };
+                        return;
+                    }
+                    let error_code = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+                    if error_code != 0 {
+                        self.error_goaway_sent = true;
+                        return;
+                    }
+                    self.phase = if remaining_after == 0 {
+                        OutboundFramePhase::Header { buf: [0_u8; 9], len: 0 }
+                    } else {
+                        OutboundFramePhase::Skip {
+                            remaining: remaining_after,
+                        }
+                    };
+                }
+                OutboundFramePhase::Skip { remaining } => {
+                    let take = remaining.min(octets.len());
+                    let next_remaining = remaining - take;
+                    octets = octets.get(take..).unwrap_or_default();
+                    self.phase = if next_remaining == 0 {
+                        OutboundFramePhase::Header { buf: [0_u8; 9], len: 0 }
+                    } else {
+                        OutboundFramePhase::Skip {
+                            remaining: next_remaining,
+                        }
+                    };
+                }
+            }
+        }
+    }
+
+    /// Whether the server has written a connection-level `GOAWAY` carrying a non-zero error code.
+    pub(crate) fn error_goaway_sent(self) -> bool {
+        self.error_goaway_sent
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)] // Test-only slices of the fixed 24-octet preface.
 mod tests {
-    use super::{HTTP2_PREFACE, Preface};
+    use super::{H2OutboundGoAwayTracker, HTTP2_PREFACE, Preface};
 
     fn after(reads: &[&[u8]]) -> Preface {
         let mut preface = Preface::default();
@@ -260,5 +379,47 @@ mod tests {
         // Partial DATA frame must NOT be flagged as reading headers.
         preface.observe(&data_partial);
         assert!(!preface.reading_h2_headers());
+    }
+
+    /// Positive — an outbound `GOAWAY` carrying a non-zero error code is detected across arbitrary
+    /// chunk splits and after preceding frames (such as server `SETTINGS`).
+    #[test]
+    fn outbound_error_goaway_is_detected_across_splits_and_debug_data() {
+        let settings = [0, 0, 0, 0x04, 0, 0, 0, 0, 0];
+        let protocol_goaway = [0, 0, 8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let mut tracker = H2OutboundGoAwayTracker::default();
+        for byte in settings.iter().chain(&protocol_goaway) {
+            assert!(!tracker.error_goaway_sent());
+            tracker.observe(&[*byte]);
+        }
+        assert!(tracker.error_goaway_sent());
+
+        let calm_goaway_with_debug = [
+            0, 0, 12, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0x0b, b'c', b'a', b'l', b'm',
+        ];
+        let mut tracker = H2OutboundGoAwayTracker::default();
+        tracker.observe(&calm_goaway_with_debug);
+        assert!(tracker.error_goaway_sent());
+    }
+
+    /// Negative — graceful `GOAWAY(NO_ERROR)`, `RST_STREAM`, malformed short `GOAWAY`, and
+    /// `GOAWAY`-shaped bytes inside a `DATA` payload must never trigger error-GOAWAY lingering.
+    #[test]
+    fn n_non_error_goaway_and_payload_decoys_do_not_trigger_error_goaway() {
+        let no_error_goaway = [0, 0, 8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0];
+        let rst_stream = [0, 0, 4, 0x03, 0, 0, 0, 0, 1, 0, 0, 0, 1];
+        let short_goaway = [0, 0, 4, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let non_zero_stream_goaway = [0, 0, 8, 0x07, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1];
+        let fake_goaway_bytes = [0, 0, 8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let mut data_carrying_decoy = vec![0, 0, fake_goaway_bytes.len() as u8, 0x00, 0, 0, 0, 0, 1];
+        data_carrying_decoy.extend_from_slice(&fake_goaway_bytes);
+
+        let mut tracker = H2OutboundGoAwayTracker::default();
+        tracker.observe(&no_error_goaway);
+        tracker.observe(&rst_stream);
+        tracker.observe(&short_goaway);
+        tracker.observe(&non_zero_stream_goaway);
+        tracker.observe(&data_carrying_decoy);
+        assert!(!tracker.error_goaway_sent());
     }
 }
