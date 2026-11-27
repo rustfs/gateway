@@ -37,7 +37,6 @@ use rustfs_gateway_types::{BucketName, CopySourceValue, ObjectKey, SseCustomerKe
 use super::*;
 use crate::authz::{Decision, authorize_input, prepare_input};
 use crate::codec::MetaView;
-use crate::op::{AuthRequirement, ResourceShape};
 use crate::registry::OperationSpec;
 use crate::request_context::{Addressed, AddressingStyle, RequestContextView};
 use crate::route::TargetKind;
@@ -91,100 +90,97 @@ fn pipeline_context(operation: &'static str, target: &str, headers: &[(&str, &[u
     RequestContextView::from_pipeline(operation, &wire, addressed, &verdict, None).expect("an anonymous request builds a context")
 }
 
-struct StsFormLike;
+// The fixtures sit inside their own `#[cfg(test)]` item for `check_op_file_shape.sh`, which admits
+// an `impl Operation` outside the ops tree only there; the whole file is test-only anyway.
+#[cfg(test)]
+mod fixtures {
+    use super::*;
 
-static STS_FORM_SPEC: OperationSpec = OperationSpec::builder("rustfs:StsFormPost", 200, None)
-    .auth(AuthRequirement::new("rustfs:AssumeRole", ResourceShape::Service))
-    .build();
+    pub(super) struct StsFormLike;
 
-static STS_FORM_FLOOR: OperationFloor =
-    OperationFloor::custom("rustfs:StsFormPost", SigService::Sts).allow_anonymous_after_listing_in_the_posture_report();
+    static STS_FORM_FLOOR: OperationFloor =
+        OperationFloor::custom("rustfs:StsFormPost", SigService::Sts).allow_anonymous_after_listing_in_the_posture_report();
 
-impl Operation for StsFormLike {
-    const NAME: &'static str = "rustfs:StsFormPost";
-    type Input = Bytes;
-    type Output = ();
-    type DerivedResources = crate::NoDerived;
+    impl Operation for StsFormLike {
+        const NAME: &'static str = "rustfs:StsFormPost";
+        type Input = Bytes;
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
 
-    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
-        Ok(crate::NoDerived)
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
+
+        fn spec() -> &'static OperationSpec {
+            panic!("Req::Debug tests never register or respond")
+        }
+
+        fn floor() -> &'static OperationFloor {
+            &STS_FORM_FLOOR
+        }
     }
 
-    fn seal_derived_input(_input: &mut Self::Input) {}
+    pub(super) struct StreamInputLike;
 
-    fn spec() -> &'static OperationSpec {
-        &STS_FORM_SPEC
+    static STREAM_INPUT_FLOOR: OperationFloor = OperationFloor::custom("rustfs:PostV3AccountPassword", SigService::S3);
+
+    impl Operation for StreamInputLike {
+        const NAME: &'static str = "rustfs:PostV3AccountPassword";
+        type Input = ByteStream;
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
+
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
+
+        fn spec() -> &'static OperationSpec {
+            panic!("Req::Debug tests never register or respond")
+        }
+
+        fn floor() -> &'static OperationFloor {
+            &STREAM_INPUT_FLOOR
+        }
     }
 
-    fn floor() -> &'static OperationFloor {
-        &STS_FORM_FLOOR
-    }
-}
-
-struct StreamInputLike;
-
-static STREAM_INPUT_SPEC: OperationSpec = OperationSpec::builder("rustfs:PostV3AccountPassword", 200, None)
-    .auth(AuthRequirement::new("rustfs:SetAccountPassword", ResourceShape::Service))
-    .build();
-
-static STREAM_INPUT_FLOOR: OperationFloor = OperationFloor::custom("rustfs:PostV3AccountPassword", SigService::S3);
-
-impl Operation for StreamInputLike {
-    const NAME: &'static str = "rustfs:PostV3AccountPassword";
-    type Input = ByteStream;
-    type Output = ();
-    type DerivedResources = crate::NoDerived;
-
-    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
-        Ok(crate::NoDerived)
+    #[derive(Debug)]
+    #[allow(dead_code)] // Fields exist specifically to verify derived `Debug` cannot leak through `Req`.
+    pub(super) struct CustomFormPayload {
+        pub(super) token: &'static str,
+        pub(super) raw: Bytes,
     }
 
-    fn seal_derived_input(_input: &mut Self::Input) {}
+    pub(super) struct CustomPayloadLike;
 
-    fn spec() -> &'static OperationSpec {
-        &STREAM_INPUT_SPEC
-    }
+    static CUSTOM_PAYLOAD_FLOOR: OperationFloor = OperationFloor::custom("vendor:RotateCredentials", SigService::S3);
 
-    fn floor() -> &'static OperationFloor {
-        &STREAM_INPUT_FLOOR
-    }
-}
+    impl Operation for CustomPayloadLike {
+        const NAME: &'static str = "vendor:RotateCredentials";
+        type Input = CustomFormPayload;
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
 
-#[derive(Debug)]
-#[allow(dead_code)] // Fields exist specifically to verify derived `Debug` cannot leak through `Req`.
-struct CustomSecretInput {
-    token: &'static str,
-    raw: Bytes,
-}
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
 
-struct CustomSecretLike;
+        fn seal_derived_input(_input: &mut Self::Input) {}
 
-static CUSTOM_SECRET_SPEC: OperationSpec = OperationSpec::builder("vendor:RotateCredentials", 200, None)
-    .auth(AuthRequirement::new("vendor:RotateCredentials", ResourceShape::Service))
-    .build();
+        fn spec() -> &'static OperationSpec {
+            panic!("Req::Debug tests never register or respond")
+        }
 
-static CUSTOM_SECRET_FLOOR: OperationFloor = OperationFloor::custom("vendor:RotateCredentials", SigService::S3);
-
-impl Operation for CustomSecretLike {
-    const NAME: &'static str = "vendor:RotateCredentials";
-    type Input = CustomSecretInput;
-    type Output = ();
-    type DerivedResources = crate::NoDerived;
-
-    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
-        Ok(crate::NoDerived)
-    }
-
-    fn seal_derived_input(_input: &mut Self::Input) {}
-
-    fn spec() -> &'static OperationSpec {
-        &CUSTOM_SECRET_SPEC
-    }
-
-    fn floor() -> &'static OperationFloor {
-        &CUSTOM_SECRET_FLOOR
+        fn floor() -> &'static OperationFloor {
+            &CUSTOM_PAYLOAD_FLOOR
+        }
     }
 }
+
+use self::fixtures::{CustomFormPayload, CustomPayloadLike, StreamInputLike, StsFormLike};
 
 // ── Req::Debug redaction tests (#1602) ────────────────────────────────────────────────────────
 
@@ -237,11 +233,11 @@ fn req_debug_does_not_print_third_party_stream_input_or_bypass_redaction() {
 /// denylist.
 #[test]
 fn req_debug_does_not_print_third_party_structured_input_fields() {
-    let input = CustomSecretInput {
+    let input = CustomFormPayload {
         token: "ROTATE_TOKEN_MARKER_1602",
         raw: Bytes::from_static(b"RAW_CREDENTIAL_BODY_1602"),
     };
-    let request = Req::<CustomSecretLike>::new(input, sse_proof());
+    let request = Req::<CustomPayloadLike>::new(input, sse_proof());
     for rendered in both_renderings(&request) {
         assert!(!rendered.contains("ROTATE_TOKEN_MARKER_1602"), "token leaked: {rendered}");
         assert!(!rendered.contains("RAW_CREDENTIAL_BODY_1602"), "raw bytes leaked: {rendered}");
