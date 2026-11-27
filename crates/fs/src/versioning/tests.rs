@@ -25,7 +25,7 @@ use super::*;
 use crate::etag;
 use rustfs_gateway::{BucketName, Handler, Req, dto};
 
-fn backend_with_bucket(tag: &str) -> (std::path::PathBuf, std::sync::Arc<FsBackend>) {
+pub(super) fn backend_with_bucket(tag: &str) -> (std::path::PathBuf, std::sync::Arc<FsBackend>) {
     let root = std::env::temp_dir().join(format!("rustfs-gateway-fs-versioning-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("a test root");
@@ -50,7 +50,7 @@ fn backend_with_bucket(tag: &str) -> (std::path::PathBuf, std::sync::Arc<FsBacke
 async fn n_the_current_record_enumeration_waits_for_a_write_in_flight() {
     let (root, backend) = backend_with_bucket("waits");
     let temporary = backend.versions_path("racing").join(".tmp-1-1");
-    let guard = backend.version_lock.lock().await;
+    let guard = backend.version_lock.lock().await.expect("version lock");
     std::fs::create_dir(&temporary).expect("the temporary directory of a write in flight");
 
     let listing = tokio::spawn({
@@ -67,7 +67,7 @@ async fn n_the_current_record_enumeration_waits_for_a_write_in_flight() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-fn sse_proof() -> rustfs_gateway::SseEnforced {
+pub(super) fn sse_proof() -> rustfs_gateway::SseEnforced {
     let request = http::Request::builder()
         .method(http::Method::GET)
         .uri("/")
@@ -88,7 +88,7 @@ fn sse_proof() -> rustfs_gateway::SseEnforced {
 #[tokio::test]
 async fn n_delete_bucket_waits_for_a_write_in_flight() {
     let (root, backend) = backend_with_bucket("delete-waits");
-    let guard = backend.version_lock.lock().await;
+    let guard = backend.version_lock.lock().await.expect("version lock");
     let delete = tokio::spawn({
         let backend = std::sync::Arc::clone(&backend);
         async move {
@@ -336,7 +336,7 @@ async fn n_delete_observes_protection_before_lock_release() {
         )
         .await
         .expect("record");
-    let guard = backend.version_lock.lock().await;
+    let guard = backend.version_lock.lock().await.expect("version lock");
     let pending = tokio::spawn({
         let backend = std::sync::Arc::clone(&backend);
         async move { backend.delete_object_version("racing", "object", Some("v1")).await }

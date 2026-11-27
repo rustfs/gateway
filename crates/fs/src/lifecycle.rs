@@ -104,6 +104,16 @@ impl FsBackend {
         while let Some(entry) = entries.next_entry().await.map_err(|_| storage_error())? {
             let name = entry.file_name();
             let name = name.to_str().ok_or_else(storage_error)?;
+            if name == super::root_lock::LOCK_FILE {
+                let file_type = entry.file_type().await.map_err(|_| storage_error())?;
+                if !file_type.is_file() || file_type.is_symlink() {
+                    return Err(HandlerError::new(
+                        ErrorCode::INVALID_REQUEST,
+                        "the version lock path is not a safe regular file",
+                    ));
+                }
+                continue;
+            }
             if name.starts_with(".tmp-bucket-") {
                 let file_type = entry.file_type().await.map_err(|_| storage_error())?;
                 if !file_type.is_dir() || file_type.is_symlink() {

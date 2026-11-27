@@ -212,10 +212,16 @@ Ranged reads resolve through the exported `evaluate_range` contract, so a suffix
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as
 they do everywhere else in this workspace rather than being re-derived here.
 
-The backend is intentionally not production storage. It does not promise crash consistency,
-multi-process coordination, hostile concurrent filesystem mutation resistance, or lifecycle
-transition scheduling or physical storage tiers. Bucket names never become raw path components and
-object keys never become paths; symbolic-link roots and storage components are refused.
+The backend coordinates version, bucket, and metadata operations across cooperating `FsBackend`
+instances in the same process (via a canonical-root mutex registry) and across OS processes (via an
+exclusive advisory file lock on `<root>/.version-lock`), failing closed on malformed or symlink lock
+paths, skipping orphaned `.tmp-*` version staging directories, staging multipart completion receipts
+before rename, and reconciling duplicate `null` versions safely against active protection. It
+remains a bounded reference implementation, not production storage: it does not promise
+crash-consistent disk durability, resistance to hostile non-cooperating filesystem modifications,
+public Object Lock enforcement, lifecycle transition scheduling, or physical storage tiers. Bucket
+names never become raw path components and object keys never become paths; symbolic-link roots and
+storage components are refused.
 
 The remaining capabilities belong to later slices of rustfs/backlog#1741 rather than this core
 reference-backend slice.

@@ -173,7 +173,7 @@ impl Handler<CreateBucket> for FsBackend {
         )?;
         let bucket = input.bucket.as_str();
         let path = self.bucket_path(bucket);
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         match tokio::fs::symlink_metadata(&path).await {
             Ok(_) => {
                 self.require_bucket(bucket).await?;
@@ -270,7 +270,7 @@ impl Handler<DeleteBucket> for FsBackend {
         // Under the version lock from the existence and emptiness checks through removal of the
         // bucket layout: CreateBucket, CreateMultipartUpload, and version publication all take the
         // same lock, so a racing operation either lands before deletion starts or after it finishes.
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         self.require_bucket(bucket).await?;
         let objects = self.objects_path(bucket);
         let uploads = self.uploads_path(bucket);

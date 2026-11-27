@@ -244,7 +244,7 @@ impl super::FsBackend {
         key: &str,
         version_id: Option<&str>,
     ) -> Result<Representation, HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         match self.select_locked(bucket, key, version_id).await? {
             Selected::Found(representation) => Ok(*representation),
             Selected::Absent(error) => Err(error),
@@ -262,7 +262,8 @@ impl super::FsBackend {
         version_id: Option<&str>,
     ) -> Result<Selected, HandlerError> {
         let reports_null = self.reports_null_version(bucket).await?;
-        let records = self.version_records(bucket).await?;
+        let mut records = self.version_records(bucket).await?;
+        self.reconcile_nulls_for_key_locked(bucket, key, &mut records)?;
         let selected = version_id
             .and_then(|id| explicit_for_key(&records, key, id))
             .or_else(|| version_id.is_none().then(|| newest_for_key(&records, key)).flatten());
@@ -325,7 +326,7 @@ impl super::FsBackend {
         version_id: Option<&str>,
         conditions: &rustfs_gateway::Preconditions,
     ) -> Result<(Representation, ConditionalOutcome), HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         match self.select_locked(bucket, key, version_id).await? {
             Selected::Found(representation) => {
                 let outcome = guard_read(Some(&representation), conditions)?;

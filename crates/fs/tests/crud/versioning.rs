@@ -21,6 +21,9 @@
 
 use super::*;
 
+#[path = "shared_root.rs"]
+mod shared_root;
+
 fn versioning_document(status: &str) -> Bytes {
     Bytes::from(format!(
         "<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Status>{status}</Status></VersioningConfiguration>"

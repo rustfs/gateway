@@ -34,7 +34,7 @@ impl FsBackend {
         rules: &[LifecycleRule],
         now: i64,
     ) -> Result<Vec<(String, u64)>, HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         Ok(self
             .expiring_version_records(bucket, rules, now)
             .await?
@@ -50,20 +50,31 @@ impl FsBackend {
         candidates: &[(String, u64)],
         now: i64,
     ) -> Result<(), HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let guard = self.version_lock.lock().await?;
         let selected: BTreeSet<_> = candidates.iter().map(|(key, sequence)| (key.as_str(), *sequence)).collect();
         // Re-read under the same lock held through deletion: a removed successor can make a
         // historical version current again, and a new write can stop a marker being orphaned.
-        for record in self.expiring_version_records(bucket, rules, now).await? {
-            if selected.contains(&(record.key.as_str(), record.sequence))
-                && !record
-                    .lock
-                    .as_ref()
-                    .is_some_and(|lock| lock.prevents_deletion(self.clock.now().unix_seconds()))
-            {
-                tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
-            }
-        }
+        let remove_paths: Vec<std::path::PathBuf> = self
+            .expiring_version_records(bucket, rules, now)
+            .await?
+            .into_iter()
+            .filter(|record| {
+                selected.contains(&(record.key.as_str(), record.sequence))
+                    && !record
+                        .lock
+                        .as_ref()
+                        .is_some_and(|lock| lock.prevents_deletion(self.clock.now().unix_seconds()))
+            })
+            .map(|record| record.path)
+            .collect();
+        let (_guard, ()) = guard
+            .run_blocking(move || {
+                for path in remove_paths {
+                    super::null_recovery::remove_version_dir_strict(&path)?;
+                }
+                Ok(())
+            })
+            .await?;
         Ok(())
     }
 
@@ -75,8 +86,10 @@ impl FsBackend {
         now: i64,
     ) -> Result<Vec<VersionRecord>, HandlerError> {
         self.require_readable_versioning(bucket).await?;
+        let mut all_records = self.version_records(bucket).await?;
+        self.reconcile_all_nulls_locked(bucket, &mut all_records)?;
         let mut keys = BTreeMap::<String, Vec<VersionRecord>>::new();
-        for record in self.version_records(bucket).await? {
+        for record in all_records {
             keys.entry(record.key.clone()).or_default().push(record);
         }
         let mut eligible = Vec::new();

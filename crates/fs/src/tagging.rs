@@ -137,7 +137,7 @@ impl FsBackend {
 impl Handler<GetObjectTagging> for FsBackend {
     async fn call(&self, request: Req<GetObjectTagging>) -> HandlerResult<GetObjectTagging> {
         let input = request.input();
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         let target = self
             .object_tag_target(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
             .await?;
@@ -171,7 +171,7 @@ impl Handler<PutObjectTagging> for FsBackend {
             .collect::<Result<Vec<_>, _>>()?;
         validate_tag_set(&pairs, TagScope::Object)
             .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         let target = self
             .object_tag_target(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
             .await?;
@@ -185,7 +185,7 @@ impl Handler<PutObjectTagging> for FsBackend {
 impl Handler<DeleteObjectTagging> for FsBackend {
     async fn call(&self, request: Req<DeleteObjectTagging>) -> HandlerResult<DeleteObjectTagging> {
         let input = request.input();
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         let target = self
             .object_tag_target(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
             .await?;
