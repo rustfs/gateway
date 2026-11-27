@@ -27435,6 +27435,119 @@ expect_fail check_caps_have_impl.sh \
     mut_caps_platform_call_removed \
     'a Linux or Apple sendfile implementation is missing'
 
+# -- check_expired_token_construction.sh ---------------------------------------------------------
+# rustfs/gateway#1584: `AuthError::ExpiredToken` may only be constructed inside
+# `PendingSessionRefusal::answer(&SignatureMatch)` in `crates/gateway/src/ext/session_answer.rs`.
+
+mut_expired_token_direct_outside_session_answer() {
+    cat >>crates/gateway/src/ext/authenticator.rs <<'RS'
+
+#[allow(dead_code)]
+fn forged_expired_answer() -> rustfs_gateway_sig::AuthError {
+    rustfs_gateway_sig::AuthError::ExpiredToken
+}
+RS
+}
+expect_fail check_expired_token_construction.sh \
+    'direct AuthError::ExpiredToken construction in authenticator.rs' \
+    mut_expired_token_direct_outside_session_answer \
+    'AuthError::ExpiredToken may only be constructed in crates/gateway/src/ext/session_answer.rs'
+
+mut_expired_token_aliased_outside_session_answer() {
+    cat >>crates/gateway/src/ext/credentials.rs <<'RS'
+
+#[allow(dead_code)]
+fn aliased_expired_answer() -> rustfs_gateway_sig::AuthError {
+    use rustfs_gateway_sig::AuthError::ExpiredToken as E;
+    E
+}
+RS
+}
+expect_fail check_expired_token_construction.sh \
+    'aliased ExpiredToken import outside session_answer.rs' \
+    mut_expired_token_aliased_outside_session_answer \
+    'AuthError::ExpiredToken may only be constructed in crates/gateway/src/ext/session_answer.rs'
+
+mut_expired_token_second_site_in_session_answer() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/session_answer.rs")
+text = path.read_text()
+old = "    pub const fn uniform(self) -> AuthError {\n        AuthError::InvalidAccessKeyId\n    }"
+if text.count(old) != 1:
+    raise SystemExit("uniform() mutation subject is not unique")
+path.write_text(
+    text.replace(old, "    pub const fn uniform(self) -> AuthError {\n        AuthError::ExpiredToken\n    }", 1)
+)
+PYEOF
+}
+expect_fail check_expired_token_construction.sh \
+    'a second ExpiredToken construction inside session_answer.rs::uniform' \
+    mut_expired_token_second_site_in_session_answer \
+    'expected exactly 1 inside PendingSessionRefusal::answer'
+
+mut_expired_token_answer_drops_signature_proof() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/session_answer.rs")
+text = path.read_text()
+old = "pub const fn answer(self, proof: &SignatureMatch) -> AuthError {"
+if text.count(old) != 1:
+    raise SystemExit("answer() signature mutation subject is not unique")
+path.write_text(text.replace(old, "pub const fn answer(self) -> AuthError {", 1))
+PYEOF
+}
+expect_fail check_expired_token_construction.sh \
+    'PendingSessionRefusal::answer dropping its &SignatureMatch proof parameter' \
+    mut_expired_token_answer_drops_signature_proof \
+    'must define exactly one proof-gated'
+
+mut_expired_token_helper_in_verdict() {
+    cat >>crates/sig/src/verdict.rs <<'RS'
+
+impl AuthError {
+    #[allow(dead_code)]
+    const fn forged_expired() -> Self {
+        Self::ExpiredToken
+    }
+}
+RS
+}
+expect_fail check_expired_token_construction.sh \
+    'an AuthError::ExpiredToken constructor helper inside verdict.rs' \
+    mut_expired_token_helper_in_verdict \
+    'unexpected ExpiredToken reference outside the enum declaration and code()/message() match arms'
+
+mut_expired_token_session_answer_deleted() {
+    rm -f crates/gateway/src/ext/session_answer.rs
+}
+expect_fail check_expired_token_construction.sh \
+    'missing session_answer.rs authority file failing closed' \
+    mut_expired_token_session_answer_deleted \
+    'required input is missing: crates/gateway/src/ext/session_answer.rs'
+
+mut_expired_token_comment_string_and_cfg_test_decoy() {
+    cat >>crates/gateway/src/ext/authenticator.rs <<'RS'
+
+// ExpiredToken mentioned in a comment must remain allowed.
+#[allow(dead_code)]
+const EXPIRED_TOKEN_LABEL_DECOY: &str = "ExpiredToken";
+
+#[cfg(test)]
+mod expired_token_decoy_tests {
+    #[allow(dead_code)]
+    fn assert_variant() -> rustfs_gateway_sig::AuthError {
+        rustfs_gateway_sig::AuthError::ExpiredToken
+    }
+}
+RS
+}
+expect_guard_pass check_expired_token_construction.sh \
+    'comments, string literals, and #[cfg(test)] items naming ExpiredToken' \
+    mut_expired_token_comment_string_and_cfg_test_decoy
+
 # -- check_guard_suite_tail_reachable.sh ---------------------------------------------------------
 #
 # The guard says which block the end of this file belongs to, so no number of new cases can

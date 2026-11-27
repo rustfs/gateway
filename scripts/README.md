@@ -109,6 +109,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_dyn_policy.sh` | Only core `Operation` and `Handler` may use AFIT/RPITIT; extension traits use `BoxFuture` | P4-06 |
 | `check_macro_governance.sh` | The handler macro keeps adjacent macro-free docs, no link magic, no minted public types, unchanged method bodies, and registry equivalence | P4-07 |
 | `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; every hand-written `PartialEq` calls `::subtle::ConstantTimeEq::ct_eq`; aliases and look-alike helpers cannot restore ordinary equality | P0 (before P2) |
+| `check_expired_token_construction.sh` | `AuthError::ExpiredToken` is constructed in production only inside `PendingSessionRefusal::answer(&SignatureMatch)` in `crates/gateway/src/ext/session_answer.rs` (`rustfs/gateway#1584`) | P2 |
 | `check_role_verdicts.sh` | PR bodies record each path-triggered advisory role with substantive evidence; deterministic presence is enforced but verdict judgement never blocks CI | P0-10 |
 | `check_license_headers.sh` | Every tracked `.rs` file opens with the Apache-2.0 licence header (ADR-0001 provenance boundary) | P0 |
 | `check_governance_attribution.sh` | The s3s relationship statement and adapted aws-sigv4 helpers retain their reviewed source, revision, licence, and copied-code registry entry | P0-01 |
