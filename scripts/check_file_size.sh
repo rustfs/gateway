@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Hand-written Rust files stay at or below 800 lines unless a reviewed allowance names a higher
-#   ceiling, an issue URL and a reason.
+#   Hand-written Rust files under crates/, xtask/, compat/sut/, fuzz/, and xtask-launcher/ stay
+#   at or below 800 lines unless a reviewed allowance names a higher ceiling, an issue URL and a
+#   reason.
 # WHY
 #   rustfs/backlog#1742 treats large files as a direct context-budget failure.
 # HOW TO EXEMPT
@@ -11,6 +12,7 @@ set -euo pipefail
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ALLOWANCES="$ROOT/allowances/file_size.txt"
+SCAN_ROOTS=(crates xtask compat/sut fuzz xtask-launcher)
 failures=0
 used=0
 max=0
@@ -21,6 +23,15 @@ if [[ ! -f "$ALLOWANCES" ]]; then
     printf 'check_file_size: allowances/file_size.txt is missing\n' >&2
     exit 1
 fi
+
+scan_dirs=()
+for rel in "${SCAN_ROOTS[@]}"; do
+    if [[ ! -d "$ROOT/$rel" ]]; then
+        printf 'check_file_size: required scan root is missing: %s\n' "$rel" >&2
+        exit 1
+    fi
+    scan_dirs+=("$ROOT/$rel")
+done
 
 seen_paths=""
 while read -r path limit issue reason; do
@@ -44,8 +55,8 @@ done <"$ALLOWANCES"
 files=()
 while IFS= read -r -d '' file; do
     files+=("$file")
-done < <(find "$ROOT/crates" "$ROOT/xtask" \
-    -path "$ROOT/crates/types/generated" -prune -o \
+done < <(find "${scan_dirs[@]}" \
+    \( -path "$ROOT/crates/types/generated" -o -name target \) -prune -o \
     -type f -name '*.rs' -print0)
 
 while read -r lines file; do

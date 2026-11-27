@@ -2,84 +2,61 @@
 # (rustfs/backlog#2757). One row per case the run leaves failed for a reviewed reason; `issue`
 # names the review that tolerates the difference, and `expires` is the day the ruling lapses.
 #
-# Provenance: the failed set of `run --profile rustfs --endpoint <compat-sut> --allow-external-fixtures
-# --exclude-slow` on 2026-10-07 against `compat/sut` at the rustfs/gateway#1393 preset, classified
-# by hand against rustfs/backlog#2684, rustfs/gateway#1349 and `docs/rustfs-profile.md`. Cases the
-# harness itself cannot measure (a pinned `clock.fixed`, fixtures the external path does not
-# establish, operations the launcher does not register, authored HTTP/2 frames) are deliberately
-# not ruled here: a ruling is a claim about the target, and those are claims about the harness.
+# Provenance: originally classified from `run --profile rustfs --endpoint <compat-sut>
+# --allow-external-fixtures --exclude-slow` on 2026-10-07 against `compat/sut` at the
+# rustfs/gateway#1393 preset, then reconciled across `#1418`/`#1464` (35 missing-header rows
+# retired), `#1406` (16 in-process-only harness rows removed), and `rustfs/gateway#1631` (6
+# now-passing rows retired: c-bucketconfig-0023, c-cors-0012, c-cors-0025, c-location-0002,
+# c-sig-0583, c-sig-0584; all remaining rows re-attributed against live `compat-sut` observations).
+# Cases the harness itself cannot measure (a pinned `clock.fixed` without `--endpoint-fixed-time`,
+# fixtures the external path does not establish, operations the launcher does not register,
+# authored HTTP/2 frames, or `IN_PROCESS_ONLY` hook/injected-fault cases) are deliberately not
+# ruled here: a ruling is a claim about the target, and those are claims about the harness.
 #
 # Every row is a claim, not a record: read `conformance/README.md` before adding one.
-#
-# #1418 retired 35 missing-header rows after external RustFS-preset passes and reverse signer
-# mutations. The 33 remaining missing-header rows are unresolved: their comments describe the
-# original ruling, not approval of the different failures exposed after the signer fix.
+# Human maintainer sign-off is owed on merge for every row reconciled in rustfs/gateway#1631.
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: write_responses_as_rustfs omits the newline after the XML declaration (rustfs/gateway#1078) and compat/sut reports its configured access-key owner (`AKIAIOSFODNN7EXAMPLE`) rather than the in-process fixture's `conformance` canonical user in GetBucketAcl
 [[ruling]]
 id = "c-acl-0001"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1078"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: write_responses_as_rustfs omits the newline after the XML declaration (rustfs/gateway#1078) and compat/sut reports its configured access-key owner (`AKIAIOSFODNN7EXAMPLE`) in GetBucketAcl
 [[ruling]]
 id = "c-acl-0028"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1078"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: write_responses_as_rustfs omits the newline after the XML declaration (rustfs/gateway#1078) and compat/sut reports its configured access-key owner (`AKIAIOSFODNN7EXAMPLE`) in GetObjectAcl
 [[ruling]]
 id = "c-acl-0029"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1078"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: compat/sut serves a single-region RustFS preset (`us-east-1`) with accept_any_signing_region; HeadBucket on a bucket created for `eu-west-1` answers 200 with `x-amz-bucket-region: us-east-1` rather than a 301 cross-region redirect
 [[ruling]]
 id = "c-bkt-0026"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
-[[ruling]]
-id = "c-bucketconfig-0023"
-verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
-expires = "2027-04-07"
-
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: compat/sut's reference backend mirrors legacy RustFS `execute_get_bucket_policy_status` (crates/fs/src/policy.rs): an unconfigured bucket answers 200 `<PolicyStatus><IsPublic>false</IsPublic></PolicyStatus>` rather than 404 NoSuchBucketPolicy
 [[ruling]]
 id = "c-bucketconfig-0030"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
-[[ruling]]
-id = "c-cors-0012"
-verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
-expires = "2027-04-07"
-
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
-[[ruling]]
-id = "c-cors-0025"
-verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
-expires = "2027-04-07"
-
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0034"
 verdict = "legacy-identical"
@@ -87,7 +64,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0035"
 verdict = "legacy-identical"
@@ -95,7 +72,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0036"
 verdict = "legacy-identical"
@@ -103,7 +80,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0043"
 verdict = "legacy-identical"
@@ -111,7 +88,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; unregistered profile reading (docs/rustfs-profile.md)
+# failed: answer_cors_as_legacy_rustfs: CORS answered in a layer in front of the stack, every OPTIONS before routing; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cors-0058"
 verdict = "legacy-identical"
@@ -119,39 +96,39 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: compat/sut configures static access keys only and does not install the in-process fixture's `live_session` STS temporary credential, so the signed session request is refused 403 InvalidAccessKeyId
 [[ruling]]
 id = "c-cred-0003"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: answer_credential_refusals_with_legacy_rustfs_sentences (rustfs/gateway#1120): unknown access key answers legacy RustFS wording (`The Access Key Id you provided does not exist in our records.`) instead of the core uniform sentence
 [[ruling]]
 id = "c-cred-0008"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1120"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: answer_credential_refusals_with_legacy_rustfs_sentences (rustfs/gateway#1120): wrong secret answers legacy RustFS wording (`The request signature we calculated does not match...`) instead of the core uniform sentence
 [[ruling]]
 id = "c-cred-0009"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1120"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: answer_credential_refusals_with_legacy_rustfs_sentences (rustfs/gateway#1120): disabled/unconfigured credential answers legacy RustFS wording (`The Access Key Id you provided does not exist in our records.`) instead of the core uniform sentence
 [[ruling]]
 id = "c-cred-0010"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1120"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0013"
 verdict = "legacy-identical"
@@ -159,7 +136,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0016"
 verdict = "legacy-identical"
@@ -167,15 +144,15 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: compat/sut configures static access keys only and does not install the fixture's `expired_session` STS credential, so the request is answered 403 InvalidAccessKeyId (legacy wording) instead of 400 ExpiredToken
 [[ruling]]
 id = "c-cred-0020"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0021"
 verdict = "legacy-identical"
@@ -183,7 +160,7 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; unregistered profile reading (docs/rustfs-profile.md)
+# failed: drain_unread_request_bodies: an unread body is drained behind the refusal and the connection closed; registered under rustfs/gateway#1634 (docs/rustfs-profile.md)
 [[ruling]]
 id = "c-cred-0026"
 verdict = "legacy-identical"
@@ -191,108 +168,84 @@ issue = "rustfs/gateway#1120"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: identify_requests_as_legacy_rustfs (R10 / R-018): error XML omits `<HostId>` (carries `<RequestId>` only), failing exact-body comparison against the core `<HostId>` golden
 [[ruling]]
 id = "c-encryption-0012"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/backlog#2762"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: compat/sut started without `--server-domains` resolves requests path-style (`LegacyRustfsVirtualHosts` not configured for the case's virtual-host domain), so virtual-hosted `GET /nested/plain.txt` answers 404
 [[ruling]]
 id = "c-host-0001"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1136"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: compat/sut started without `--server-domains` resolves requests path-style (`LegacyRustfsVirtualHosts` not configured for the case's region-bearing virtual-host domain), so virtual-hosted `GET /nested/plain.txt` answers 404
 [[ruling]]
 id = "c-host-0002"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1136"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: identify_requests_as_legacy_rustfs (R-018): the error document carries no RequestId; the host writes the identifier (T2.3)
+# failed: identify_requests_as_legacy_rustfs (R10 / R-018): error XML omits `<HostId>` (carries `<RequestId>` only), failing exact-body comparison against the core `<HostId>` golden
 [[ruling]]
 id = "c-host-0012"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2762"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (rustfs/backlog#2762 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: identify_requests_as_legacy_rustfs (R-018): the error document carries no RequestId; the host writes the identifier (T2.3)
+# failed: identify_requests_as_legacy_rustfs (R10 / R-018): error XML omits `<HostId>` (carries `<RequestId>` only), failing exact-body comparison against the core `<HostId>` golden
 [[ruling]]
 id = "c-host-0013"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2762"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (rustfs/backlog#2762 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: identify_requests_as_legacy_rustfs (R10 / R-018): error XML omits `<HostId>` (carries `<RequestId>` only), failing exact-body comparison against the core `<HostId>` golden
 [[ruling]]
 id = "c-lifecycle-0013"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/backlog#2762"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: write_responses_as_rustfs (rustfs/gateway#1078): omits the newline after `<?xml version="1.0" encoding="UTF-8"?>` before `<LocationConstraint>`
 [[ruling]]
 id = "c-location-0001"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/gateway#1078"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
-[[ruling]]
-id = "c-location-0002"
-verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
-expires = "2027-04-07"
-
-# failed: GW-SIG item 6: a scope refusal in RustFS's code and words (InvalidRequest, not AuthorizationHeaderMalformed); the case's own summary names the profile
+# failed: accept_any_signing_region (SigV4Authenticator::rustfs_profile, ADR-0023): accepts `rustfs-local` as a valid signing region and serves 200 `<LocationConstraint>` rather than 400 AuthorizationHeaderMalformed
 [[ruling]]
 id = "c-location-0005"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: answer_header_signatures_as_legacy_rustfs (GW-SIG item 4): validates `x-amz-date` as SigV4 ISO-8601 before SigV2 dispatch, refusing the SigV2 case's RFC 2822 HTTP-date `x-amz-date` header with 400 InvalidRequest (`invalid x-amz-date`)
 [[ruling]]
 id = "c-sig-0506"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG items 4 and 6: a skewed date is refused RequestTimeTooSkewed before the credential lookup, ahead of the key or signature verdict the case expects
-[[ruling]]
-id = "c-sig-0583"
-verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
-expires = "2027-04-07"
-
-# failed: GW-SIG items 4 and 6: a skewed date is refused RequestTimeTooSkewed before the credential lookup, ahead of the key or signature verdict the case expects
-[[ruling]]
-id = "c-sig-0584"
-verdict = "legacy-identical"
-issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
-expires = "2027-04-07"
-
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: accept_empty_signing_region (SigV4Authenticator::rustfs_profile, docs/rustfs-profile.md): an empty scope region passes scope parsing and reaches HMAC verification, answering SignatureDoesNotMatch instead of InvalidAccessKeyId / AccessDenied
 [[ruling]]
 id = "c-sig-0597"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
 # failed: R-053: an access key the floor cannot read is 403 AccessDenied before any lookup; legacy answers InvalidAccessKeyId; kept by the gateway, E3 drafted for rustfs/backlog#2684
@@ -303,20 +256,20 @@ issue = "rustfs/gateway#1349"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 6: a scope refusal in RustFS's code and words (InvalidRequest, not AuthorizationHeaderMalformed); the case's own summary names the profile
+# failed: refuse_unreadable_signing_regions_after_verification (SigV4Authenticator::rustfs_profile, docs/rustfs-profile.md): verifies the signature before refusing uppercase `US-EAST-1`, so the tampered scope fails HMAC verification as 403 SignatureDoesNotMatch rather than 400 AuthorizationHeaderMalformed
 [[ruling]]
 id = "c-sig-0599"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
-# failed: GW-SIG item 4 (answer_header_signatures_as_legacy_rustfs rule 8): a header-signed s3 request without x-amz-content-sha256 is 400 InvalidRequest 'missing header'; the suite's signer never sends the header, so the preset refuses the request as legacy RustFS refuses it
+# failed: accept_signing_regions_of_any_length (SigV4Authenticator::rustfs_profile, docs/rustfs-profile.md): lifts the 64-byte region length ceiling so the tampered scope reaches HMAC verification and answers SignatureDoesNotMatch instead of InvalidAccessKeyId
 [[ruling]]
 id = "c-sig-0600"
 verdict = "legacy-identical"
 issue = "rustfs/backlog#2684"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (pre-#1418 rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"
 
 # failed: GW-SIG item 7: an unsigned x-amz-* header is AccessDenied after the credential lookup, not SignatureDoesNotMatch
@@ -335,10 +288,10 @@ issue = "rustfs/backlog#2684"
 approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
 expires = "2027-04-07"
 
-# failed: identify_requests_as_legacy_rustfs (R-018): the error document carries no RequestId; the host writes the identifier (T2.3)
+# failed: refuse_plaintext_customer_keys_before_routing (R11, docs/rustfs-profile.md) and identify_requests_as_legacy_rustfs (R10): cleartext SSE-C refusal uses legacy RustFS wording (`Requests specifying Server Side Encryption...`) and omits `<HostId>`
 [[ruling]]
 id = "c-ssec-0002"
 verdict = "legacy-identical"
-issue = "rustfs/backlog#2762"
-approved_by = "rustfs/backlog#2684 coordinator ruling of 2026-09-30, relayed by rustfs/backlog#2757; re-approval owed by the maintainer on merge"
+issue = "rustfs/backlog#2684"
+approved_by = "reconciled against live compat-sut observation in rustfs/gateway#1631 (rustfs/backlog#2684 ruling); maintainer sign-off owed on merge"
 expires = "2027-04-07"

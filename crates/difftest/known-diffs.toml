@@ -18,7 +18,7 @@ item = "PutObjectInput.checksum_algorithm"
 gateway = "\"*\""
 s3s = "<unset>"
 reason = "The gateway reads the algorithm from x-amz-sdk-checksum-algorithm, the header the S3 model binds; the pinned s3s reads x-amz-checksum-algorithm, so each stack leaves the member unset for the other header."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0002"
 
 [[diff]]
@@ -28,7 +28,7 @@ operation = "PutObject"
 item = "PutObjectInput.version_id"
 gateway = "<no member>"
 reason = "MinIO's ?versionId= on a PUT has no member in the gateway's PutObject; only the replication dialect's replica write reads it, after s3:ReplicateObject authorization."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0007"
 
 [[diff]]
@@ -38,7 +38,7 @@ operation = "GetObject"
 item = "GetObjectInput.if_range"
 s3s = "<no member>"
 reason = "The pinned s3s GetObjectInput has no If-Range member, so RustFS never sees the validator and serves the range of whatever object is current; the gateway binds it (q-range-0058). A follow-up for the RustFS adapter, not a gateway change."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0004"
@@ -47,7 +47,7 @@ operation = "UploadPart"
 item = "UploadPartInput.upload_id"
 gateway = "\"<an id the gateway could never have minted>\""
 reason = "The gateway hands an upload id out only through its resolver, which refuses a shape no server mints (a leading slash, a dot-dot segment, control bytes) as NoSuchUpload; s3s hands the text to RustFS, whose lookup answers NoSuchUpload for it too."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 # ── Decode: model defaults the gateway writes into the input ────────────────────────────────
 #
@@ -62,7 +62,7 @@ item = "ListObjectsInput.max_keys"
 gateway = "\"1000\""
 s3s = "<unset>"
 reason = "Gateway writes the 1000-key default into the input; RustFS applies the same default to an unset max-keys (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/bucket.rs#L132)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0006"
@@ -72,7 +72,7 @@ item = "ListObjectsV2Input.max_keys"
 gateway = "\"1000\""
 s3s = "<unset>"
 reason = "Gateway writes the 1000-key default into the input; RustFS applies the same default to an unset max-keys (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/bucket.rs#L161)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0007"
@@ -82,7 +82,7 @@ item = "ListObjectsV2Input.fetch_owner"
 gateway = "\"false\""
 s3s = "<unset>"
 reason = "Gateway writes fetch-owner=false into the input; RustFS reads an unset member as false (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L2886)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0008"
@@ -92,7 +92,7 @@ item = "ListObjectVersionsInput.max_keys"
 gateway = "\"1000\""
 s3s = "<unset>"
 reason = "Gateway writes the 1000-key default into the input; RustFS applies the same default to an unset max-keys (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/bucket.rs#L132)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0009"
@@ -102,7 +102,7 @@ item = "ListMultipartUploadsInput.max_uploads"
 gateway = "\"1000\""
 s3s = "<unset>"
 reason = "Gateway writes the 1000-upload default into the input; RustFS applies its own 1000 cap to an unset max-uploads (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L149)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0010"
@@ -112,7 +112,7 @@ item = "ListPartsInput.max_parts"
 gateway = "\"1000\""
 s3s = "<unset>"
 reason = "Gateway writes the 1000-part default into the input; RustFS applies the same default to an unset max-parts (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L112)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0011"
@@ -122,7 +122,7 @@ item = "ListBucketsInput.max_buckets"
 gateway = "\"10000\""
 s3s = "<unset>"
 reason = "Gateway writes the 10000-bucket default into the input; the RustFS ListBuckets handler does not paginate and reads none of the input's members (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L1566), so the value changes nothing today."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 # ── Decode: one stack refuses a request the other hands to its handler ─────────────────────
 
@@ -134,7 +134,7 @@ item = "outcome"
 gateway = "411 MissingContentLength: the request omits a member the wire contract requires"
 s3s = "handled"
 reason = "A plain PUT with no Content-Length is refused by the gateway (q-length-0007); s3s back-fills the length and accepts."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0003"
 
 [[diff]]
@@ -145,7 +145,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: Expecting a single x-amz-checksum- header"
 s3s = "handled"
 reason = "Two integrity claims in one request are refused before the body is read (q-checksum-0006); s3s keeps both."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0005"
 
 [[diff]]
@@ -156,7 +156,7 @@ item = "outcome"
 gateway = "400 InvalidDigest: The Content-MD5 you specified is not valid"
 s3s = "handled"
 reason = "The gateway refuses a Content-MD5 that is not base64 before the handler with the AWS answer, 400 InvalidDigest; s3s hands it to RustFS, whose PutObject body fails to decode it as a generic storage error (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/put.rs#L1724). Both refuse the upload; the gateway's code is the AWS one."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0015"
@@ -166,7 +166,7 @@ item = "outcome"
 gateway = "400 InvalidArgument: the name contains a dot-dot path segment"
 s3s = "handled"
 reason = "The object-key floor refuses a dot-dot segment for every operation that names a key; s3s keeps it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0008"
 
 [[diff]]
@@ -177,7 +177,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: requests specifying a customer-provided encryption key must be made over a secure connection"
 s3s = "handled"
 reason = "The gateway refuses SSE-C on a cleartext connection by default, as AWS does. RustFS main only reports it unless RUSTFS_SSE_C_REQUIRE_TLS=true (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/server/ssec_transport.rs#L56), so the RustFS adapter must install SseConfig::allowing_customer_keys_over_plaintext exactly when that switch is off."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0017"
@@ -187,7 +187,7 @@ item = "outcome"
 gateway = "handled"
 s3s = "400 InvalidArgument: invalid header: range: *"
 reason = "RFC 9110 says an unparseable, multi-range or non-bytes Range is ignored and the whole object served; the gateway keeps the header verbatim and does that, s3s refuses it with 400."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0018"
@@ -197,7 +197,7 @@ item = "outcome"
 gateway = "handled"
 s3s = "400 InvalidArgument: invalid header: if-modified-since: *"
 reason = "A date condition that is not an HTTP-date is ignored rather than refused (q-cond-0050); s3s refuses it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0019"
@@ -207,7 +207,7 @@ item = "outcome"
 gateway = "handled"
 s3s = "400 InvalidArgument: invalid header: if-match: *"
 reason = "The gateway keeps an entity-tag condition as text and checks its grammar when the condition is evaluated (q-etag-form-0074); the migration seam's entity-tag conversion refuses a malformed one by member name, so the RustFS app body never receives it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0020"
@@ -217,7 +217,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header"
 s3s = "handled"
 reason = "DeleteObjects is in the model's httpChecksumRequired set, so the gateway refuses a body with neither Content-MD5 nor an x-amz-checksum-* header, as AWS does; s3s does not check."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0021"
@@ -227,7 +227,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header"
 s3s = "handled"
 reason = "PutBucketVersioning is in the model's httpChecksumRequired set, so the gateway refuses a body with no integrity header, as AWS does; s3s does not check."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0022"
@@ -237,7 +237,7 @@ item = "outcome"
 gateway = "400 InvalidArgument: the request carries a value this member cannot hold"
 s3s = "handled"
 reason = "A part number outside 1..=10000 is refused by the gateway codec; s3s hands it to RustFS, which refuses it with the same code (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L122)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0113"
@@ -291,7 +291,7 @@ operation = "*"
 item = "error.message"
 gateway = "the request carries a value this member cannot hold"
 reason = "The gateway's codec answers every unreadable member value with one fixed sentence that repeats no request bytes; s3s names the header or query and its value."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0009"
 
 [[diff]]
@@ -302,7 +302,7 @@ item = "error.message"
 gateway = "The specified bucket is not valid"
 s3s = "The specified bucket is not valid."
 reason = "The same sentence, without the final full stop."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0009"
 
 [[diff]]
@@ -313,7 +313,7 @@ item = "error.message"
 gateway = "the request body is not the XML this operation accepts"
 s3s = "This happens when the user sends malformed XML (XML that doesn't conform to the published XSD) for the configuration. The error message is, \"The XML you provided was not well-formed or did not validate against our published schema.\""
 reason = "The gateway's fixed sentence for a request document it cannot read; s3s answers with the AWS MalformedXML description."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0009"
 
 [[diff]]
@@ -323,7 +323,7 @@ operation = "*"
 item = "error.message"
 gateway = "x-amz-copy-source must name a key as well as a bucket"
 reason = "The gateway names what the copy source lacks; s3s echoes the header value."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0009"
 
 [[diff]]
@@ -333,7 +333,7 @@ operation = "*"
 item = "error.message"
 gateway = "the bucket named by x-amz-copy-source is not a valid bucket name"
 reason = "The gateway names which part of the copy source it refused; s3s echoes the header value."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0009"
 
 [[diff]]
@@ -344,7 +344,7 @@ item = "error.message"
 gateway = "This request does not name any S3 operation. If clients address buckets as virtual hosts, check that the gateway has been configured with the domain it serves; otherwise the method, path or query is not one this service defines."
 s3s = "Unknown operation"
 reason = "Both answer a request that names no operation with the same status and code; the gateway's sentence carries the virtual-host hint."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0009"
 
 [[diff]]
@@ -355,7 +355,7 @@ item = "error.message"
 gateway = "This operation is defined by S3 but is not handled by this backend."
 s3s = "* is not implemented yet"
 reason = "A harness fact, not a stack difference: the diff registers handlers only for the operations it compares member by member, so both stacks answer any other operation with their own not-implemented sentence. Its route is still compared."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0082"
@@ -378,7 +378,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
 s3s = "handled"
 reason = "The gateway refuses an x-amz-sdk-checksum-algorithm whose x-amz-checksum-* header is missing, because the request then claims an integrity check it does not carry; s3s hands the algorithm name to RustFS and checks nothing."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0031"
@@ -388,7 +388,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
 s3s = "handled"
 reason = "The gateway refuses an x-amz-sdk-checksum-algorithm whose x-amz-checksum-* header is missing, because the request then claims an integrity check it does not carry; s3s hands the algorithm name to RustFS and checks nothing."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0032"
@@ -398,7 +398,7 @@ item = "UploadPartInput.checksum_algorithm"
 gateway = "\"*\""
 s3s = "<unset>"
 reason = "As kd-decode-0001 for PutObject: the gateway reads x-amz-sdk-checksum-algorithm, the header the model binds, and the pinned s3s reads x-amz-checksum-algorithm."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0002"
 
 [[diff]]
@@ -409,7 +409,7 @@ item = "DeleteObjectsInput.checksum_algorithm"
 gateway = "\"*\""
 s3s = "<unset>"
 reason = "As kd-decode-0001: the gateway reads x-amz-sdk-checksum-algorithm, the header the model binds, and the pinned s3s reads x-amz-checksum-algorithm."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0002"
 
 [[diff]]
@@ -420,7 +420,7 @@ item = "PutBucketVersioningInput.checksum_algorithm"
 gateway = "\"*\""
 s3s = "<unset>"
 reason = "As kd-decode-0001: the gateway reads x-amz-sdk-checksum-algorithm, the header the model binds, and the pinned s3s reads x-amz-checksum-algorithm."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0002"
 
 [[diff]]
@@ -431,7 +431,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
 s3s = "handled"
 reason = "As kd-decode-0030 for a part upload: a named algorithm with no checksum header claims an integrity check the request does not carry."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0036"
@@ -441,7 +441,7 @@ item = "outcome"
 gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
 s3s = "handled"
 reason = "As kd-decode-0030 for a single PUT: a named algorithm with no checksum header claims an integrity check the request does not carry."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 # ── Decode: members only one model carries ─────────────────────────────────────────────────
 
@@ -453,7 +453,7 @@ item = "PutObjectInput.object_lock_event_hold*"
 gateway = "\"*\""
 s3s = "<no member>"
 reason = "The Object Lock event-hold members of the 2026-09-17 model exist in no pinned s3s input and RustFS stores no event hold; the migration seam refuses an input naming one rather than dropping the hold."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0009"
 
 [[diff]]
@@ -464,7 +464,7 @@ item = "CopyObjectInput.object_lock_event_hold*"
 gateway = "\"*\""
 s3s = "<no member>"
 reason = "As kd-decode-0037 for a copy: no pinned s3s input carries an event hold, and RustFS stores none."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0009"
 
 [[diff]]
@@ -475,7 +475,7 @@ item = "CreateMultipartUploadInput.object_lock_event_hold*"
 gateway = "\"*\""
 s3s = "<no member>"
 reason = "As kd-decode-0037 for a multipart upload: no pinned s3s input carries an event hold, and RustFS stores none."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0009"
 
 [[diff]]
@@ -485,7 +485,7 @@ operation = "CopyObject"
 item = "CopyObjectInput.annotation_directive"
 gateway = "<no member>"
 reason = "The pinned s3s reads x-amz-object-annotation-directive into CopyObject; the gateway's CopyObject has no annotation member (object annotations are reserved as their own operations) and RustFS stores no annotations."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0041"
@@ -494,7 +494,7 @@ operation = "CopyObject"
 item = "CopyObjectInput.version_id"
 gateway = "<no member>"
 reason = "As kd-decode-0002 for a copy: MinIO's ?versionId= on the copy target has no member in the gateway's CopyObject."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0007"
 
 [[diff]]
@@ -504,7 +504,7 @@ operation = "CreateMultipartUpload"
 item = "CreateMultipartUploadInput.version_id"
 gateway = "<no member>"
 reason = "As kd-decode-0002 for a multipart upload: MinIO's ?versionId= has no member in the gateway's CreateMultipartUpload."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0007"
 
 [[diff]]
@@ -514,7 +514,7 @@ operation = "DeleteObjects"
 item = "DeleteObjectsInput.delete.objects[*"
 gateway = "<no member>"
 reason = "The gateway moves each key and version into the derived resources before authorization and seals the input; the per-object ETag, LastModifiedTime and Size conditions have no path to its handler. s3s hands them to RustFS, whose multi-delete does not read them today (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/delete.rs). A gateway follow-up before RustFS implements conditional multi-delete."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0047"
@@ -524,7 +524,7 @@ item = "error.code"
 gateway = "InvalidArgument"
 s3s = "MalformedXML"
 reason = "An ObjectIdentifier LastModifiedTime that is not the model's HTTP-date is refused by both stacks: the gateway's codec as a member value it cannot hold, s3s as a document that does not validate."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0048"
@@ -533,7 +533,7 @@ operation = "CreateBucket"
 item = "CreateBucketInput.bucket_namespace"
 gateway = "<no member>"
 reason = "The pinned s3s reads x-amz-bucket-namespace (account-regional namespaces); the gateway's CreateBucket does not bind it, and RustFS has one namespace."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0049"
@@ -542,7 +542,7 @@ operation = "CreateBucket"
 item = "CreateBucketInput.create_bucket_configuration.*"
 gateway = "<no member>"
 reason = "The gateway's CreateBucketConfiguration carries LocationConstraint only; Location and Bucket (directory buckets) and Tags are skipped as unknown elements, where s3s reads them. RustFS creates no directory buckets and applies no creation-time tags today; tags at creation are a gateway follow-up."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-decode-0050"
@@ -551,7 +551,7 @@ operation = "DeleteBucket"
 item = "DeleteBucketInput.force_delete"
 gateway = "<no member>"
 reason = "MinIO's x-minio-force-delete has no member in the gateway's DeleteBucket. RustFS reads the header from the request headers rather than the input (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L1458), and the adapter's request context carries every header, so a forced delete still reaches it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 # ── Decode: a body that ends in an error on one stack ───────────────────────────────────────
 
@@ -562,7 +562,7 @@ operation = "PutObject"
 item = "rest_body"
 gateway = "* then an error"
 reason = "The gateway verifies a Content-MD5 or x-amz-checksum-* digest while the handler reads and fails the body at its end when it does not match; s3s hands every byte to RustFS, which verifies the same digest in its own reader and refuses with BadDigest (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/extract.rs#L1208). Neither stack commits the object."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 # ── Decode: first seen in the corpus, each reproduced by a built-in row ─────────────────────
 
@@ -1229,7 +1229,7 @@ item = 'header x-amz-request-id'
 gateway = '<REQID>'
 s3s = '<absent>'
 reason = "The gateway stamps a request id on every answer (its format is asserted: 16 uppercase hex digits); s3s writes none, and RustFS adds one in a layer in front of s3s. Both matrices run the default identifiers; the RustFS profile's (identify_requests_as_legacy_rustfs, with RustFS's own id handed over) are compared with legacy RustFS in crates/goldens error_parity::identifiers."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0001"
 
 [[diff]]
@@ -1240,7 +1240,7 @@ item = 'header x-amz-id-2'
 gateway = '<HOSTID>'
 s3s = '<absent>'
 reason = "The gateway stamps a host id on every answer (asserted: 32 uppercase hex digits); s3s writes none. Both matrices run the default identifiers; under the RustFS profile (identify_requests_as_legacy_rustfs) the gateway writes no host id either, as legacy RustFS writes none (crates/goldens error_parity::identifiers)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-err-0001"
 
 [[diff]]
@@ -1251,7 +1251,7 @@ item = 'header date'
 gateway = '<DATE>'
 s3s = '<absent>'
 reason = "The gateway stamps Date from its clock abstraction (asserted: an IMF-fixdate); s3s leaves it to the HTTP server, which a RustFS deployment's hyper adds."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0004"
@@ -1261,7 +1261,7 @@ item = 'header server'
 gateway = '<SERVER>'
 s3s = '<absent>'
 reason = "The gateway stamps Server: RustFS (asserted: a product token); s3s writes none."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0005"
@@ -1271,7 +1271,7 @@ item = 'body.prolog'
 gateway = '"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"'
 s3s = '"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"'
 reason = "The gateway ends the XML declaration with a newline, as AWS does; s3s writes the root element straight after it. Both are the same document to an XML reader."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0006"
@@ -1281,7 +1281,7 @@ item = 'body */ETag'
 gateway = '"&quot;*&quot;"'
 s3s = '"\"*\""'
 reason = "The gateway escapes the entity tag's quotes as &quot; in XML text, as AWS does; s3s writes the literal quote. Both read back as the same text."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 
 # ── Encode: element order ───────────────────────────────────────────────────────────────────
@@ -1299,7 +1299,7 @@ item = 'body.order CompleteMultipartUploadResult'
 gateway = 'Location,Bucket,Key,ETag,ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumMD5,ChecksumXXHASH64,ChecksumXXHASH3,ChecksumXXHASH128,ChecksumType'
 s3s = 'Bucket,ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumMD5,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumType,ChecksumXXHASH128,ChecksumXXHASH3,ChecksumXXHASH64,ETag,Key,Location'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0008"
@@ -1309,7 +1309,7 @@ item = 'body.order DeleteResult/Deleted'
 gateway = 'Key,VersionId,DeleteMarker,DeleteMarkerVersionId'
 s3s = 'DeleteMarker,DeleteMarkerVersionId,Key,VersionId'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0009"
@@ -1319,7 +1319,7 @@ item = 'body.order DeleteResult/Error'
 gateway = 'Key,VersionId,Code,Message'
 s3s = 'Code,Key,Message,VersionId'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0010"
@@ -1329,7 +1329,7 @@ item = 'body.order VersioningConfiguration'
 gateway = 'Status,MfaDelete'
 s3s = 'MfaDelete,Status'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0011"
@@ -1339,7 +1339,7 @@ item = 'body.order ListAllMyBucketsResult'
 gateway = 'Owner,Buckets,ContinuationToken,Prefix'
 s3s = 'Buckets,ContinuationToken,Owner,Prefix'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0012"
@@ -1349,7 +1349,7 @@ item = 'body.order ListAllMyBucketsResult/Buckets/Bucket'
 gateway = 'Name,CreationDate,BucketRegion,BucketArn'
 s3s = 'BucketArn,BucketRegion,CreationDate,Name'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0013"
@@ -1359,7 +1359,7 @@ item = 'body.order ListAllMyBucketsResult/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0014"
@@ -1369,7 +1369,7 @@ item = 'body.order ListMultipartUploadsResult'
 gateway = 'Bucket,KeyMarker,UploadIdMarker,NextKeyMarker,Prefix,Delimiter,NextUploadIdMarker,MaxUploads,IsTruncated,Upload,CommonPrefixes,EncodingType'
 s3s = 'Bucket,CommonPrefixes,Delimiter,EncodingType,IsTruncated,KeyMarker,MaxUploads,NextKeyMarker,NextUploadIdMarker,Prefix,UploadIdMarker,Upload'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0015"
@@ -1379,7 +1379,7 @@ item = 'body.order ListMultipartUploadsResult/Upload'
 gateway = 'UploadId,Key,Initiated,StorageClass,Owner,Initiator,ChecksumAlgorithm,ChecksumType'
 s3s = 'ChecksumAlgorithm,ChecksumType,Initiated,Initiator,Key,Owner,StorageClass,UploadId'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0016"
@@ -1389,7 +1389,7 @@ item = 'body.order ListMultipartUploadsResult/Upload/Initiator'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0017"
@@ -1399,7 +1399,7 @@ item = 'body.order ListMultipartUploadsResult/Upload/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0018"
@@ -1409,7 +1409,7 @@ item = 'body.order ListVersionsResult'
 gateway = 'Name,Prefix,KeyMarker,VersionIdMarker,NextKeyMarker,NextVersionIdMarker,MaxKeys,Delimiter,IsTruncated,Version,DeleteMarker,CommonPrefixes,EncodingType'
 s3s = 'CommonPrefixes,DeleteMarker,Delimiter,EncodingType,IsTruncated,KeyMarker,MaxKeys,Name,NextKeyMarker,NextVersionIdMarker,Prefix,VersionIdMarker,Version'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0019"
@@ -1419,7 +1419,7 @@ item = 'body.order ListVersionsResult/DeleteMarker'
 gateway = 'Key,VersionId,IsLatest,LastModified,Owner'
 s3s = 'IsLatest,Key,LastModified,Owner,VersionId'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0020"
@@ -1429,7 +1429,7 @@ item = 'body.order ListVersionsResult/DeleteMarker/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0021"
@@ -1439,7 +1439,7 @@ item = 'body.order ListVersionsResult/Version'
 gateway = 'Key,VersionId,IsLatest,LastModified,ETag,ChecksumAlgorithm,ChecksumType,Size,StorageClass,Owner,RestoreStatus'
 s3s = 'ChecksumAlgorithm,ChecksumType,ETag,IsLatest,Key,LastModified,Owner,RestoreStatus,Size,StorageClass,VersionId'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0022"
@@ -1449,7 +1449,7 @@ item = 'body.order ListVersionsResult/Version/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0023"
@@ -1459,7 +1459,7 @@ item = 'body.order ListBucketResult'
 gateway = 'Name,Prefix,Marker,NextMarker,MaxKeys,Delimiter,IsTruncated,Contents,CommonPrefixes,EncodingType'
 s3s = 'Name,Prefix,Marker,MaxKeys,IsTruncated,Contents,CommonPrefixes,Delimiter,NextMarker,EncodingType'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0024"
@@ -1469,7 +1469,7 @@ item = 'body.order ListBucketResult/Contents*'
 gateway = 'Key,LastModified,ETag,ChecksumAlgorithm,ChecksumType,Size,StorageClass,Owner,RestoreStatus'
 s3s = 'ChecksumAlgorithm,ChecksumType,ETag,Key,LastModified,Owner,RestoreStatus,Size,StorageClass'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0025"
@@ -1479,7 +1479,7 @@ item = 'body.order ListBucketResult/Contents*/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0026"
@@ -1489,7 +1489,7 @@ item = 'body.order ListBucketResult'
 gateway = 'Name,Prefix,KeyCount,MaxKeys,Delimiter,IsTruncated,Contents,CommonPrefixes,EncodingType,ContinuationToken,NextContinuationToken,StartAfter'
 s3s = 'Name,Prefix,MaxKeys,KeyCount,ContinuationToken,IsTruncated,NextContinuationToken,Contents,CommonPrefixes,Delimiter,StartAfter,EncodingType'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0027"
@@ -1499,7 +1499,7 @@ item = 'body.order ListBucketResult/Contents*'
 gateway = 'Key,LastModified,ETag,ChecksumAlgorithm,ChecksumType,Size,StorageClass,Owner,RestoreStatus'
 s3s = 'ChecksumAlgorithm,ChecksumType,ETag,Key,LastModified,Owner,RestoreStatus,Size,StorageClass'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0028"
@@ -1509,7 +1509,7 @@ item = 'body.order ListBucketResult/Contents*/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0029"
@@ -1519,7 +1519,7 @@ item = 'body.order ListPartsResult'
 gateway = 'Bucket,Key,UploadId,PartNumberMarker,NextPartNumberMarker,MaxParts,IsTruncated,Part,Initiator,Owner,StorageClass,ChecksumAlgorithm,ChecksumType'
 s3s = 'Bucket,ChecksumAlgorithm,ChecksumType,Initiator,IsTruncated,Key,MaxParts,NextPartNumberMarker,Owner,PartNumberMarker,Part,StorageClass,UploadId'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0030"
@@ -1529,7 +1529,7 @@ item = 'body.order ListPartsResult/Initiator'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0031"
@@ -1539,7 +1539,7 @@ item = 'body.order ListPartsResult/Owner'
 gateway = 'ID,DisplayName'
 s3s = 'DisplayName,ID'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0032"
@@ -1549,7 +1549,7 @@ item = 'body.order ListPartsResult/Part'
 gateway = 'PartNumber,LastModified,ETag,Size,ChecksumCRC32'
 s3s = 'ChecksumCRC32,ETag,LastModified,PartNumber,Size'
 reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 
 # ── Encode: other answers written differently ───────────────────────────────────────────────
@@ -1562,7 +1562,7 @@ item = 'body CopyObjectResult'
 gateway = '<CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
 s3s = '<CopyObjectResult>'
 reason = "The gateway writes the S3 namespace on the CopyObjectResult root, as every other S3 document and AWS's own answer carry it; s3s omits it on this one."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0034"
@@ -1572,7 +1572,7 @@ item = 'header content-type'
 gateway = 'binary/octet-stream'
 s3s = '<absent>'
 reason = "With no stored content type the gateway writes the S3 default, binary/octet-stream (q-content-0008); s3s writes no Content-Type. RustFS stores a type for every object, so its outputs rarely leave it unset."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0001"
 
 [[diff]]
@@ -1583,7 +1583,7 @@ item = 'header content-type'
 gateway = 'binary/octet-stream'
 s3s = '<absent>'
 reason = "As for GetObject: the gateway writes the S3 default content type when the output has none; s3s writes nothing."
-expires = "2026-12-31"
+expires = "2027-06-30"
 ruling = "rd-put-0001"
 
 [[diff]]
@@ -1594,7 +1594,7 @@ item = 'status'
 gateway = '200'
 s3s = '206'
 reason = "s3s answers 206 whenever the output carries a Content-Range; the gateway takes the status from the handler's response, so the RustFS adapter must answer a ranged read with the partial status itself (rustfs/backlog#1752)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0037"
@@ -1604,7 +1604,7 @@ item = 'body ListBucketResult/Delimiter'
 gateway = '"%252F"'
 s3s = '"%2F"'
 reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0038"
@@ -1614,7 +1614,7 @@ item = 'body ListBucketResult/Contents/Key'
 gateway = '"a%2520b"'
 s3s = '"a%20b"'
 reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0039"
@@ -1624,7 +1624,7 @@ item = 'body ListBucketResult/Delimiter'
 gateway = '"%252F"'
 s3s = '"%2F"'
 reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0040"
@@ -1634,7 +1634,7 @@ item = 'body ListVersionsResult/Delimiter'
 gateway = '"%252F"'
 s3s = '"%2F"'
 reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0041"
@@ -1644,7 +1644,7 @@ item = 'body ListMultipartUploadsResult/Delimiter'
 gateway = '"%252F"'
 s3s = '"%2F"'
 reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 
 # ── Encode: s3s output members the gateway output cannot hold ───────────────────────────────
@@ -1656,7 +1656,7 @@ operation = "UploadPart"
 item = 'unconvertible checksum_spec'
 gateway = '<cannot hold>'
 reason = "The gateway output carries one checksum; an s3s output with two is refused rather than one silently dropped. RustFS answers a part upload with at most the one checksum the client named."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0044"
@@ -1665,7 +1665,7 @@ operation = "CompleteMultipartUpload"
 item = 'unconvertible future'
 gateway = '<cannot hold>'
 reason = "s3s lets a handler defer a completion behind a future; the gateway output is written once. RustFS does not set it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0045"
@@ -1674,7 +1674,7 @@ operation = "CreateBucket"
 item = 'unconvertible bucket_arn'
 gateway = '<cannot hold>'
 reason = "The gateway CreateBucketOutput has no BucketArn (directory and table buckets); RustFS does not set it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0046"
@@ -1683,7 +1683,7 @@ operation = "HeadBucket"
 item = 'unconvertible access_point_alias'
 gateway = '<cannot hold>'
 reason = "The gateway HeadBucketOutput carries the region only; the s3s access-point-alias member is refused while set. RustFS does not set it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0048"
@@ -1692,7 +1692,7 @@ operation = "HeadBucket"
 item = 'unconvertible bucket_arn'
 gateway = '<cannot hold>'
 reason = "As kd-encode-0046: the gateway HeadBucketOutput has no BucketArn; RustFS does not set it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0049"
@@ -1701,7 +1701,7 @@ operation = "HeadBucket"
 item = 'unconvertible bucket_location_name'
 gateway = '<cannot hold>'
 reason = "As kd-encode-0046: the gateway HeadBucketOutput has no directory-bucket location name; RustFS does not set it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0050"
@@ -1710,7 +1710,7 @@ operation = "HeadBucket"
 item = 'unconvertible bucket_location_type'
 gateway = '<cannot hold>'
 reason = "As kd-encode-0046: the gateway HeadBucketOutput has no directory-bucket location type; RustFS does not set it."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 # ── Encode: a listing member with a control character, found by the encode_diff fuzz target ──
 
@@ -1815,7 +1815,7 @@ item = 'body.order CopyObjectResult'
 gateway = 'ETag,LastModified,ChecksumCRC32'
 s3s = 'ChecksumCRC32,ETag,LastModified'
 reason = "A copy result with one checksum: the gateway writes the S3 model's member order; s3s writes its own declaration order. The members and their values agree (rd-copy-0001)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0063"
@@ -1825,7 +1825,7 @@ item = 'body.order CopyObjectResult'
 gateway = 'ETag,LastModified,ChecksumType'
 s3s = 'ChecksumType,ETag,LastModified'
 reason = "A copy result with the checksum type: the gateway writes the S3 model's member order; s3s writes its own declaration order. The members and their values agree (rd-copy-0001)."
-expires = "2026-12-31"
+expires = "2027-06-30"
 
 [[diff]]
 id = "kd-encode-0064"
@@ -1835,4 +1835,4 @@ item = 'body.order CopyObjectResult'
 gateway = 'ETag,LastModified,ChecksumType,ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumMD5,ChecksumXXHASH64,ChecksumXXHASH3,ChecksumXXHASH128'
 s3s = 'ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumMD5,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumType,ChecksumXXHASH128,ChecksumXXHASH3,ChecksumXXHASH64,ETag,LastModified'
 reason = "A copy result with every checksum and the type: the gateway writes the S3 model's member order; s3s writes its own declaration order. The members and their values agree (rd-copy-0001)."
-expires = "2026-12-31"
+expires = "2027-06-30"
