@@ -760,3 +760,5 @@ mod legacy_paths;
 
 mod fixed_clock_tests;
 mod object_lock_tests;
+/// Server-side `5xx` diagnostic observer wired into the served assembly (rustfs/gateway#1083).
+mod server_error_logging_tests;

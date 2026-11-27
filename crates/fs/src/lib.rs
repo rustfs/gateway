@@ -28,8 +28,8 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
@@ -174,6 +174,8 @@ mod registry;
 mod root_lock;
 mod rustfs_parity;
 mod staging;
+#[cfg(test)]
+mod storage_error_tests;
 mod tagging;
 mod transitions;
 mod upload_part;
@@ -373,20 +375,20 @@ impl FsBackend {
         upload.join(PARTS_DIR).join(format!("p-{part_number:05}"))
     }
 
-    async fn require_directory(&self, path: &Path, missing: HandlerError) -> Result<(), HandlerError> {
+    async fn require_directory(&self, path: &Path, missing: impl FnOnce() -> HandlerError) -> Result<(), HandlerError> {
         match tokio::fs::symlink_metadata(path).await {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
             Ok(_) => Err(HandlerError::new(ErrorCode::INVALID_REQUEST, "the storage path is not a safe directory")),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Err(missing),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Err(missing()),
             Err(_) => Err(storage_error()),
         }
     }
 
     async fn require_bucket(&self, bucket: &str) -> Result<(), HandlerError> {
-        self.require_directory(&self.bucket_path(bucket), no_such_bucket()).await?;
-        self.require_directory(&self.objects_path(bucket), storage_error()).await?;
-        self.require_directory(&self.uploads_path(bucket), storage_error()).await?;
-        self.require_directory(&self.versions_path(bucket), storage_error()).await
+        self.require_directory(&self.bucket_path(bucket), no_such_bucket).await?;
+        self.require_directory(&self.objects_path(bucket), || storage_error()).await?;
+        self.require_directory(&self.uploads_path(bucket), || storage_error()).await?;
+        self.require_directory(&self.versions_path(bucket), || storage_error()).await
     }
 
     /// The plain object file and its metadata, or `None` when the key holds no object. Absence is a
@@ -413,7 +415,7 @@ impl FsBackend {
     }
 
     async fn write_atomic(&self, directory: &Path, destination: &Path, bytes: &[u8]) -> Result<(), HandlerError> {
-        self.require_directory(directory, storage_error()).await?;
+        self.require_directory(directory, || storage_error()).await?;
         let temporary = directory.join(format!(".tmp-{}-{}", std::process::id(), staging::next_temporary_id()));
         let std_file = std::fs::OpenOptions::new()
             .write(true)
@@ -434,7 +436,7 @@ impl FsBackend {
     }
 
     async fn directory_is_empty(&self, path: &Path) -> Result<bool, HandlerError> {
-        self.require_directory(path, storage_error()).await?;
+        self.require_directory(path, || storage_error()).await?;
         let mut entries = tokio::fs::read_dir(path).await.map_err(|_| storage_error())?;
         Ok(entries.next_entry().await.map_err(|_| storage_error())?.is_none())
     }
@@ -453,7 +455,7 @@ impl FsBackend {
 
     async fn list_part_numbers(&self, upload: &Path) -> Result<Vec<i32>, HandlerError> {
         let parts = upload.join(PARTS_DIR);
-        self.require_directory(&parts, no_such_upload()).await?;
+        self.require_directory(&parts, no_such_upload).await?;
         let mut entries = tokio::fs::read_dir(parts).await.map_err(|_| storage_error())?;
         let mut numbers = Vec::new();
         while let Some(entry) = entries.next_entry().await.map_err(|_| storage_error())? {
@@ -476,7 +478,27 @@ impl FsBackend {
     }
 }
 
+static STORAGE_ERROR_OBSERVER: OnceLock<fn(&'static core::panic::Location<'static>)> = OnceLock::new();
+
+/// Registers a process-wide observer called whenever the reference backend constructs an internal
+/// storage error, reporting only the static caller source location (`file` and `line`).
+///
+/// The observer never receives bucket names, object keys, filesystem paths, or request bytes.
+/// Returns `true` when installed, or `false` if an observer was already registered.
+pub fn set_storage_error_observer(observer: fn(&'static core::panic::Location<'static>)) -> bool {
+    STORAGE_ERROR_OBSERVER.set(observer).is_ok()
+}
+
+#[track_caller]
 fn storage_error() -> HandlerError {
+    storage_error_with(STORAGE_ERROR_OBSERVER.get().copied())
+}
+
+#[track_caller]
+fn storage_error_with(observer: Option<fn(&'static core::panic::Location<'static>)>) -> HandlerError {
+    if let Some(observer) = observer {
+        observer(core::panic::Location::caller());
+    }
     HandlerError::internal_error("the filesystem reference backend could not complete the storage operation")
 }
 

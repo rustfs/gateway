@@ -166,7 +166,7 @@ for key, value, delimiter in (
         record=True, stale_proposal=True, after=late_delimiter_preserved)
 ''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("OK: 119 mint report probes;", result.stdout)
+        self.assertIn("OK: 124 mint report probes;", result.stdout)
 
     def test_noninteger_system_exit_matches_python(self):
         run = self.runner()
@@ -233,7 +233,7 @@ finally:
     def test_complete_census_uses_bounded_judge_subprocesses(self):
         result, commands = exercise()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("OK: 117 mint report probes;", result.stdout)
+        self.assertIn("OK: 122 mint report probes;", result.stdout)
         judges = [cmd for cmd in commands if len(cmd) > 2 and cmd[2] == "judge"]
         self.assertEqual(len(judges), 4, "all four CLI exit classes need one boundary control; remaining judges must reuse the interpreter")
         self.assertEqual(sum(len(cmd) > 2 and cmd[2] == "redact" for cmd in commands), 1)
@@ -326,6 +326,85 @@ class MintFailureClassTests(unittest.TestCase):
                       f"<Code>{longest_code}x</Code>", f"An error occurred ({longest_code}x) when calling"):
             with self.subTest(error=error[:40]):
                 self.assertEqual(self.classified(error), "-/-/-")
+
+
+class MintServerErrorDiagnosticsTests(unittest.TestCase):
+    """Runner-local `compat-sut` 5xx diagnostics extracted strictly through a closed-vocabulary
+    grammar without carrying request identifiers, host paths, or secrets (rustfs/gateway#1083)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report = runpy.run_path(str(ROOT / "ci/mint/report.py"))
+
+    def extract(self, text):
+        fn = self.report.get("extract_server_errors")
+        self.assertIsNotNone(fn, "ci/mint/report.py defines no extract_server_errors")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "compat-sut.log"
+            path.write_text(text, encoding="utf-8")
+            return fn(path)
+
+    def test_n_unstructured_secrets_and_request_ids_never_appear(self):
+        secret = "SUPERSECRET-TOKEN-1083"
+        req_id = "11111111-2222-4333-8444-555555555555"
+        lines = "\n".join([
+            f"ERROR compat_sut: unexpected crash {secret}",
+            f"WARN rustfs_gateway: Authorization: AWS4-HMAC-SHA256 Signature={secret}",
+            f"ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id={req_id}",
+            f"ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id={req_id} extra={secret}",
+        ])
+        entries = self.extract(lines)
+        self.assertEqual(entries, ["PUT PutObject 500/InternalError"])
+        for entry in entries:
+            self.assertNotIn(secret, entry)
+            self.assertNotIn(req_id, entry)
+
+    def test_n_host_paths_traversal_and_non_5xx_are_rejected(self):
+        lines = "\n".join([
+            "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=/home/runner/crates/fs/src/lib.rs line=10",
+            "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src/../secrets.rs line=10",
+            "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src//lib.rs line=10",
+            "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=HACK operation=PutObject status=500 code=InternalError deadline=none request_id=r1",
+            "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=403 code=AccessDenied deadline=none request_id=r2",
+            "ERROR rustfs_gateway: bearer_verifier panicked; the request was answered 403 event=gateway_extension_panicked component=gateway subsystem=extension result=contained extension=bearer_verifier request_id=r3 operation=GetObject suppressed=0",
+        ])
+        self.assertEqual(self.extract(lines), [])
+
+    def test_n_missing_sut_log_raises_environment_error(self):
+        fn = self.report.get("extract_server_errors")
+        self.assertIsNotNone(fn, "ci/mint/report.py defines no extract_server_errors")
+        report_error = self.report["ReportError"]
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "does-not-exist.log"
+            with self.assertRaises(report_error) as ctx:
+                fn(missing)
+            self.assertEqual(ctx.exception.code, self.report["EXIT_ENVIRONMENT"])
+
+    def test_n_entries_are_capped_at_server_errors_limit(self):
+        limit = self.report["SERVER_ERRORS_LIMIT"]
+        lines = "\n".join(
+            f"ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src/lib.rs line={i}"
+            for i in range(1, limit + 15)
+        )
+        entries = self.extract(lines)
+        self.assertEqual(len(entries), limit)
+        self.assertEqual(entries[0], "fs_storage_error crates/fs/src/lib.rs:1")
+        self.assertEqual(entries[-1], f"fs_storage_error crates/fs/src/lib.rs:{limit}")
+
+    def test_a_deduplicates_preserving_order_and_formats_all_three_event_shapes(self):
+        lines = "\n".join([
+            "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src/versioning/publish.rs line=216",
+            "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id=a",
+            "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src/versioning/publish.rs line=216",
+            "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=acknowledged request_id=b",
+            "ERROR rustfs_gateway: authorizer panicked; the request was answered 500 event=gateway_extension_panicked component=gateway subsystem=extension result=contained extension=authorizer request_id=c operation=CreateBucket suppressed=2",
+        ])
+        self.assertEqual(self.extract(lines), [
+            "fs_storage_error crates/fs/src/versioning/publish.rs:216 (x2)",
+            "PUT PutObject 500/InternalError",
+            "PUT PutObject 500/InternalError deadline=acknowledged",
+            "extension_panicked authorizer CreateBucket",
+        ])
 
 
 if __name__ == "__main__":

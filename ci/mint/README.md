@@ -56,3 +56,10 @@ the S3 error code where the text puts one in a defined place; each is `-` where 
 none. Nothing else of the text is carried. The class says which failure it was and not where in
 the test it happened; a failure that stays `-/-/-` is one the grammar cannot read, and the answer
 is a wider grammar, never a wider baseline.
+
+The runner also passes the local `compat-sut` stderr log to `ci/mint/report.py judge --sut-log`
+after redaction. Only closed-vocabulary `ERROR` lines for unexpected `5xx` responses, internal
+`rustfs-gateway-fs` `storage_error` call sites (`crates/fs/src/<file>:<line>`), and contained
+`500` extension panics are summarised into `report.json` (`server_errors`) and, when non-empty,
+`summary.md` (`### Server 5xx diagnostics`). Request identifiers, secrets, host prefixes, and all
+other log lines stay on the runner (rustfs/gateway#1083).

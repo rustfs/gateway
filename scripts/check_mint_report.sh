@@ -41,6 +41,11 @@ set -euo pipefail
 #                   the secret leave the evidence files, and the aggregate
 #                   report carries a record's `error` only as the class
 #                   `<exception>/<status>/<code>` drawn from it, never its text
+#     server 5xx    when `--sut-log` is given, only closed-vocabulary 5xx
+#                   summaries leave the runner (`server_errors` in JSON and
+#                   `### Server 5xx diagnostics` in Markdown when non-empty);
+#                   free text, secrets, request ids, host paths, and non-5xx
+#                   lines never appear, and a missing explicit log exits 3
 #
 # WHY THIS IS A GUARD AND NOT A UNIT TEST
 #   The zombie failure mode for an external suite is that the judgement
@@ -193,6 +198,7 @@ def probe(
     also_progress: bool = False,
     redact: bool = False,
     extra_args: list[str] | None = None,
+    sut_log: str | None = None,
 ) -> None:
     global probes
     probes += 1
@@ -235,10 +241,18 @@ def probe(
             command += ["--pass", " ".join(pass_sdks), str(pass_path)]
         if record or record_at_baseline:
             command += ["--record", str(proposal)]
+        sut_log_path = None
+        if sut_log is not None:
+            sut_log_path = work / "compat-sut.log"
+            sut_log_path.write_text(sut_log, encoding="utf-8")
+            command += ["--sut-log", str(sut_log_path)]
         command += extra_args or []
         if redact:
+            redact_targets = [str(log_dir), str(progress_path)]
+            if sut_log_path is not None:
+                redact_targets.append(str(sut_log_path))
             redaction = run_report([sys.executable, report, "redact", "--secret-env", "MINT_JSON_REDACTION_PROBE",
-                                   str(log_dir), str(progress_path)])
+                                   *redact_targets])
             if redaction.returncode:
                 failures.append(f"{label}: redaction exited {redaction.returncode}")
                 return
@@ -874,6 +888,60 @@ probe("an external endpoint is judged against the same baseline, and regresses o
 probe("an endpoint build without an external SUT is a usage error", 2,
       ["--endpoint-build describes an external endpoint"], extra_args=["--endpoint-build", "RustFS"])
 probe("an unknown SUT is a usage error", 2, ["invalid choice: 'rustfs'"], extra_args=["--sut", "rustfs"])
+
+# --- server-side 5xx diagnostics (rustfs/gateway#1083) ------------------------------------
+def server_errors_are(expected: list[str]):
+    def check(work: Path, _proposal: Path) -> str | None:
+        try:
+            found = json.loads((work / "report.json").read_text(encoding="utf-8")).get("server_errors")
+        except (OSError, ValueError) as error:
+            return f"report.json is unreadable: {error}"
+        return None if found == expected else f"server_errors is {found!r}, expected {expected!r}"
+    return check
+
+
+sut_5xx_sample = "\n".join([
+    "INFO rustfs_gateway: SECURITY_POSTURE anonymous_reachable_ops=[]",
+    "WARN rustfs_gateway: request refused by authentication event=gateway_request_refused status=403 code=AccessDenied",
+    "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src/put_object.rs line=142",
+    "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id=7f2a1c9e-4b3d-4a60-9000-000000000001",
+    "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id=7f2a1c9e-4b3d-4a60-9000-000000000002",
+    "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=GET operation=GetObject status=503 code=ServiceUnavailable deadline=unacknowledged request_id=7f2a1c9e-4b3d-4a60-9000-000000000003",
+    "ERROR rustfs_gateway: handler panicked; the request was answered 500 event=gateway_extension_panicked component=gateway subsystem=extension result=contained extension=handler request_id=7f2a1c9e-4b3d-4a60-9000-000000000004 operation=PutObject suppressed=0",
+    f"ERROR compat_sut: free text {UNIQUE_ERROR} Authorization: AWS4-HMAC-SHA256 Signature={SECRET}",
+    f"ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id=req-5 trailing={UNIQUE_ERROR}",
+    "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=/etc/passwd line=1",
+])
+probe("server 5xx diagnostics summarize closed-vocabulary events and exclude free text and request ids", 0,
+      ["### Server 5xx diagnostics", "fs_storage_error crates/fs/src/put_object.rs:142",
+       "PUT PutObject 500/InternalError (x2)",
+       "GET GetObject 503/ServiceUnavailable deadline=unacknowledged",
+       "extension_panicked handler PutObject"],
+      [UNIQUE_ERROR, SECRET, "7f2a1c9e-4b3d-4a60", "/etc/passwd", "SECURITY_POSTURE", "AccessDenied"],
+      sut_log=sut_5xx_sample,
+      after=server_errors_are([
+          "fs_storage_error crates/fs/src/put_object.rs:142",
+          "PUT PutObject 500/InternalError (x2)",
+          "GET GetObject 503/ServiceUnavailable deadline=unacknowledged",
+          "extension_panicked handler PutObject",
+      ]))
+probe("a SUT log without 5xx events omits the server diagnostics section", 0,
+      ['"server_errors": []'], ["### Server 5xx diagnostics"],
+      sut_log="INFO rustfs_gateway: SECURITY_POSTURE\nWARN rustfs_gateway: refused status=403\n",
+      after=server_errors_are([]))
+probe("omitting --sut-log records empty server_errors and omits the diagnostics section", 0,
+      ['"server_errors": []'], ["### Server 5xx diagnostics"],
+      after=server_errors_are([]))
+probe("non-5xx statuses or 403 panics in the SUT log are never reported as server 5xx diagnostics", 0,
+      ['"server_errors": []'], ["### Server 5xx diagnostics", "403", "400", "bearer_verifier"],
+      sut_log="\n".join([
+          "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=400 code=InvalidArgument deadline=none request_id=req-400",
+          "ERROR rustfs_gateway: bearer_verifier panicked; the request was answered 403 event=gateway_extension_panicked component=gateway subsystem=extension result=contained extension=bearer_verifier request_id=req-403 operation=GetObject suppressed=0",
+      ]),
+      after=server_errors_are([]))
+probe("an explicit --sut-log that does not exist exits 3", 3,
+      ["cannot read the SUT log"],
+      extra_args=["--sut-log", "/nonexistent-gateway-sut-log-1083.log"])
 
 if failures:
     for failure in failures:

@@ -210,7 +210,10 @@ pub(crate) fn build_service(
         })
         // No host stands in front of this launcher to hand its identifier over, so the
         // identifier is minted in RustFS's shape (ruling R10).
-        .trace_source(MintedTraces::with_uuid_request_ids());
+        .trace_source(MintedTraces::with_uuid_request_ids())
+        // Record unexpected 5xx answers with closed-vocabulary metadata so runner-local logs can
+        // attribute intermittent failures without logging request bytes (rustfs/gateway#1083).
+        .observer(crate::logging::ServerErrorObserver);
     let assembly = match options.fixed_time {
         Some(seconds) => assembly.clock_with_skew_ack(
             FixedClock::at_unix_seconds(seconds),

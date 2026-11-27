@@ -15349,6 +15349,29 @@ mut_mint_report_class_ignores_go_code() {
 expect_fail check_mint_report.sh 'a mint failure class that no longer reads the S3 error code' \
     mut_mint_report_class_ignores_go_code "a FAIL row carries the class of its record's error"
 
+# Server-side 5xx diagnostics (rustfs/gateway#1083): closed-vocabulary only, never raw log text,
+# and a missing explicit --sut-log must fail with exit 3 rather than silently producing [].
+mut_mint_report_drops_server_errors() {
+    mint_mutate "$MINT_REPORT" '    server_errors = extract_server_errors(Path(args.sut_log)) if args.sut_log else []' \
+        '    server_errors = []'
+}
+expect_fail check_mint_report.sh 'mint report silently dropping server 5xx diagnostics from --sut-log' \
+    mut_mint_report_drops_server_errors 'server 5xx diagnostics summarize closed-vocabulary events'
+
+mut_mint_report_leaks_sut_log_text() {
+    mint_mutate "$MINT_REPORT" '        if summary is not None:\n            counts[summary] = counts.get(summary, 0) + 1' \
+        '        if summary is None and line:\n            summary = line\n        if summary is not None:\n            counts[summary] = counts.get(summary, 0) + 1'
+}
+expect_fail check_mint_report.sh 'mint report carrying raw compat-sut log lines into the uploaded aggregate' \
+    mut_mint_report_leaks_sut_log_text 'must not appear in the output'
+
+mut_mint_report_ignores_missing_sut_log() {
+    mint_mutate "$MINT_REPORT" '        raise ReportError(\n            f"cannot read the SUT log {path}: {error.__class__.__name__}", EXIT_ENVIRONMENT\n        ) from error' \
+        '        return []'
+}
+expect_fail check_mint_report.sh 'mint report silently skipping a missing explicit --sut-log' \
+    mut_mint_report_ignores_missing_sut_log 'an explicit --sut-log that does not exist exits 3'
+
 # Excluded SDKs (rustfs/backlog#1764, generation 1): run and reported, never judged, and never
 # a place for a counted SDK's records to disappear into.
 mut_mint_report_ignores_exclusions() {

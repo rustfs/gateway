@@ -77,6 +77,16 @@ status a service answered, without any of the text leaving the runner. The class
 failure it was, not where in the test it happened, and a failure the grammar cannot read is
 `function:-/-/-`.
 
+# Server 5xx diagnostics
+#
+# When `--sut-log` names the runner-local `compat-sut` stderr log, only lines matching the
+# launcher's three fixed `ERROR` grammars are summarised into `server_errors` in `report.json`
+# and (when non-empty) a `### Server 5xx diagnostics` section in `summary.md`: unexpected 5xx
+# responses (`compat_sut_server_error`), internal `rustfs-gateway-fs` storage-error call sites
+# (`compat_sut_fs_storage_error`), and contained 500 extension panics
+# (`gateway_extension_panicked`). Request identifiers, secrets, host prefixes, and all other
+# lines stay on the runner (rustfs/gateway#1083).
+#
 # Passes
 
 `ci/mint/run.sh` may run the SDKs in more than one container: the SDKs a TLS-only suite needs
@@ -140,6 +150,35 @@ ERROR_CODE = re.compile(
     r"|An error occurred \(([A-Z][A-Za-z0-9.]{0,63})\)"
 )
 UNCLASSIFIED = "-"
+
+# Closed-vocabulary server-side 5xx diagnostics extracted from the runner-local `compat-sut` log
+# (rustfs/gateway#1083). Only exact matches to these three grammars leave the runner; request
+# identifiers, free text, host prefixes, and secrets never match or are dropped before rendering.
+SERVER_ERRORS_LIMIT = 50
+SUT_SERVER_ERROR = re.compile(
+    r"^ERROR compat_sut: server returned 5xx "
+    r"event=compat_sut_server_error "
+    r"method=(GET|HEAD|POST|PUT|DELETE|OPTIONS|PATCH|CONNECT|TRACE|OTHER) "
+    r"operation=([A-Za-z][A-Za-z0-9:_-]{0,63}) "
+    r"status=(5[0-9]{2}) "
+    r"code=([A-Za-z][A-Za-z0-9.-]{0,63}) "
+    r"deadline=(none|acknowledged|unacknowledged)"
+    r"(?: request_id=\S+)?$"
+)
+SUT_FS_STORAGE_ERROR = re.compile(
+    r"^ERROR compat_sut: filesystem backend returned storage_error "
+    r"event=compat_sut_fs_storage_error "
+    r"file=(crates/fs/src/(?!.*//)[a-z0-9_][a-z0-9_/]{0,76}\.rs|unknown) "
+    r"line=([0-9]{1,6})$"
+)
+SUT_EXTENSION_PANICKED = re.compile(
+    r"^ERROR rustfs_gateway: (?:handler|authorizer) panicked; the request was answered 500 "
+    r"event=gateway_extension_panicked component=gateway subsystem=extension result=contained "
+    r"extension=(handler|authorizer) "
+    r"request_id=\S+ "
+    r"operation=([A-Za-z][A-Za-z0-9:_-]{0,63}) "
+    r"suppressed=[0-9]+$"
+)
 
 # Each pattern's first group is kept and everything the rest matches is replaced. Together they
 # cover the places an S3 client or server puts signing material into text: the Authorization
@@ -233,6 +272,46 @@ def classify_error(value: object) -> str:
         match = pattern.search(text)
         slots.append(next(group for group in match.groups() if group) if match else UNCLASSIFIED)
     return "/".join(slots)
+
+
+def extract_server_errors(path: Path) -> list[str]:
+    """Closed-vocabulary 5xx summaries drawn from the runner-local `compat-sut` log.
+
+    Only lines matching the launcher's three fixed `ERROR` grammars are summarised; every
+    other line (warnings, posture, request identifiers, host paths, free text) is ignored.
+    Repeated entries are collapsed in first-seen order with a `(xN)` suffix and capped at
+    SERVER_ERRORS_LIMIT. An explicit missing or unreadable log exits with EXIT_ENVIRONMENT.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        raise ReportError(
+            f"cannot read the SUT log {path}: {error.__class__.__name__}", EXIT_ENVIRONMENT
+        ) from error
+    counts: dict[str, int] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        summary: str | None = None
+        match = SUT_SERVER_ERROR.fullmatch(line)
+        if match is not None:
+            method, operation, status, code, deadline = match.groups()
+            summary = f"{method} {operation} {status}/{code}"
+            if deadline != "none":
+                summary += f" deadline={deadline}"
+        else:
+            match = SUT_FS_STORAGE_ERROR.fullmatch(line)
+            if match is not None:
+                file_path, line_no = match.groups()
+                summary = f"fs_storage_error {file_path}:{line_no}"
+            else:
+                match = SUT_EXTENSION_PANICKED.fullmatch(line)
+                if match is not None:
+                    extension, operation = match.groups()
+                    summary = f"extension_panicked {extension} {operation}"
+        if summary is not None:
+            counts[summary] = counts.get(summary, 0) + 1
+    entries = [f"{item} (x{count})" if count > 1 else item for item, count in counts.items()]
+    return entries[:SERVER_ERRORS_LIMIT]
 
 
 @dataclass
@@ -511,6 +590,7 @@ def render_markdown(
     problems: list[str],
     code: int,
     against: dict | None = None,
+    server_errors: list[str] | None = None,
 ) -> str:
     lines = ["## MinIO mint", ""]
     if image:
@@ -540,6 +620,9 @@ def render_markdown(
             if len(row.tally.failing) > len(shown):
                 lines.append(f"  - and {len(row.tally.failing) - len(shown)} more")
     lines += render_excluded(excluded)
+    if server_errors:
+        lines += ["", "### Server 5xx diagnostics", ""]
+        lines += [f"- `{entry}`" for entry in server_errors]
     return "\n".join(lines) + "\n"
 
 
@@ -604,6 +687,7 @@ def judge(args: argparse.Namespace) -> int:
     if record_path is not None and record_path.resolve() == baseline_path.resolve():
         raise ReportError("record mode writes a proposal; it never overwrites the reviewed baseline", EXIT_USAGE)
     generation, allowed, exclusions = read_baseline(baseline_path)
+    server_errors = extract_server_errors(Path(args.sut_log)) if args.sut_log else []
 
     problems: list[str] = []
     listed = set(allowed) | set(exclusions)
@@ -694,6 +778,8 @@ def judge(args: argparse.Namespace) -> int:
             )
     for problem in problems:
         print(f"mint: INCOMPLETE {problem}")
+    for entry in server_errors:
+        print(f"mint: SERVER-5XX {entry}")
     print(f"mint: {describe_measured(against)}")
     print(
         f"mint: sdks={len(sdks)} measured={len(rows)} "
@@ -709,7 +795,8 @@ def judge(args: argparse.Namespace) -> int:
 
     if args.markdown:
         Path(args.markdown).write_text(
-            render_markdown(args.image, generation, rows, excluded, problems, code, against), encoding="utf-8"
+            render_markdown(args.image, generation, rows, excluded, problems, code, against, server_errors),
+            encoding="utf-8",
         )
     if args.json:
         payload = {
@@ -719,6 +806,7 @@ def judge(args: argparse.Namespace) -> int:
             "exit": code,
             "complete": not problems,
             "incomplete": problems,
+            "server_errors": server_errors,
             "sdks": {
                 row.sdk: {
                     "verdict": row.verdict,
@@ -791,6 +879,10 @@ def main(argv: list[str]) -> int:
     judging.add_argument("--endpoint-build", default="", help="the external endpoint's own Server header")
     judging.add_argument("--markdown")
     judging.add_argument("--json")
+    judging.add_argument(
+        "--sut-log",
+        help="runner-local compat-sut stderr log; closed-vocabulary 5xx events are summarised into the report",
+    )
     judging.add_argument("--record", help="write a proposed baseline here; the reviewed one is never edited")
     try:
         args = parser.parse_args(argv)
