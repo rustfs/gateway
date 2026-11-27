@@ -1195,6 +1195,30 @@ when_queries = ["uploads", "uploadId"]
 reason = "The default overlay explicitly gives completion precedence 420 over initiation at 450 when both selectors occur; the pinned legacy POST selector tries uploads before uploadId. The original nightly artifact, its 28-byte reduction and a valid completion document reproduce this exact operation pair. Both literal query names and both route pins are required; neither runtime router changes (https://github.com/rustfs/gateway/issues/1555)."
 expires = "2027-03-31"
 
+# ── Decode: multipart upload-part and object-ACL overlap (nightly issue #1431) ──
+
+[[diff]]
+id = "kd-decode-0116"
+kind = "decode"
+operation = "UploadPart"
+item = "route"
+gateway = "UploadPart"
+s3s = "PutObjectAcl"
+when_queries = ["partNumber", "uploadId", "acl"]
+reason = "The default route table gives UploadPart precedence 410 over PutObjectAcl at 560 when partNumber, uploadId, and acl occur together on an object PUT, while the pinned s3s PUT selector checks acl before partNumber and uploadId. The original 234-byte nightly artifact, its 34-byte reduction, and a valid part-upload PUT reproduce this exact operation pair. All three literal query names and both route pins are required; neither runtime router changes (https://github.com/rustfs/gateway/issues/1431)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0117"
+kind = "decode"
+operation = "UploadPart"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: PutObjectAcl is not implemented yet"
+when_queries = ["partNumber", "uploadId", "acl"]
+reason = "A valid UploadPart PUT carrying partNumber, uploadId, and acl reaches the default UploadPart handler while the pinned s3s oracle refuses its unimplemented PutObjectAcl operation. Only this exact complete outcome pair under all three literal query names is accepted; malformed partNumber, malformed ACL XML, and other refusals remain unregistered (https://github.com/rustfs/gateway/issues/1431)."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]
