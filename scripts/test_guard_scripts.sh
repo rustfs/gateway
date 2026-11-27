@@ -120,6 +120,14 @@ GUARD_BUDGET_STOP=$((GUARD_BUDGET_SECONDS - GUARD_BUDGET_RESERVE_SECONDS))
 # Say so out loud well before that, so an overrun is visible one pull request
 # early rather than on the pull request that crosses the line.
 GUARD_BUDGET_WARN=$((GUARD_BUDGET_SECONDS * 4 / 5))
+# Time already spent by the group parent (e.g. baseline snapshot preparation) before
+# spawning shard workers, so workers stop relative to the outer stage budget rather
+# than running past `verify --all`'s hard timeout (rustfs/gateway#1619).
+GUARD_BUDGET_ELAPSED="${GATEWAY_GUARD_BUDGET_ELAPSED:-0}"
+if [[ ! "$GUARD_BUDGET_ELAPSED" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    printf 'test_guard_scripts: GATEWAY_GUARD_BUDGET_ELAPSED must be a non-negative integer\n' >&2
+    exit 1
+fi
 
 # Reset SECONDS to measure elapsed time from this point, not from when the
 # parent shell started. Without this, inheriting SECONDS from the environment
@@ -206,13 +214,13 @@ GUARD_SHARD_SUMMARY="${GATEWAY_GUARD_SHARD_SUMMARY:-}"
 GUARD_EXECUTED=0
 
 guard_budget_stop() {
-    local ordinal="$1" where='this run'
+    local ordinal="$1" where='this run' elapsed=$((${GUARD_BUDGET_ELAPSED:-0} + SECONDS))
     [[ -z "$GUARD_SHARD_COUNT" ]] ||
         where="group $((GUARD_SHARD_GROUP + 1))/${GUARD_SHARD_GROUPS} worker $((GUARD_SHARD_INDEX + 1))/${GUARD_SHARD_COUNT}"
     printf '\n' >&2
     printf 'test_guard_scripts: OUT OF TIME — no assertion in this suite failed.\n' >&2
     printf '  %s reached %ss of its %ss budget at case %s and stopped itself.\n' \
-        "$where" "$SECONDS" "$GUARD_BUDGET_SECONDS" "$ordinal" >&2
+        "$where" "$elapsed" "$GUARD_BUDGET_SECONDS" "$ordinal" >&2
     printf '  This is not a defect in the change under test. The suite no longer fits\n' >&2
     printf '  the CI slice it is given, which is a gate failing for a reason having\n' >&2
     printf '  nothing to do with what it checks.\n' >&2
@@ -263,7 +271,7 @@ guard_worker_of() {
 # still counts it, which is what makes the group's coverage proof possible.
 guard_case_owned() {
     local ordinal="$1"
-    if ((SECONDS >= GUARD_BUDGET_STOP)); then
+    if (((${GUARD_BUDGET_ELAPSED:-0} + SECONDS) >= GUARD_BUDGET_STOP)); then
         guard_budget_stop "$ordinal"
     fi
     if [[ -n "$GUARD_SHARD_COUNT" ]]; then
@@ -398,16 +406,24 @@ run_guard_shards() {
     local jobs="$1"
     local workdir index rc status=0 considered="" summary recorded=0
     local total_failures=0 total_executed=0
-    local pids=() codes=()
+    local pids=() codes=() done_flags=()
     local shard_considered shard_executed shard_failures
+    local baseline_elapsed parent_stop remaining_workers progressed last_case recorded_count
     # Snapshot the current tree once, retaining its immutable objects until every worker exits.
     if ! make_sandbox; then
         printf 'cannot prepare the current-tree guard group baseline\n' >&2
         return 1
     fi
+    baseline_elapsed="$SECONDS"
+    if ((baseline_elapsed >= GUARD_BUDGET_STOP)); then
+        printf 'test_guard_scripts: OUT OF TIME — no assertion in this suite failed.\n' >&2
+        printf '  group %s/%s baseline setup reached %ss of its %ss budget before workers started.\n' \
+            "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$baseline_elapsed" "$GUARD_BUDGET_SECONDS" >&2
+        return 2
+    fi
     workdir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-shards.XXXXXX")"
-    printf 'Guard self-test: group %s/%s, %s worker(s), %ss budget\n' \
-        "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$jobs" "$GUARD_BUDGET_SECONDS"
+    printf 'Guard self-test: group %s/%s, %s worker(s), %ss budget (baseline %ss)\n' \
+        "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$jobs" "$GUARD_BUDGET_SECONDS" "$baseline_elapsed"
     for ((index = 0; index < jobs; index++)); do
         mkdir -p "${workdir}/tmp-${index}"
         : >"${workdir}/ledger-${index}"
@@ -420,19 +436,71 @@ run_guard_shards() {
             GATEWAY_GUARD_SHARD_LEDGER="${workdir}/ledger-${index}" \
             GATEWAY_GUARD_SHARD_SUMMARY="${workdir}/summary-${index}" \
             GATEWAY_GUARD_BUDGET_SECONDS="$GUARD_BUDGET_SECONDS" \
+            GATEWAY_GUARD_BUDGET_ELAPSED="$baseline_elapsed" \
             TMPDIR="${workdir}/tmp-${index}" \
             bash "$GUARD_SELF" >"${workdir}/out-${index}" 2>&1 &
         pids[index]=$!
+        done_flags[index]=0
+    done
+    # Flush each completed worker immediately rather than buffering the whole group until the
+    # slowest worker exits, and stop stalled workers before the outer stage timeout sends SIGKILL.
+    parent_stop=$((GUARD_BUDGET_SECONDS - 10))
+    remaining_workers="$jobs"
+    while ((remaining_workers > 0)); do
+        progressed=0
+        for ((index = 0; index < jobs; index++)); do
+            ((done_flags[index] == 0)) || continue
+            if ! kill -0 "${pids[index]}" 2>/dev/null; then
+                rc=0
+                wait "${pids[index]}" || rc=$?
+                codes[index]=$rc
+                done_flags[index]=1
+                remaining_workers=$((remaining_workers - 1))
+                progressed=1
+                printf '\n===== group %s/%s worker %s/%s (exit %s) =====\n' \
+                    "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$((index + 1))" "$jobs" "${codes[index]}"
+                cat "${workdir}/out-${index}"
+            fi
+        done
+        if ((remaining_workers == 0)); then
+            break
+        fi
+        if ((SECONDS >= parent_stop)); then
+            status=1
+            printf '\ntest_guard_scripts: OUT OF TIME — no assertion in this suite failed.\n' >&2
+            printf '  group %s/%s reached %ss of its %ss budget with %s unfinished worker(s):\n' \
+                "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$SECONDS" "$GUARD_BUDGET_SECONDS" "$remaining_workers" >&2
+            for ((index = 0; index < jobs; index++)); do
+                ((done_flags[index] == 0)) || continue
+                recorded_count="$(wc -l <"${workdir}/ledger-${index}" | tr -d ' ')"
+                last_case="$(tail -n 1 "${workdir}/ledger-${index}" 2>/dev/null || true)"
+                [[ -n "$last_case" ]] || last_case="none"
+                printf '  group %s/%s worker %s/%s still running after %s recorded case(s), last recorded case %s\n' \
+                    "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$((index + 1))" "$jobs" "$recorded_count" "$last_case" >&2
+                pkill -TERM -P "${pids[index]}" 2>/dev/null || true
+                kill -TERM "${pids[index]}" 2>/dev/null || true
+            done
+            sleep 1
+            for ((index = 0; index < jobs; index++)); do
+                ((done_flags[index] == 0)) || continue
+                if kill -0 "${pids[index]}" 2>/dev/null; then
+                    pkill -KILL -P "${pids[index]}" 2>/dev/null || true
+                    kill -KILL "${pids[index]}" 2>/dev/null || true
+                fi
+                rc=0
+                wait "${pids[index]}" || rc=$?
+                codes[index]=$rc
+                done_flags[index]=1
+                remaining_workers=$((remaining_workers - 1))
+                printf '\n===== group %s/%s worker %s/%s (stopped at %ss, exit %s) =====\n' \
+                    "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$((index + 1))" "$jobs" "$SECONDS" "${codes[index]}"
+                cat "${workdir}/out-${index}"
+            done
+            break
+        fi
+        ((progressed != 0)) || sleep 0.2
     done
     for ((index = 0; index < jobs; index++)); do
-        rc=0
-        wait "${pids[index]}" || rc=$?
-        codes[index]=$rc
-    done
-    for ((index = 0; index < jobs; index++)); do
-        printf '\n===== group %s/%s worker %s/%s (exit %s) =====\n' \
-            "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$((index + 1))" "$jobs" "${codes[index]}"
-        cat "${workdir}/out-${index}"
         summary="${workdir}/summary-${index}"
         if [[ ! -f "$summary" ]]; then
             printf 'test_guard_scripts: worker %s/%s ended without a summary, so its cases did not all run\n' \
@@ -26020,6 +26088,9 @@ shard_case 'nested signature cases partition the ledger and propagate every fail
 
 shard_case 'one immutable group baseline preserves current inputs and private worker mutations' \
     python3 "${SCRIPT_DIR}/test_guard_group_baseline.py"
+
+shard_case 'guard shards charge baseline time, flush completed workers, and diagnose stalls before kill' \
+    python3 "${SCRIPT_DIR}/test_guard_budget_diagnostics.py"
 
 shard_case 'the default mode shards across the requested workers' \
     shard_plan_is 4 4 0 0 0
