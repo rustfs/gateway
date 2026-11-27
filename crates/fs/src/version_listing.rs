@@ -94,10 +94,11 @@ impl Handler<ListObjectVersions> for FsBackend {
                 "a version-id-marker requires a key-marker",
             ));
         }
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         self.require_readable_versioning(input.bucket.as_str()).await?;
         let prefix = input.prefix.as_deref().unwrap_or_default();
         let mut records = self.version_records(input.bucket.as_str()).await?;
+        self.reconcile_all_nulls_locked(input.bucket.as_str(), &mut records)?;
         records.retain(|record| record.key.starts_with(prefix));
         records.sort_by(|left, right| left.key.cmp(&right.key).then_with(|| right.sequence.cmp(&left.sequence)));
         let mut latest = BTreeMap::new();

@@ -37,14 +37,11 @@ use rustfs_gateway::{
     ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Preconditions, Req,
     ResourceVisibility, Resp, Timestamp, validate_versioning,
 };
-use sha2::{Digest as _, Sha256};
 
-use super::conditions::guard_write;
-use super::reads::Selected;
 use super::records::{
     ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
 };
-use super::tagging::{TAGS_FILE, serialize_tags};
+use super::root_lock::RootVersionGuard;
 use super::{FsBackend, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
@@ -98,14 +95,26 @@ pub(super) struct ObjectTagTarget {
 }
 
 pub(super) struct PublishedObject {
-    /// The version directory the object was published into.
-    pub(super) directory: PathBuf,
     pub(super) size: i64,
     pub(super) version_id: Option<String>,
     pub(super) last_modified: Timestamp,
 }
 
 impl FsBackend {
+    pub(super) fn reconcile_nulls_for_key_locked(
+        &self,
+        bucket: &str,
+        key: &str,
+        records: &mut Vec<VersionRecord>,
+    ) -> Result<(), HandlerError> {
+        let legacy = self.object_path(bucket, key);
+        null_recovery::reconcile_null_records_for_key(records, key, &legacy, self.clock.now().unix_seconds())
+    }
+
+    pub(super) fn reconcile_all_nulls_locked(&self, bucket: &str, records: &mut Vec<VersionRecord>) -> Result<(), HandlerError> {
+        null_recovery::reconcile_all_null_records(self, bucket, records, self.clock.now().unix_seconds())
+    }
+
     /// Publishes one object's bytes and the attributes — user metadata and representation headers —
     /// that must outlive them.
     ///
@@ -138,65 +147,30 @@ impl FsBackend {
         conditions: Option<&Preconditions>,
     ) -> Result<PublishedObject, HandlerError> {
         validate_attributes(attributes)?;
-        let _guard = self.version_lock.lock().await;
-        if let Some(conditions) = conditions {
-            match self.select_locked(bucket, key, None).await? {
-                Selected::Found(current) => guard_write(Some(&current), conditions)?,
-                Selected::Absent(_) => guard_write(None, conditions)?,
-            }
-        }
-        let state = self.versioning_state(bucket).await?;
-        let state = state.for_write(self.excluded(bucket, key, state).await?);
-        let existing = self.version_records(bucket).await?;
-        let version_id = if matches!(state, VersioningState::Enabled) {
-            None
-        } else {
-            Some("null")
-        };
-        if version_id.is_some() {
-            super::lock_record::ensure_null_deletable(&existing, key, self.clock.now().unix_seconds())?;
-        }
-        let legacy_object = if version_id.is_some() {
-            self.preflight_legacy_object(bucket, key).await?
-        } else {
-            None
-        };
-        let record = self
-            .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag), attributes)
-            .await?;
-        if version_id.is_some() {
-            self.remove_null_versions(
-                &existing
-                    .into_iter()
-                    .filter(|held| held.path != record.path)
-                    .collect::<Vec<_>>(),
-                key,
+        let guard = self.version_lock.lock().await?;
+        let (_guard, _tombstone, published) = self
+            .publish_object_if_locked(
+                guard,
+                PublishPlan {
+                    bucket,
+                    key,
+                    bytes,
+                    e_tag,
+                    attributes,
+                    conditions,
+                    receipt: None,
+                },
+                None,
             )
             .await?;
-            if let Some(path) = legacy_object {
-                tokio::fs::remove_file(path).await.map_err(|_| storage_error())?;
-            }
-        }
-        Ok(PublishedObject {
-            directory: record.path.clone(),
-            size: record.size,
-            // Reported only while versioning is enabled, as RustFS reports it: a suspended bucket's
-            // write is the null version and answers no id (rustfs/gateway#1003).
-            version_id: matches!(state, VersioningState::Enabled).then_some(record.version_id),
-            last_modified: Timestamp::from_secs(record.modified),
-        })
+        Ok(published)
     }
 
     /// Every key's current record, read under the version lock.
-    ///
-    /// The lock is the point: `version_records` refuses a `.tmp-*` entry as corruption, and
-    /// `publish_version` creates exactly one while it holds this lock, so a listing or a lifecycle
-    /// sweep that enumerated without it answered `500` — or skipped every bucket's expiry — whenever
-    /// an ordinary write was in flight. Every other reader of the version directory already takes
-    /// it; the four callers of this method (listing, lifecycle, transitions) held nothing.
     pub(super) async fn current_object_records(&self, bucket: &str) -> Result<Vec<CurrentObjectRecord>, HandlerError> {
-        let _guard = self.version_lock.lock().await;
-        let records = self.version_records(bucket).await?;
+        let _guard = self.version_lock.lock().await?;
+        let mut records = self.version_records(bucket).await?;
+        self.reconcile_all_nulls_locked(bucket, &mut records)?;
         let mut current = BTreeMap::<String, VersionRecord>::new();
         for record in records {
             match current.get(&record.key) {
@@ -233,7 +207,8 @@ impl FsBackend {
         version_id: Option<&str>,
     ) -> Result<ObjectTagTarget, HandlerError> {
         let state = self.versioning_state(bucket).await?;
-        let records = self.version_records(bucket).await?;
+        let mut records = self.version_records(bucket).await?;
+        self.reconcile_nulls_for_key_locked(bucket, key, &mut records)?;
         let selected = version_id
             .and_then(|id| explicit_for_key(&records, key, id))
             .or_else(|| version_id.is_none().then(|| newest_for_key(&records, key)).flatten());
@@ -259,16 +234,17 @@ impl FsBackend {
         key: &str,
         observed_sequence: u64,
     ) -> Result<bool, HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let guard = self.version_lock.lock().await?;
         let state = self.versioning_state(bucket).await?;
         let state = state.for_delete(self.excluded(bucket, key, state).await?);
-        let records = self.version_records(bucket).await?;
+        let mut records = self.version_records(bucket).await?;
+        self.reconcile_nulls_for_key_locked(bucket, key, &mut records)?;
         if newest_for_key(&records, key)
             .is_none_or(|record| record.sequence != observed_sequence || !matches!(record.kind, RecordKind::Object))
         {
             return Ok(false);
         }
-        self.delete_current_locked(bucket, key, state, records).await?;
+        self.delete_current_locked(guard, bucket, key, state, records).await?;
         Ok(true)
     }
 
@@ -279,8 +255,9 @@ impl FsBackend {
         observed_sequence: u64,
         storage_class: &StorageClass,
     ) -> Result<bool, HandlerError> {
-        let _guard = self.version_lock.lock().await;
-        let records = self.version_records(bucket).await?;
+        let _guard = self.version_lock.lock().await?;
+        let mut records = self.version_records(bucket).await?;
+        self.reconcile_nulls_for_key_locked(bucket, key, &mut records)?;
         let Some(record) = newest_for_key(&records, key) else {
             return Ok(false);
         };
@@ -300,38 +277,109 @@ impl FsBackend {
 
     async fn delete_current_locked(
         &self,
+        guard: RootVersionGuard,
         bucket: &str,
         key: &str,
         state: VersioningState,
         records: Vec<VersionRecord>,
-    ) -> Result<Option<VersionRecord>, HandlerError> {
+    ) -> Result<Option<String>, HandlerError> {
+        let now = self.clock.now().unix_seconds();
         if !matches!(state, VersioningState::Enabled) {
-            super::lock_record::ensure_null_deletable(&records, key, self.clock.now().unix_seconds())?;
+            super::lock_record::ensure_null_deletable(&records, key, now)?;
         }
         match state {
             VersioningState::Never => {
-                self.remove_null_versions(&records, key).await?;
-                self.remove_legacy_object(bucket, key).await?;
+                let remove_paths: Vec<PathBuf> = records
+                    .into_iter()
+                    .filter(|record| record.key == key && record.version_id == "null")
+                    .map(|record| record.path)
+                    .collect();
+                let legacy_object = self.preflight_legacy_object(bucket, key).await?;
+                let (_guard, ()) = guard
+                    .run_blocking(move || {
+                        for path in remove_paths {
+                            null_recovery::remove_version_dir_strict(&path)?;
+                        }
+                        if let Some(path) = legacy_object.as_deref() {
+                            null_recovery::remove_legacy_object_sync(path)?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
                 Ok(None)
             }
-            VersioningState::Enabled => self
-                .publish_version(bucket, key, None, None, None, &ObjectAttributes::default())
-                .await
-                .map(Some),
-            VersioningState::Suspended => {
-                let marker = self
-                    .publish_version(bucket, key, Some("null"), None, None, &ObjectAttributes::default())
+            VersioningState::Enabled => {
+                let staged = self
+                    .stage_version(publish::StageVersion {
+                        bucket,
+                        key,
+                        version_id: None,
+                        body: None,
+                        e_tag: None,
+                        attributes: &ObjectAttributes::default(),
+                        held: &records,
+                        superseded_nulls: &[],
+                        supersedes_legacy: false,
+                        receipt: None,
+                        report_version_id: true,
+                    })
                     .await?;
-                self.remove_null_versions(
-                    &records
-                        .into_iter()
-                        .filter(|held| held.path != marker.path)
-                        .collect::<Vec<_>>(),
-                    key,
-                )
-                .await?;
-                self.remove_legacy_object(bucket, key).await?;
-                Ok(Some(marker))
+                let version_id = staged.version_id.clone();
+                let (_guard, _) = guard
+                    .run_blocking(move || {
+                        null_recovery::commit_staged_version(null_recovery::CommitStagedVersion {
+                            temporary: staged.temporary,
+                            destination: staged.destination,
+                            temp_guard: staged.temp_guard,
+                            tombstone_guard: None,
+                            superseded_nulls: Vec::new(),
+                            legacy_object: None,
+                            now,
+                        })
+                    })
+                    .await?;
+                Ok(Some(version_id))
+            }
+            VersioningState::Suspended => {
+                let legacy_object = self.preflight_legacy_object(bucket, key).await?;
+                let superseded_nulls: Vec<&VersionRecord> = records
+                    .iter()
+                    .filter(|record| record.key == key && record.version_id == "null")
+                    .collect();
+                let staged = self
+                    .stage_version(publish::StageVersion {
+                        bucket,
+                        key,
+                        version_id: Some("null"),
+                        body: None,
+                        e_tag: None,
+                        attributes: &ObjectAttributes::default(),
+                        held: &records,
+                        superseded_nulls: &superseded_nulls,
+                        supersedes_legacy: legacy_object.is_some(),
+                        receipt: None,
+                        report_version_id: false,
+                    })
+                    .await?;
+                let version_id = staged.version_id.clone();
+                let superseded_paths = superseded_nulls
+                    .into_iter()
+                    .map(|record| (record.path.clone(), record.lock.clone()))
+                    .collect();
+                let (_guard, _) = guard
+                    .run_blocking(move || {
+                        null_recovery::commit_staged_version(null_recovery::CommitStagedVersion {
+                            temporary: staged.temporary,
+                            destination: staged.destination,
+                            temp_guard: staged.temp_guard,
+                            tombstone_guard: None,
+                            superseded_nulls: superseded_paths,
+                            legacy_object,
+                            now,
+                        })
+                    })
+                    .await?;
+                Ok(Some(version_id))
             }
         }
     }
@@ -445,115 +493,10 @@ impl FsBackend {
         Ok(record)
     }
 
-    async fn publish_version(
-        &self,
-        bucket: &str,
-        key: &str,
-        version_id: Option<&str>,
-        body: Option<&[u8]>,
-        e_tag: Option<&ETag>,
-        attributes: &ObjectAttributes,
-    ) -> Result<VersionRecord, HandlerError> {
-        let held = self.version_records(bucket).await?;
-        let sequence = self.next_version_sequence(bucket, &held).await?;
-        let version_id = version_id.map_or_else(|| opaque_version_id(bucket, key, sequence), ToOwned::to_owned);
-        let modified = self.clock.now().unix_seconds();
-        let digest = Sha256::digest(format!("{sequence}\0{key}\0{version_id}").as_bytes());
-        let versions = self.versions_path(bucket);
-        let destination = versions.join(format!("v-{sequence:020}-{}", hex::encode(digest)));
-        let temporary = versions.join(format!(".tmp-{}-{}", std::process::id(), super::staging::next_temporary_id()));
-        let mut temp_guard = super::staging::TempDirGuard::create(temporary.clone())?;
-        let object_metadata = match (body, e_tag) {
-            (Some(bytes), Some(e_tag)) => {
-                Some((e_tag.opaque_tag().to_owned(), i64::try_from(bytes.len()).map_err(|_| storage_error())?))
-            }
-            (None, None) => None,
-            _ => return Err(storage_error()),
-        };
-        let (tag, size) = match (body, object_metadata) {
-            (Some(bytes), Some((tag, size))) => {
-                // Open synchronously and flush to completion before renaming so neither cancellation
-                // cleanup nor an immediate post-rename read can observe an in-flight write.
-                super::staging::create_and_write_file(&temporary.join(BODY_FILE), bytes).await?;
-                (tag, size)
-            }
-            _ => (String::new(), 0),
-        };
-        // Written into the temporary directory, so the tags a write carried become visible in
-        // the same rename as the version itself — never a version first and its tags later.
-        if !attributes.tags.is_empty() {
-            super::staging::create_and_write_file(&temporary.join(TAGS_FILE), serialize_tags(&attributes.tags).as_ref()).await?;
-        }
-        let record = encode_version_record(&VersionRecord {
-            path: destination.clone(),
-            sequence,
-            key: key.to_owned(),
-            version_id: version_id.clone(),
-            kind: if body.is_some() {
-                RecordKind::Object
-            } else {
-                RecordKind::DeleteMarker
-            },
-            modified,
-            e_tag: tag,
-            size,
-            storage_class: attributes.storage_class.clone().unwrap_or(StorageClass::STANDARD),
-            metadata: attributes.metadata.clone(),
-            headers: attributes.headers.clone(),
-            checksum: attributes.checksum,
-            part_lengths: attributes.part_lengths.clone(),
-            part_metadata: attributes.part_metadata.clone(),
-            lock: attributes.lock.clone(),
-        });
-        #[cfg(test)]
-        {
-            tests::block_version_record_write(&temporary);
-            super::staging::test_hooks::maybe_pause("publish_version").await;
-        }
-        super::staging::create_and_write_file(&temporary.join(RECORD_FILE), record.as_bytes()).await?;
-        std::fs::rename(&temporary, &destination).map_err(|_| storage_error())?;
-        temp_guard.disarm();
-        self.read_version_record(destination).await
-    }
-
-    async fn next_version_sequence(&self, bucket: &str, held: &[VersionRecord]) -> Result<u64, HandlerError> {
-        let path = self.bucket_path(bucket).join(SEQUENCE_FILE);
-        let previous = match tokio::fs::symlink_metadata(&path).await {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => held.iter().map(|record| record.sequence).max().unwrap_or(0),
-            Err(_) => return Err(storage_error()),
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|_| storage_error())?
-                .strip_suffix('\n')
-                .and_then(|value| value.parse::<u64>().ok())
-                .ok_or_else(storage_error)?,
-            Ok(_) => {
-                return Err(HandlerError::new(
-                    ErrorCode::INVALID_REQUEST,
-                    "the version sequence path is not a safe regular file",
-                ));
-            }
-        };
-        let next = previous.checked_add(1).ok_or_else(storage_error)?;
-        self.write_atomic(&self.bucket_path(bucket), &path, format!("{next}\n").as_bytes())
-            .await?;
-        Ok(next)
-    }
-
     pub(super) async fn read_version_body(&self, record: &VersionRecord) -> Result<Vec<u8>, HandlerError> {
         tokio::fs::read(record.path.join(BODY_FILE))
             .await
             .map_err(|_| storage_error())
-    }
-
-    async fn remove_null_versions(&self, records: &[VersionRecord], key: &str) -> Result<(), HandlerError> {
-        for record in records
-            .iter()
-            .filter(|record| record.key == key && record.version_id == "null")
-        {
-            tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
-        }
-        Ok(())
     }
 
     async fn preflight_legacy_object(&self, bucket: &str, key: &str) -> Result<Option<PathBuf>, HandlerError> {
@@ -568,17 +511,6 @@ impl FsBackend {
             Err(_) => Err(storage_error()),
         }
     }
-
-    async fn remove_legacy_object(&self, bucket: &str, key: &str) -> Result<(), HandlerError> {
-        if let Some(path) = self.preflight_legacy_object(bucket, key).await? {
-            tokio::fs::remove_file(path).await.map_err(|_| storage_error())?;
-        }
-        Ok(())
-    }
-}
-
-fn opaque_version_id(bucket: &str, key: &str, sequence: u64) -> String {
-    hex::encode(Sha256::digest(format!("{bucket}\0{key}\0{sequence}").as_bytes()))
 }
 
 pub(super) fn missing_version(key: &str) -> HandlerError {
@@ -610,7 +542,8 @@ pub(super) fn newest_for_key<'a>(records: &'a [VersionRecord], key: &str) -> Opt
 pub(super) fn explicit_for_key<'a>(records: &'a [VersionRecord], key: &str, version_id: &str) -> Option<&'a VersionRecord> {
     records
         .iter()
-        .find(|record| record.key == key && record.version_id == version_id)
+        .filter(|record| record.key == key && record.version_id == version_id)
+        .max_by_key(|record| record.sequence)
 }
 
 impl Handler<PutBucketVersioning> for FsBackend {
@@ -624,7 +557,7 @@ impl Handler<PutBucketVersioning> for FsBackend {
             Some("Suspended") => VersioningState::Suspended,
             _ => return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "versioning status is required")),
         };
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores `MfaDelete` with the rest of the
         // configuration and neither enforces it — a delete never needs an MFA token — nor returns
         // it from GetBucketVersioning (`rustfs/src/app/bucket_usecase.rs:2265-2270` at
@@ -639,7 +572,7 @@ impl Handler<PutBucketVersioning> for FsBackend {
 
 impl Handler<GetBucketVersioning> for FsBackend {
     async fn call(&self, request: Req<GetBucketVersioning>) -> HandlerResult<GetBucketVersioning> {
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         let status = match self.versioning_state(request.input().bucket.as_str()).await? {
             VersioningState::Never => None,
             VersioningState::Enabled => Some(Status::ENABLED),
@@ -676,9 +609,10 @@ impl FsBackend {
         version_id: Option<&str>,
         condition: Option<&DeleteIfMatch>,
     ) -> Result<DeleteObjectOutput, HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let guard = self.version_lock.lock().await?;
         let state = self.versioning_state(bucket).await?;
-        let records = self.version_records(bucket).await?;
+        let mut records = self.version_records(bucket).await?;
+        self.reconcile_nulls_for_key_locked(bucket, key, &mut records)?;
         if let Some(version_id) = version_id {
             let record = explicit_for_key(&records, key, version_id);
             if let Some(condition) = condition {
@@ -687,15 +621,24 @@ impl FsBackend {
             if let Some(record) = record {
                 super::lock_record::ensure_deletable(record.lock.as_ref(), self.clock.now().unix_seconds())?;
                 let delete_marker = matches!(record.kind, RecordKind::DeleteMarker);
-                tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
+                let path = record.path.clone();
+                let removed_id = record.version_id.clone();
+                let (_guard, ()) = guard
+                    .run_blocking(move || null_recovery::remove_version_dir_strict(&path))
+                    .await?;
                 return Ok(DeleteObjectOutput {
                     delete_marker: Some(delete_marker),
-                    version_id: Some(record.version_id.clone()),
+                    version_id: Some(removed_id),
                     ..DeleteObjectOutput::default()
                 });
             }
             if version_id == "null" {
-                self.remove_legacy_object(bucket, key).await?;
+                let legacy = self.preflight_legacy_object(bucket, key).await?;
+                if let Some(path) = legacy {
+                    let (_guard, ()) = guard
+                        .run_blocking(move || null_recovery::remove_legacy_object_sync(&path))
+                        .await?;
+                }
             }
             return Ok(DeleteObjectOutput::default());
         }
@@ -703,10 +646,10 @@ impl FsBackend {
         if let Some(condition) = condition {
             self.judge_current(condition, bucket, key, state, &records).await?;
         }
-        let marker = self.delete_current_locked(bucket, key, state, records).await?;
+        let marker = self.delete_current_locked(guard, bucket, key, state, records).await?;
         Ok(DeleteObjectOutput {
             delete_marker: marker.as_ref().map(|_| true),
-            version_id: marker.map(|record| record.version_id),
+            version_id: marker,
             ..DeleteObjectOutput::default()
         })
     }
@@ -726,10 +669,15 @@ impl Handler<DeleteObject> for FsBackend {
 mod configuration;
 mod delete_conditions;
 mod lifecycle;
+mod null_recovery;
+mod publish;
 
 use delete_conditions::DeleteIfMatch;
 
 pub(super) use configuration::CONFIGURATION_FILE;
+pub(super) use publish::PublishPlan;
 
+#[cfg(test)]
+mod shared_root_tests;
 #[cfg(test)]
 mod tests;

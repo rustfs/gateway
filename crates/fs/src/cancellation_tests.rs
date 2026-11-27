@@ -142,8 +142,6 @@ async fn n_cancelled_complete_multipart_upload_does_not_leave_tombstone_or_brick
         .expect("store part");
     let part_etag = etag(body).expect("etag");
 
-    // Hold version_lock so CompleteMultipartUpload parks right after renaming upload -> .complete-*.
-    let guard = backend.version_lock.lock().await;
     let uploads_dir = backend.uploads_path("cancel-mpu");
 
     let complete_input = CompleteMultipartUploadInput {
@@ -160,9 +158,16 @@ async fn n_cancelled_complete_multipart_upload_does_not_leave_tombstone_or_brick
         ..CompleteMultipartUploadInput::default()
     };
 
-    let complete_fut = Handler::<CompleteMultipartUpload>::call(backend.as_ref(), Req::new(complete_input, sse_proof()));
-    poll_until_and_drop(complete_fut, || !entries_with_prefix(&uploads_dir, ".complete-").is_empty()).await;
-    drop(guard);
+    let entered = Arc::new(AtomicBool::new(false));
+    let complete_fut = pause_at(
+        "complete_stage",
+        Arc::clone(&entered),
+        Handler::<CompleteMultipartUpload>::call(backend.as_ref(), Req::new(complete_input, sse_proof())),
+    );
+    poll_until_and_drop(complete_fut, || {
+        entered.load(Ordering::SeqCst) && !entries_with_prefix(&uploads_dir, ".complete-").is_empty()
+    })
+    .await;
 
     assert!(
         entries_with_prefix(&uploads_dir, ".complete-").is_empty(),

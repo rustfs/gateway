@@ -52,7 +52,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 "the completion names a checksum type for an upload without checksum negotiation",
             ));
         }
-        let completed = input.multipart_upload.parts;
+        let completed = &input.multipart_upload.parts;
         if completed.is_empty() {
             return Err(HandlerError::new(ErrorCode::INVALID_PART, "the completion names no uploaded part"));
         }
@@ -64,11 +64,12 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             previous = number;
             let checksum = record
                 .checksum
-                .map(|selection| selection.completed_part(&part))
+                .map(|selection| selection.completed_part(part))
                 .transpose()?
                 .flatten();
             let entity_tag = part
                 .e_tag
+                .clone()
                 .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_PART, "a completed part has no entity tag"))?;
             requested.push((number, entity_tag, checksum));
         }
@@ -140,8 +141,16 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             std::process::id(),
             super::staging::next_temporary_id()
         ));
-        std::fs::rename(&upload, &tombstone).map_err(|_| no_such_upload())?;
-        let mut tombstone_guard = super::staging::CompletionTombstoneGuard::new(tombstone.clone(), upload);
+        // Hold one shared-root lock across upload retirement, staged receipt + version publication,
+        // and tombstone removal/rollback so a concurrent retry never observes a missing upload
+        // without its committed version and receipt.
+        let guard = self.version_lock.lock().await?;
+        if std::fs::rename(&upload, &tombstone).is_err() {
+            return self.replay_completion_locked(&input, no_such_upload()).await;
+        }
+        let tombstone_guard = super::staging::CompletionTombstoneGuard::new(tombstone.clone(), upload);
+        #[cfg(test)]
+        super::staging::test_hooks::maybe_pause("complete_stage").await;
         // The completion's write conditions are the same verdict `PutObject` gives, evaluated
         // inside the publication's version lock (rustfs/gateway#1002, #808).
         let write_conditions = conditions::conditions(
@@ -151,23 +160,39 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             None,
             Timestamp::from_secs(self.clock.now().unix_seconds()),
         )?;
-        let published = self
-            .publish_object_if(
-                input.bucket.as_str(),
-                input.key.as_str(),
-                &completed_bytes,
-                &composite,
-                &attributes,
-                conditions::any(&write_conditions).then_some(&write_conditions),
+        let receipt_spec = completion_replay::CompletionReceiptSpec {
+            upload_id: upload_id.clone(),
+            parts: requested
+                .iter()
+                .map(|(number, e_tag, _)| (*number, e_tag.opaque_tag().to_owned()))
+                .collect(),
+        };
+        let (guard, mut tombstone_guard, published) = self
+            .publish_object_if_locked(
+                guard,
+                super::versioning::PublishPlan {
+                    bucket: input.bucket.as_str(),
+                    key: input.key.as_str(),
+                    bytes: &completed_bytes,
+                    e_tag: &composite,
+                    attributes: &attributes,
+                    conditions: conditions::any(&write_conditions).then_some(&write_conditions),
+                    receipt: Some(&receipt_spec),
+                },
+                Some(tombstone_guard),
             )
             .await?;
-        tombstone_guard.mark_published();
         #[cfg(test)]
         super::staging::test_hooks::maybe_pause("complete_remove").await;
-        let _ = tokio::fs::remove_dir_all(&tombstone).await;
-        tombstone_guard.disarm();
-        let parts = requested.iter().map(|(number, e_tag, _)| (*number, e_tag));
-        completion_replay::record_completion(&published.directory, &upload_id, published.version_id.as_deref(), parts).await;
+        let (_guard, ()) = guard
+            .run_blocking(move || {
+                let _ = std::fs::remove_dir_all(&tombstone);
+                if let Some(mut tg) = tombstone_guard.take() {
+                    tg.disarm();
+                }
+                Ok(())
+            })
+            .await?;
         let mut output = CompleteMultipartUploadOutput {
             location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
             bucket: Some(input.bucket),

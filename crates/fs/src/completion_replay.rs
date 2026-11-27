@@ -26,7 +26,7 @@
 use std::path::Path;
 
 use rustfs_gateway::dto::{CompleteMultipartUpload, CompleteMultipartUploadInput, CompleteMultipartUploadOutput};
-use rustfs_gateway::{ETag, ErrorCode, HandlerError, HandlerResult, RecordedUpload, Resp, resolve_upload};
+use rustfs_gateway::{ErrorCode, HandlerError, HandlerResult, RecordedUpload, Resp, resolve_upload};
 
 use super::FsBackend;
 
@@ -91,38 +91,57 @@ impl Completion {
     }
 }
 
-/// Records what a completion published, so a retry can be recognised. Best effort: a receipt
-/// that could not be written only means a retry answers `NoSuchUpload`, as it did before.
-pub(super) async fn record_completion(
-    directory: &Path,
-    upload_id: &str,
-    version_id: Option<&str>,
-    parts: impl Iterator<Item = (i32, &ETag)>,
-) {
+/// Information needed to write a completion replay receipt inside the staged version directory
+/// before atomic publication rename.
+pub(super) struct CompletionReceiptSpec {
+    pub(super) upload_id: String,
+    pub(super) parts: Vec<(i32, String)>,
+}
+
+/// Writes the completion replay receipt into `staging_dir` before the version directory is renamed
+/// into place. Best effort: an obstruction or write failure does not fail the completion, and only
+/// means a later retry answers `NoSuchUpload`.
+pub(super) fn write_staged_completion_receipt(staging_dir: &Path, spec: &CompletionReceiptSpec, version_id: Option<&str>) {
     let receipt = Completion {
         bucket: String::new(),
         key: String::new(),
-        upload_id: upload_id.to_owned(),
+        upload_id: spec.upload_id.clone(),
         version_id: version_id.map(ToOwned::to_owned),
-        parts: parts.map(|(number, e_tag)| (number, e_tag.opaque_tag().to_owned())).collect(),
+        parts: spec.parts.clone(),
     };
-    let _ = tokio::fs::write(directory.join(COMPLETION_FILE), receipt.encode()).await;
+    let _ = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(staging_dir.join(COMPLETION_FILE))
+        .and_then(|mut file| std::io::Write::write_all(&mut file, receipt.encode().as_bytes()));
 }
 
 impl FsBackend {
-    /// Answers a completion whose upload is gone: a replay of the committed object when the key's
-    /// current version was published by this upload with these parts, `InvalidPart` when the parts
-    /// differ, and `missing` otherwise.
+    /// Answers a completion whose upload is gone while acquiring the shared-root version lock.
     pub(super) async fn replay_completion(
+        &self,
+        input: &CompleteMultipartUploadInput,
+        missing: HandlerError,
+    ) -> HandlerResult<CompleteMultipartUpload> {
+        let _guard = self.version_lock.lock().await?;
+        self.replay_completion_locked(input, missing).await
+    }
+
+    /// Answers a completion whose upload is gone while the caller already holds the shared-root
+    /// version lock: a replay of the committed object when the key's current version was published
+    /// by this upload with these parts, `InvalidPart` when the parts differ, and `missing`
+    /// otherwise.
+    pub(super) async fn replay_completion_locked(
         &self,
         input: &CompleteMultipartUploadInput,
         missing: HandlerError,
     ) -> HandlerResult<CompleteMultipartUpload> {
         let bucket = input.bucket.as_str();
         let key = input.key.as_str();
-        let Ok(current) = self.representation(bucket, key, None).await else {
+        let Ok(super::reads::Selected::Found(current)) = self.select_locked(bucket, key, None).await else {
             return Err(missing);
         };
+        let current = *current;
         let Some(directory) = current.directory.as_deref() else {
             return Err(missing);
         };

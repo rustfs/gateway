@@ -128,7 +128,7 @@ impl Handler<GetObjectAcl> for FsBackend {
     /// `object_tag_target`, so the four subresource reads agree on which object is not there.
     async fn call(&self, request: Req<GetObjectAcl>) -> HandlerResult<GetObjectAcl> {
         let input = request.input();
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         let _target = self
             .object_tag_target(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
             .await?;
@@ -144,7 +144,7 @@ impl Handler<GetObjectAcl> for FsBackend {
 impl Handler<PutObjectAcl> for FsBackend {
     async fn call(&self, request: Req<PutObjectAcl>) -> HandlerResult<PutObjectAcl> {
         let input = request.input();
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock().await?;
         let _target = self
             .object_tag_target(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
             .await?;

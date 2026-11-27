@@ -15,8 +15,10 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads, persistent object versions and tags, and lifecycle actions.
-//! NOT responsible for: production durability, physical storage tiers, or cross-process coordination.
+//! including atomically published multipart uploads, persistent object versions and tags, lifecycle
+//! actions, and shared-root coordination across cooperating backend instances and processes.
+//! NOT responsible for: production crash-consistent durability, physical storage tiers, or
+//! resisting hostile non-cooperating filesystem modifications.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -166,6 +168,7 @@ mod put_object;
 mod reads;
 mod records;
 mod registry;
+mod root_lock;
 mod rustfs_parity;
 mod staging;
 mod tagging;
@@ -195,7 +198,7 @@ pub struct FsBackend {
     owner: Option<Owner>,
     /// Each bucket's reserved upload-ID window, keyed by bucket name; the lock serializes allocation.
     upload_id_windows: tokio::sync::Mutex<std::collections::HashMap<String, uploads::UploadIdWindow>>,
-    version_lock: tokio::sync::Mutex<()>,
+    version_lock: root_lock::RootVersionLock,
     clock: Arc<dyn Clock>,
     lifecycle_day_seconds: i64,
     lifecycle_scheduler_running: AtomicBool,
@@ -234,14 +237,15 @@ impl FsBackend {
         }
         let regions = RegionSet::new([US_EAST_1])
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "us-east-1 is not a usable region name"))?;
+        let canonical_root = std::fs::canonicalize(root.as_ref())?;
         Ok(Self {
-            root: std::fs::canonicalize(root.as_ref())?,
+            version_lock: root_lock::RootVersionLock::for_canonical_root(canonical_root.clone()),
+            root: canonical_root,
             region: US_EAST_1.to_owned(),
             regions,
             region_match_policy: REGION_MATCH_POLICY,
             owner: None,
             upload_id_windows: tokio::sync::Mutex::default(),
-            version_lock: tokio::sync::Mutex::new(()),
             clock,
             lifecycle_day_seconds: 24 * 60 * 60,
             lifecycle_scheduler_running: AtomicBool::new(false),
@@ -531,7 +535,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         refuse_unstored_object_lock!(input)?;
         let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
         let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
-        let _guard = self.version_lock.lock().await;
+        let _guard = self.version_lock.lock_shared().await?;
         // S3 carries user metadata and the representation headers on the initiating request and on
         // neither the parts nor the completion, so this is the only call in the multipart family
         // that has them to persist.
