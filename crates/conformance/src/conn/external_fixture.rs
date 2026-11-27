@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Opt-in owned bucket, object, version, and multipart fixtures for an external endpoint.
+//! Opt-in owned bucket, object, version, Object Lock, and multipart fixtures for an external endpoint.
 //!
-//! Responsible for: validating the narrow remote-setup subset, restricting authored writes to
+//! Responsible for: validating the remote-setup subset, restricting authored writes to
 //! classified owned versions unless `--allow-external-writes` granted them, and holding
 //! successful or unresolved remote ownership.
-//! NOT responsible for: locked or fault fixtures; endpoint resolution; authored
+//! NOT responsible for: fault fixtures; endpoint resolution; authored
 //! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
 //! by `crate::cli`.
 
@@ -39,6 +39,9 @@ mod multipart;
 #[cfg(test)]
 mod multipart_tests;
 mod object;
+mod object_lock;
+#[cfg(test)]
+mod object_lock_tests;
 #[cfg(test)]
 mod object_tests;
 mod region;
@@ -88,6 +91,7 @@ struct BucketPlan {
     absent: bool,
     region: region::FixtureRegion,
     versioned: bool,
+    object_lock: bool,
 }
 
 #[derive(Debug)]
@@ -102,6 +106,7 @@ struct OwnedBucket {
     name: String,
     region: region::FixtureRegion,
     versioned: bool,
+    object_lock: bool,
 }
 
 impl ExternalFixtures {
@@ -126,13 +131,17 @@ impl ExternalFixtures {
         self.control_connection = None;
     }
 
-    /// Whether `target` addresses an object inside an owned versioning-enabled bucket.
+    /// Whether `target` addresses an object inside an owned versioning-enabled or Object Lock bucket.
     pub(super) fn is_versioned_object_target(&self, target: &str) -> bool {
         let path = target.split_once('?').map_or(target, |(path, _)| path);
         let Some((bucket, key)) = path.strip_prefix('/').and_then(|rest| rest.split_once('/')) else {
             return false;
         };
-        !key.is_empty() && self.owned_buckets.iter().any(|owned| owned.name == bucket && owned.versioned)
+        !key.is_empty()
+            && self
+                .owned_buckets
+                .iter()
+                .any(|owned| owned.name == bucket && (owned.versioned || owned.object_lock))
     }
 
     fn plan(&self, setup: &Value, decoder: &crate::inprocess::InProcess) -> Result<FixturePlan, SutError> {
@@ -178,21 +187,38 @@ impl ExternalFixtures {
                 )));
             }
             let versioning = bucket.read("setup.buckets[].versioning").and_then(Value::as_str);
-            if !matches!(versioning, None | Some("disabled" | "enabled"))
-                || bucket.read("setup.buckets[].object_lock").and_then(Value::as_bool) == Some(true)
-            {
+            let absent = match bucket.read("setup.buckets[].absent") {
+                None => false,
+                Some(value) => value.as_bool().ok_or_else(|| {
+                    SutError::Environment(format!(
+                        "external bucket state for `{name}` is not supported; `absent` must be a boolean"
+                    ))
+                })?,
+            };
+            let object_lock = match bucket.read("setup.buckets[].object_lock") {
+                None => false,
+                Some(value) => value.as_bool().ok_or_else(|| {
+                    SutError::Environment(format!(
+                        "external bucket state for `{name}` is not supported; `object_lock` must be a boolean"
+                    ))
+                })?,
+            };
+            if !matches!(versioning, None | Some("disabled" | "enabled")) {
                 return Err(SutError::Environment(format!(
-                    "external bucket state for `{name}` is not supported; object fixtures require an owned, non-absent, unlocked bucket with versioning disabled or enabled"
+                    "external bucket state for `{name}` is not supported; object fixtures require versioning disabled or enabled"
+                )));
+            }
+            if object_lock && (absent || versioning == Some("disabled")) {
+                return Err(SutError::Environment(format!(
+                    "external bucket state for `{name}` is not supported; object_lock requires a non-absent bucket with versioning not disabled"
                 )));
             }
             plan.push(BucketPlan {
                 name: name.to_owned(),
-                absent: bucket
-                    .read("setup.buckets[].absent")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                absent,
                 region: region::FixtureRegion::parse(bucket.read("setup.buckets[].region").and_then(Value::as_str))?,
                 versioned: versioning == Some("enabled"),
+                object_lock,
             });
         }
         let objects = object::plans(setup, &plan, decoder)?;
@@ -475,7 +501,8 @@ mod tests {
             "[[buckets]]\nname = \"fixture-one\"\n[[multipart_uploads]]\nbucket = \"fixture-one\"\nkey = \"one\"\nparts = [{ part_number = 1, unknown = true }]\n",
             "fault = { operation = \"PutObject\", at = \"after_commit\", code = \"InternalError\" }\n",
             "[[buckets]]\nname = \"fixture-one\"\nversioning = \"suspended\"\n",
-            "[[buckets]]\nname = \"fixture-one\"\nobject_lock = true\n",
+            "[[buckets]]\nname = \"fixture-one\"\nversioning = \"disabled\"\nobject_lock = true\n",
+            "[[buckets]]\nname = \"fixture-one\"\nabsent = true\nobject_lock = true\n",
             "[[buckets]]\nname = \"fixture-one\"\nregion = \"../us-west-2\"\n",
             "[[buckets]]\nname = \"../escape\"\n",
         ] {

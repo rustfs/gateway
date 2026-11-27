@@ -559,17 +559,23 @@ cargo xtask conformance run --profile rustfs --endpoint http://127.0.0.1:9100 \
     --rulings conformance/rulings/rustfs-profile.toml --json report.json
 ```
 
-The fixture opt-in supports owned buckets, objects, multipart uploads with declared parts, and enabled
-versioning. Setup records each returned upload ID and uploads the declared parts, capturing returned
+The fixture opt-in supports owned buckets, objects, multipart uploads with declared parts, enabled
+versioning, and Object Lock buckets. Setup records each returned upload ID and uploads the declared parts, capturing returned
 ETags when requested. Cleanup aborts tracked uploads with known IDs, including after setup failure.
 An existing bucket is never adopted. Versioned buckets are enabled and read back before setup
-objects or authored writes run. Structured path-style object PUT, CopyObject and DELETE exchanges
-may write within owned versioned buckets; the runner records each returned version ID, including
+objects or authored writes run. Object Lock buckets are created with `x-amz-bucket-object-lock-enabled: true`
+and verified by reading back both `?object-lock` and `?versioning` as `Enabled` before setup objects
+are put with exact version tracking. Structured path-style object PUT, CopyObject and DELETE exchanges
+may write within owned unlocked versioned buckets; the runner records each returned version ID, including
 delete markers, and deletes those exact versions before removing the bucket. Copy sources must
-also use owned versioned buckets. Unclassified raw or HTTP/2 mutations, request subresources,
-ambiguous framing and Host overrides remain unsupported. Missing upload or version identities, or
-failed cleanup, retain ownership and block the next case. Object Lock and authored multipart writes,
-including completion, remain unsupported and report their capability reason.
+also use owned unlocked versioned buckets. Authored writes against Object Lock buckets require
+`--allow-external-writes`, under which cleanup deletes versions with `x-amz-bypass-governance-retention: true`
+and lifts active Legal Hold (`OFF`) before retrying `DELETE`; cases that would apply irremovable
+`COMPLIANCE` object retention are skipped at preflight before any remote contact so they never wedge
+a bucket. Unclassified raw or HTTP/2 mutations, request subresources,
+ambiguous framing and Host overrides remain unsupported without `--allow-external-writes`. Missing upload or version identities, or
+failed cleanup, retain ownership and block the next case. Authored multipart writes without
+`--allow-external-writes`, including completion, remain unsupported and report their capability reason.
 
 **Writes need `--allow-external-writes`.** Without it the runner sends no authored write to an
 endpoint. A request counts as a write unless its bytes can only read: anything but GET, HEAD or
@@ -614,7 +620,7 @@ in its list of cases configured by id that an endpoint can still judge, and ever
 **What can run against an external endpoint at all.** Two gates run before any traffic: the clock
 gate skips, at the `clock` phase, a case that pins `clock.fixed` (or a server `skew_ms`) an
 endpoint on its own wall clock cannot follow — the text report counts these on a `clock:` line —
-and the preflight gate above. Of the 895 cases, 538 (60.1%) pass these gates with
+and the preflight gate above. Of the 895 cases, 537 (60.0%) pass these gates with
 `--allow-external-writes` and 128 (14.3%) without it, with `--allow-external-fixtures` in both and
 the endpoint on its own wall clock. `writes_tests::the_readme_states_the_externally_runnable_share_of_this_corpus`
 recomputes both numbers from the corpus with the runner's own gates and fails until this sentence

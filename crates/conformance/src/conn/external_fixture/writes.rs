@@ -106,6 +106,9 @@ impl Conn {
         }
         let fixtures = &self.external_fixtures;
         if fixtures.writes {
+            if let Some(reason) = super::object_lock::irremovable_compliance_reason(setup, &self.inner, requests)? {
+                return Err(SutError::Environment(reason));
+            }
             return Ok(());
         }
         let versioned = fixtures.enabled
@@ -113,9 +116,10 @@ impl Conn {
                 .and_then(|setup| setup.read("setup.buckets"))
                 .and_then(Value::as_array)
                 .is_some_and(|buckets| {
-                    buckets
-                        .iter()
-                        .any(|bucket| bucket.read("setup.buckets[].versioning").and_then(Value::as_str) == Some("enabled"))
+                    buckets.iter().any(|bucket| {
+                        bucket.read("setup.buckets[].versioning").and_then(Value::as_str) == Some("enabled")
+                            && bucket.read("setup.buckets[].object_lock").and_then(Value::as_bool) != Some(true)
+                    })
                 });
         for request in requests {
             let wire = self.inner.read_wire(request)?;
@@ -182,18 +186,33 @@ impl Conn {
             if uploads.is_empty() && versions.is_empty() {
                 return Ok(());
             }
-            for (entries, query) in [(uploads, "uploadId"), (versions, "versionId")] {
-                for (key, id) in entries {
-                    let target = super::object::query_target(&super::object::object_target(&bucket.name, &key)?, query, &id);
-                    let status = self
-                        .fixture_control_observation("DELETE", &target, &bucket.region, &[], &[])?
-                        .status;
-                    if status != Some(204) {
-                        return Err(SutError::Environment(format!(
-                            "emptying bucket `{}`: DELETE of a listed {query} returned status {status:?}",
-                            bucket.name
-                        )));
-                    }
+            for (key, id, _) in uploads {
+                let target = super::object::query_target(&super::object::object_target(&bucket.name, &key)?, "uploadId", &id);
+                let status = self
+                    .fixture_control_observation("DELETE", &target, &bucket.region, &[], &[])?
+                    .status;
+                if status != Some(204) {
+                    return Err(SutError::Environment(format!(
+                        "emptying bucket `{}`: DELETE of a listed uploadId returned status {status:?}",
+                        bucket.name
+                    )));
+                }
+            }
+            for (key, id, is_version) in versions {
+                let object_target = super::object::object_target(&bucket.name, &key)?;
+                if bucket.object_lock {
+                    self.delete_locked_fixture_version(&bucket.name, &object_target, &id, &bucket.region, is_version, false)?;
+                    continue;
+                }
+                let target = super::object::query_target(&object_target, "versionId", &id);
+                let status = self
+                    .fixture_control_observation("DELETE", &target, &bucket.region, &[], &[])?
+                    .status;
+                if status != Some(204) {
+                    return Err(SutError::Environment(format!(
+                        "emptying bucket `{}`: DELETE of a listed versionId returned status {status:?}",
+                        bucket.name
+                    )));
                 }
             }
         }
@@ -203,7 +222,7 @@ impl Conn {
         )))
     }
 
-    /// The `(Key, id)` of every `items` entry a listing shows; a bucket that does not exist lists none.
+    /// The `(Key, id, is_version)` of every `items` entry a listing shows; a bucket that does not exist lists none.
     fn list_fixture_bucket(
         &mut self,
         bucket: &OwnedBucket,
@@ -211,7 +230,7 @@ impl Conn {
         root: &[u8],
         items: &[&[u8]],
         id: &[u8],
-    ) -> Result<Vec<(String, String)>, SutError> {
+    ) -> Result<Vec<(String, String, bool)>, SutError> {
         let target = format!("/{}?{query}", bucket.name);
         let observation = self.fixture_control_observation("GET", &target, &bucket.region, &[], &[])?;
         let unreadable = || {
@@ -233,6 +252,7 @@ impl Conn {
         }
         let mut entries = Vec::new();
         for item in items {
+            let is_version = *item == b"Version";
             for children in super::response_xml::element_texts(&observation.body, &[root, item]).ok_or_else(unreadable)? {
                 let one = |name: &[u8]| {
                     let mut texts = super::response_xml::texts(&children, name);
@@ -241,7 +261,7 @@ impl Conn {
                         _ => None,
                     }
                 };
-                entries.push((one(b"Key").ok_or_else(unreadable)?, one(id).ok_or_else(unreadable)?));
+                entries.push((one(b"Key").ok_or_else(unreadable)?, one(id).ok_or_else(unreadable)?, is_version));
             }
         }
         Ok(entries)

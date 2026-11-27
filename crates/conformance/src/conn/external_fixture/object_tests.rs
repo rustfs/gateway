@@ -217,18 +217,17 @@ fn an_object_must_reference_a_bucket_owned_by_this_setup() {
 }
 
 #[test]
-fn unsupported_versioning_or_locked_object_buckets_are_refused_before_mutation() {
-    for bucket_option in ["versioning = \"unknown\"", "versioning = \"suspended\"", "object_lock = true"] {
+fn unsupported_versioning_or_contradictory_locked_object_buckets_are_refused_before_mutation() {
+    for bucket_option in [
+        "versioning = \"unknown\"",
+        "versioning = \"suspended\"",
+        "versioning = \"disabled\"\nobject_lock = true",
+    ] {
         let source = format!(
             "[[buckets]]\nname = \"fixture-bucket\"\n{bucket_option}\n[[objects]]\nbucket = \"fixture-bucket\"\nkey = \"key\"\n"
         );
         let error = error_before_connection(&source);
-        assert!(
-            error
-                .to_string()
-                .contains("unlocked bucket with versioning disabled or enabled"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("is not supported"), "{error}");
     }
 }
 
