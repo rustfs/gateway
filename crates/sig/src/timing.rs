@@ -38,9 +38,9 @@
 //!
 //! # The register
 //!
-//! Ten channels, each with one of three dispositions: closed here, deferred to a named task with
-//! the interface constrained here, or accepted with the reason recorded. The list is data rather
-//! than prose so that a test can assert every entry still has an owner.
+//! Eleven channels, each with one of three dispositions: closed here, deferred to a named task
+//! with the interface constrained here, or accepted with the reason recorded. The list is data
+//! rather than prose so that a test can assert every entry still has an owner.
 //!
 //! | # | Channel | Disposition |
 //! |---|---|---|
@@ -54,6 +54,7 @@
 //! | T8 | `Choice` misuse: `a.ct_eq(&b).into() && other()` reintroduces a branch, because `&&` short-circuits | Closed by construction plus guard: `bool::from` appears exactly once in this crate, inside `Signature::ct_verify`, and `scripts/check_ct_eq.sh` counts it |
 //! | T9 | All four SigV4 derivation steps are secret-equivalent; an intermediate left in a `Vec<u8>` or a `String` survives on the heap | Closed here: [`SigningKey`](crate::SigningKey) wraps every step in a once-allocated `Box<[u8]>` and zeroizes on drop, and the guard rejects `Vec<u8>`/`String` bindings named after key material |
 //! | T10 | Lenient base64 and hex decoding maps two spellings onto one value, which is a comparison-bypass surface | Closed by P2-01's [`codec`](crate::codec): length-exact, alphabet-exact, padding-exact, canonical-bits-exact, and it rejects rather than truncates |
+//! | T11 | Body-digest header signatures without `x-amz-content-sha256` (legacy RustFS `sts` scope and S3 Vectors) buffer and hash the request body only after credential lookup admits a usable or token-matched expired key, so an unknown, disabled, or token-mismatched key skips the body read | Accepted risk, recorded (rustfs/gateway#1581): reading a body before credential usability would let an unauthenticated caller force body buffering up to the service ceiling and replace `InvalidAccessKeyId` with a body-length refusal; unknown and unusable keys still run placeholder/key HMAC parity work over the empty payload and are held to [`FailureFloor`] (T6) |
 
 use core::fmt;
 use core::time::Duration;
@@ -76,7 +77,7 @@ pub enum Disposition {
 /// One entry in the register.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SideChannel {
-    /// Stable identifier, `T1` through `T10`.
+    /// Stable identifier, `T1` through `T11`.
     pub id: &'static str,
     /// One line on what an attacker learns.
     pub leak: &'static str,
@@ -84,12 +85,12 @@ pub struct SideChannel {
     pub disposition: Disposition,
 }
 
-/// Every authentication side channel considered in P2-02, with its disposition.
+/// Every authentication side channel considered in P2-02 and subsequent audits, with its disposition.
 ///
 /// Exposed as data so that a test can assert the register is complete and that nothing was
 /// deferred to nowhere. Adding a channel means adding an entry; removing one without replacing the
 /// mitigation makes the accompanying test fail.
-pub const SIDE_CHANNELS: [SideChannel; 10] = [
+pub const SIDE_CHANNELS: [SideChannel; 11] = [
     SideChannel {
         id: "T1",
         leak: "access key enumeration from the latency of an unknown-key rejection",
@@ -139,6 +140,13 @@ pub const SIDE_CHANNELS: [SideChannel; 10] = [
         id: "T10",
         leak: "lenient hex/base64 decoding gives two spellings of one value",
         disposition: Disposition::ClosedHere,
+    },
+    SideChannel {
+        id: "T11",
+        leak: "body-digest header signatures without x-amz-content-sha256 (legacy STS and S3 Vectors) buffer and hash the body only after credential lookup admits a usable or token-matched expired key",
+        disposition: Disposition::AcceptedRisk(
+            "buffering a body for an unknown, disabled, or token-mismatched key would allow unauthenticated body-buffering DoS up to the service ceiling; unknown and unusable keys still run placeholder HMAC parity work over the empty payload and are held to FailureFloor (T6)",
+        ),
     },
 ];
 
@@ -351,7 +359,7 @@ mod tests {
 
     #[test]
     fn the_register_is_complete_and_every_entry_has_an_owner() {
-        assert_eq!(SIDE_CHANNELS.len(), 10);
+        assert_eq!(SIDE_CHANNELS.len(), 11);
         for (index, channel) in SIDE_CHANNELS.iter().enumerate() {
             assert_eq!(channel.id, format!("T{}", index + 1), "the register must stay in order");
             assert!(!channel.leak.is_empty());
@@ -362,6 +370,11 @@ mod tests {
                 Disposition::ClosedHere => {}
             }
         }
+        let t11 = SIDE_CHANNELS.iter().find(|entry| entry.id == "T11").expect("T11 exists");
+        assert!(
+            matches!(t11.disposition, Disposition::AcceptedRisk(reason) if !reason.is_empty()),
+            "T11 must record its AcceptedRisk rationale"
+        );
     }
 
     #[test]

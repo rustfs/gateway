@@ -519,20 +519,14 @@ async fn n_a_fault_closes_the_connection_exactly_as_an_unknown_key_does() {
 }
 
 /// Negative — a session credential presented without its token, and a disabled credential, keep
-/// their answer in both positions: neither is a store fault. Off the object path that answer is the
-/// uniform refusal, except for the SigV4 object-path form, which checks only the key and the HMAC
-/// before its method refusal (`authenticator_presented.rs`, legacy-compat) and so is the `405` in
-/// both positions.
+/// their answer in both positions: neither is a store fault, and every form (including the SigV4
+/// object-path form, rustfs/gateway#1581) answers the uniform unknown-key refusal.
 #[tokio::test]
 async fn n_session_and_disabled_refusals_are_unchanged_by_the_switch() {
     for record in [Record::Session, Record::Disabled] {
         for form in FORMS {
             let off = Harness::new(form, record, false).send(form, SECRET).await;
-            if form == Form::V4ObjectPath {
-                assert_eq!(off.status, StatusCode::METHOD_NOT_ALLOWED, "{record:?} {form:?}: {off:?}");
-            } else {
-                assert_eq!(off, unknown_key_answer(form, false).await, "{record:?} {form:?}");
-            }
+            assert_eq!(off, unknown_key_answer(form, false).await, "{record:?} {form:?}");
             let harness = Harness::new(form, record, true);
             assert_eq!(harness.send(form, SECRET).await, off, "{record:?} {form:?}");
             assert!(harness.unreached(form), "{record:?} {form:?}");

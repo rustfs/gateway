@@ -72,6 +72,16 @@ impl PendingSessionRefusal {
     pub const fn uniform(self) -> AuthError {
         AuthError::InvalidAccessKeyId
     }
+
+    /// Whether verifying a signature over the request body can change the refusal from the
+    /// uniform `InvalidAccessKeyId` (specifically, to `ExpiredToken` via [`Self::answer`]).
+    ///
+    /// Used only by the STS / S3 Vectors body-digest path (`rustfs/gateway#1581`) to avoid
+    /// buffering an unauthenticated body when no signature could alter the uniform refusal.
+    /// Obtaining `ExpiredToken` still requires a [`SignatureMatch`] through [`Self::answer`].
+    pub(super) const fn needs_signature_proof(&self) -> bool {
+        self.expired
+    }
 }
 
 impl core::fmt::Debug for PendingSessionRefusal {

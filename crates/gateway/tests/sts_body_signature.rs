@@ -367,3 +367,192 @@ async fn n_s3_and_s3tables_keep_the_missing_payload_header_refusal() {
         assert!(record.lock().expect("the record is never poisoned").events.is_empty());
     }
 }
+
+const STS_SESSION_TOKEN: &str = "FQoGZXIvYXdzEStsWireSessionToken";
+const STS_OTHER_TOKEN: &str = "FQoGZXIvYXdzEStsWireOtherToken";
+
+struct SessionProvider(Arc<Mutex<Record>>);
+
+impl CredentialProvider for SessionProvider {
+    fn lookup<'a>(&'a self, access_key: &'a str) -> BoxFuture<'a, Result<CredentialLookup, ProviderError>> {
+        Box::pin(async move {
+            self.0.lock().expect("the record is never poisoned").events.push("lookup");
+            let base = || Credentials::new(access_key, b"secret").expect("valid credential");
+            let live = rustfs_gateway::SessionBinding::new("sts.example.test", support::SIGNED_AT_UNIX_SECONDS + 3_600)
+                .expect("valid binding");
+            let expired = rustfs_gateway::SessionBinding::new("sts.example.test", support::SIGNED_AT_UNIX_SECONDS - 1)
+                .expect("valid binding");
+            let found = match access_key {
+                "AKIDEXAMPLE" => base(),
+                "AKIDDISABLED" => base().disable(),
+                "AKIDLIVE" => base().with_session(STS_SESSION_TOKEN, live).expect("valid token"),
+                "AKIDEXPIRED" => base().with_session(STS_SESSION_TOKEN, expired).expect("valid token"),
+                _ => return Ok(CredentialLookup::NotFound),
+            };
+            Ok(CredentialLookup::Found(found))
+        })
+    }
+}
+
+fn session_service() -> (S3Service, Arc<Mutex<Record>>) {
+    let record = Arc::new(Mutex::new(Record::default()));
+    let backend = Arc::new(Backend(Arc::clone(&record)));
+    let service = ServiceBuilder::new()
+        .authenticator(
+            SigV4Authenticator::new(
+                Arc::new(SessionProvider(Arc::clone(&record))),
+                rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty"),
+            )
+            .accept_legacy_rustfs_signing_services(),
+        )
+        .authorizer(allow_when(|_| true))
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .answer_header_signatures_as_legacy_rustfs()
+        .answer_credential_refusals_with_legacy_rustfs_sentences()
+        .accept_all_checksum_omissions()
+        .register::<dto::PutObject, _>(backend)
+        .build()
+        .expect("a complete assembly");
+    (service, record)
+}
+
+fn signed_sts_with_token(key_id: &str, secret: &str, token: Option<&str>, signed_body: &[u8], body: Bytes) -> Request<Bytes> {
+    let stamp = support::SIGNED_AT_STAMP;
+    let day = &stamp[..8];
+    let scope = format!("{day}/us-east-1/sts/aws4_request");
+    let signed_headers = if token.is_some() {
+        "host;x-amz-date;x-amz-security-token"
+    } else {
+        "host;x-amz-date"
+    };
+    let token_line = token.map(|t| format!("x-amz-security-token:{t}\n")).unwrap_or_default();
+    let canonical = format!(
+        "PUT\n/bucket/key\n\nhost:s3.example.com\nx-amz-date:{stamp}\n{token_line}\n{signed_headers}\n{}",
+        hex(&Sha256::digest(signed_body))
+    );
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}", hex(&Sha256::digest(canonical.as_bytes())));
+    let mut key = hmac(format!("AWS4{secret}").as_bytes(), day.as_bytes());
+    for part in ["us-east-1", "sts", "aws4_request"] {
+        key = hmac(&key, part.as_bytes());
+    }
+    let signature = hex(&hmac(&key, string_to_sign.as_bytes()));
+    let mut builder = Request::builder()
+        .method(Method::PUT)
+        .uri("/bucket/key")
+        .header("host", "s3.example.com")
+        .header("x-amz-date", stamp);
+    if let Some(t) = token {
+        builder = builder.header("x-amz-security-token", t);
+    }
+    builder
+        .header(
+            "authorization",
+            format!("AWS4-HMAC-SHA256 Credential={key_id}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"),
+        )
+        .body(body)
+        .expect("valid request")
+}
+
+async fn exchange_session(request: Request<Bytes>, chunked: bool) -> (StatusCode, String, Arc<Mutex<Record>>) {
+    let (service, record) = session_service();
+    let (mut parts, body) = request.into_parts();
+    if chunked {
+        parts
+            .headers
+            .insert("transfer-encoding", http::HeaderValue::from_static("chunked"));
+    } else {
+        parts
+            .headers
+            .insert("content-length", body.len().to_string().parse().expect("an integer length"));
+    }
+    let frames = if chunked {
+        body.chunks(997).map(Bytes::copy_from_slice).collect()
+    } else {
+        VecDeque::from([body])
+    };
+    let response = service
+        .call(Request::from_parts(
+            parts,
+            Frames {
+                frames,
+                record: Arc::clone(&record),
+            },
+        ))
+        .await;
+    let wire = rustfs_gateway::collect(response).await.expect("a complete response");
+    (wire.status(), String::from_utf8(wire.body().to_vec()).expect("utf-8"), record)
+}
+
+/// Negative — rustfs/gateway#1581: disabled, token-missing, token-mismatched, and spurious-token
+/// STS-scoped requests without `x-amz-content-sha256` match an unknown key (`403 InvalidAccessKeyId`)
+/// without polling the body, even when the body exceeds the 8192-byte STS bound.
+#[tokio::test]
+async fn n_unusable_sts_keys_match_unknown_key_wire_answer_without_polling_body() {
+    for size in [3, 9000] {
+        for chunked in [false, true] {
+            let bytes = Bytes::from(vec![b'a'; size]);
+            for (key_id, secret, token) in [
+                ("AKIDDISABLED", "wrong-secret", None),
+                ("AKIDDISABLED", "secret", None),
+                ("AKIDLIVE", "wrong-secret", None),
+                ("AKIDLIVE", "secret", None),
+                ("AKIDLIVE", "wrong-secret", Some(STS_OTHER_TOKEN)),
+                ("AKIDEXPIRED", "wrong-secret", None),
+                ("AKIDEXPIRED", "secret", Some(STS_OTHER_TOKEN)),
+                ("AKIDEXAMPLE", "wrong-secret", Some(STS_SESSION_TOKEN)),
+            ] {
+                let (status, body, record) =
+                    exchange_session(signed_sts_with_token(key_id, secret, token, &bytes, bytes.clone()), chunked).await;
+                refused(status, &body, &record, StatusCode::FORBIDDEN, "InvalidAccessKeyId");
+                assert_eq!(
+                    record.lock().expect("unpoisoned").events,
+                    ["lookup"],
+                    "size={size} chunked={chunked} {key_id} {token:?}: unusable key must not poll body"
+                );
+            }
+        }
+    }
+}
+
+/// Negative + positive control — an expired STS session with its issued token answers `403
+/// InvalidAccessKeyId` when its signature is wrong or its body exceeds the bound, while a valid
+/// signature over a bounded body answers `400 ExpiredToken` and a live session answers `200 OK`.
+#[tokio::test]
+async fn n_expired_sts_session_with_issued_token_refuses_bad_sig_and_oversized_body_uniformly() {
+    let small = Bytes::from_static(b"abc");
+    let large = Bytes::from(vec![b'a'; 9000]);
+
+    // Positive controls: live session succeeds; proven expired session gets 400 ExpiredToken.
+    let (status, body, record) = exchange_session(
+        signed_sts_with_token("AKIDLIVE", "secret", Some(STS_SESSION_TOKEN), &small, small.clone()),
+        false,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(record.lock().expect("unpoisoned").stored, vec![small.to_vec()]);
+
+    let (status, body, record) = exchange_session(
+        signed_sts_with_token("AKIDEXPIRED", "secret", Some(STS_SESSION_TOKEN), &small, small.clone()),
+        false,
+    )
+    .await;
+    refused(status, &body, &record, StatusCode::BAD_REQUEST, "ExpiredToken");
+
+    // Negative: bad signature (small or oversized) and oversized body (even with empty-body sig)
+    // stay 403 InvalidAccessKeyId.
+    for (secret, signed_bytes, wire_body) in [
+        ("wrong-secret", small.as_ref(), small.clone()),
+        ("wrong-secret", large.as_ref(), large.clone()),
+        ("secret", b"".as_slice(), large.clone()),
+    ] {
+        let (status, body, record) = exchange_session(
+            signed_sts_with_token("AKIDEXPIRED", secret, Some(STS_SESSION_TOKEN), signed_bytes, wire_body),
+            false,
+        )
+        .await;
+        refused(status, &body, &record, StatusCode::FORBIDDEN, "InvalidAccessKeyId");
+    }
+}
