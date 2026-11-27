@@ -1,6 +1,7 @@
 [package]
 name = "rustfs-gateway-fuzz"
 version = "0.0.0"
+license = "Apache-2.0"
 publish = false
 edition = "2024"
 
@@ -14,6 +15,8 @@ libfuzzer-sys = "0.4"
 rustfs-gateway = { path = "../crates/gateway" }
 rustfs-gateway-conformance = { path = "../crates/conformance" }
 rustfs-gateway-core = { path = "../crates/core" }
+rustfs-gateway-dialect-minio = { path = "../crates/dialect-minio" }
+rustfs-gateway-dialect-rustfs-admin = { path = "../crates/dialect-rustfs-admin" }
 # The migration-only differential (rustfs/backlog#1762): the decode_diff and encode_diff properties.
 rustfs-gateway-difftest = { path = "../crates/difftest" }
 rustfs-gateway-http = { path = "../crates/http" }
@@ -25,7 +28,8 @@ rustfs-gateway-xml = { path = "../crates/xml" }
 # The `policy_json` property's reference reader: the JSON reader RustFS loads a stored policy with.
 serde = "1"
 serde_json = "1"
-# The `self_held_http1` property drives the production driver over a real loopback socket.
+# The `self_held_http1` and `server_http_conn` properties drive the production drivers over loopback.
+hyper = "1"
 http-body-util = "0.1"
 tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }
@@ -190,6 +194,48 @@ bench = false
 [[bin]]
 name = "self_held_http1"
 path = "fuzz_targets/self_held_http1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dialect_admin_routes"
+path = "fuzz_targets/dialect_admin_routes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "s3vectors_auth"
+path = "fuzz_targets/s3vectors_auth.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sig_token_and_sts"
+path = "fuzz_targets/sig_token_and_sts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "server_http_conn"
+path = "fuzz_targets/server_http_conn.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_metadata_query"
+path = "fuzz_targets/http_metadata_query.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sse_context_json"
+path = "fuzz_targets/sse_context_json.rs"
 test = false
 doc = false
 bench = false

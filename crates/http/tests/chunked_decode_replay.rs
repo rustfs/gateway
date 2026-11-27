@@ -32,12 +32,18 @@ mod chunked_decode;
 use chunked_decode::{Outcome, check};
 
 /// The seeds the property's two directions rest on. Each must exist; none may be skipped.
-const REQUIRED_SEEDS: [&str; 5] = [
+const REQUIRED_SEEDS: [&str; 11] = [
     "valid-signed",
     "oversized-chunk",
     "truncated-data",
     "bad-signature",
     "underflow-declared",
+    "valid-unsigned-trailer",
+    "valid-signed-trailer",
+    "missing-signed-trailer-sig",
+    "bad-signed-trailer-sig",
+    "undeclared-trailer",
+    "oversized-trailer",
 ];
 
 fn seed_dir() -> PathBuf {
@@ -106,6 +112,56 @@ fn the_underflow_seed_is_refused_one_byte_short_of_its_declaration() {
     let outcome = replay("underflow-declared");
     assert_eq!(outcome.verdict, Err(ChunkReject::DecodedLengthUnderflow { declared: 6, actual: 5 }));
     assert_eq!(outcome.chunks_verified, None, "unsigned framing has no signer");
+}
+
+/// Positive trailer control (unsigned): `STREAMING-UNSIGNED-PAYLOAD-TRAILER` delivers the body and
+/// declared checksum trailer through `ingest/trailer.rs`.
+#[test]
+fn the_valid_unsigned_trailer_seed_delivers_body_and_declared_trailer() {
+    let outcome = replay("valid-unsigned-trailer");
+    assert_eq!(outcome.verdict, Ok(b"hello".to_vec()));
+    assert_eq!(outcome.delivered_bytes, 5);
+    assert_eq!(outcome.chunks_verified, None);
+    assert!(outcome.trailers_seen);
+}
+
+/// Positive trailer control (signed): `STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER` verifies both
+/// chunk signatures and the chained `x-amz-trailer-signature`.
+#[test]
+fn the_valid_signed_trailer_seed_verifies_chunks_and_trailer_signature() {
+    let outcome = replay("valid-signed-trailer");
+    assert_eq!(outcome.verdict, Ok(b"hello".to_vec()));
+    assert_eq!(outcome.delivered_bytes, 5);
+    assert_eq!(outcome.chunks_verified, Some(2));
+    assert!(outcome.trailers_seen);
+}
+
+/// Negative: a signed trailer section that omits `x-amz-trailer-signature` is refused.
+#[test]
+fn n_the_missing_signed_trailer_signature_seed_is_refused() {
+    let outcome = replay("missing-signed-trailer-sig");
+    assert_eq!(outcome.verdict, Err(ChunkReject::TrailerSignatureMissing));
+}
+
+/// Negative: a signed trailer section with one flipped signature hex digit is refused.
+#[test]
+fn n_the_bad_signed_trailer_signature_seed_is_refused() {
+    let outcome = replay("bad-signed-trailer-sig");
+    assert_eq!(outcome.verdict, Err(ChunkReject::TrailerSignatureMismatch));
+}
+
+/// Negative: a trailer field not named in `x-amz-trailer` is refused in strict mode.
+#[test]
+fn n_the_undeclared_trailer_seed_is_refused() {
+    let outcome = replay("undeclared-trailer");
+    assert_eq!(outcome.verdict, Err(ChunkReject::DeclaredTrailerMismatch));
+}
+
+/// Negative: a trailer section exceeding the 1 KiB ceiling is refused.
+#[test]
+fn n_the_oversized_trailer_seed_is_refused() {
+    let outcome = replay("oversized-trailer");
+    assert_eq!(outcome.verdict, Err(ChunkReject::TrailerSizeExceeded));
 }
 
 /// Every committed seed — the five above and any minimised regression added later — replays

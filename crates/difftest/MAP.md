@@ -51,7 +51,7 @@ compare and why this is not an in-process dual stack.
 | `src/fuzz.rs` | The fuzz input format (a raw request) and the two fuzz properties, with the known classes each input domain leaves out. | A fuzz target reports something, or its input domain changes. |
 | `src/endpoint_replay/{mod,encode,http_client}.rs` | Out-of-process HTTP/1.1 replay of `decode_diff` and `encode_diff` fuzz corpora against a live `--endpoint`, with health probes and redacted crash artifacts. | The nightly candidate endpoint replay changes. |
 | `src/bin/fuzz-endpoint-replay.rs` | The endpoint replay runner's command line. | Never; it only calls `endpoint_replay::main`. |
-| `src/tests/endpoint_replay.rs` | Loopback server and CLI tests for `endpoint_replay`, plus committed `encode_diff` seed replay. | Endpoint replay contracts or failure detection changes. |
+| `src/tests/endpoint_replay.rs`, `src/tests/endpoint_replay_xml.rs` | Loopback server and CLI tests for `endpoint_replay`, XML 1.0 `Char` validation, `decode_diff` XML checks, control-byte preservation, and committed `encode_diff` seed replay. | Endpoint replay contracts or failure detection changes. |
 | `src/fuzz_case.rs` | A decode_diff fuzz artifact as a conformance case draft under `conformance/cases/_from_fuzz/`. | Converting a fuzz finding into a case. |
 | `src/bin/fuzz-to-case.rs` | The converter's command line. | Never; it only calls `fuzz_case::draft`. |
 | `src/tests/fuzz.rs` | The stable replay of both properties (committed seeds, fixed-seed samplers), the reader, the converter, and both properties failing on injected faults. | A fuzz property or the converter changes. |

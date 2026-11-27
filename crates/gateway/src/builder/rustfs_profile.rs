@@ -28,83 +28,85 @@
 //! Upstream: `super::ServiceBuilder`, `crate::ext::SigV4Authenticator`. Downstream:
 //! `crate::startup_report`, the RustFS bridge and the client-matrix launcher (`compat/sut`).
 //!
-//! # The switches, what each keeps, and where rustfs/backlog#2684 registers it
+//! # The switches, what each keeps, and where each is registered
 //!
-//! `docs/rustfs-profile.md` carries the same table with each switch's exit condition. "Unregistered"
-//! means rustfs/backlog#2684 has no entry for the reading yet; the register has no item numbers,
-//! so an entry is named by its heading.
+//! `docs/rustfs-profile.md` carries the same table with each switch's exit condition. Every switch
+//! must carry a registered tracking entry (a `rustfs/backlog#2684` heading, an accepted ADR, or a
+//! tracked repository issue); `scripts/check_rustfs_profile_registered.sh` enforces zero
+//! unregistered switches and parity between code, this rustdoc table, and `docs/rustfs-profile.md`.
 //!
 //! Builder half, `ServiceBuilder::rustfs_profile`:
 //!
-//! | Switch | Legacy RustFS behaviour kept | #2684 entry |
+//! | Switch | Legacy RustFS behaviour kept | Tracking entry |
 //! | --- | --- | --- |
 //! | `accept_all_checksum_omissions` | no integrity claim required on any request body | "no checksum required on any operation" (R5) |
-//! | `accept_an_empty_line_before_aws_chunk_trailers` | one CRLF between the terminal chunk line and the first trailer field read as part of the section | unregistered (rustfs/backlog#2734) |
+//! | `accept_an_empty_line_before_aws_chunk_trailers` | one CRLF between the terminal chunk line and the first trailer field read as part of the section | `rustfs/gateway#1634` (origin: `rustfs/backlog#2734`) |
 //! | `accept_empty_uploads_without_content_length` | an upload the transport ended empty without `Content-Length` is an empty object | "empty upload without Content-Length stored" |
 //! | `accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report` | every key up to 1024 bytes reaches storage, which judges it | "paths, keys and addressing as legacy" (`key_floor.rs`) |
 //! | `accept_minio_body_literals` | a bare `Enabled` body on a versioning or object-lock write | "bare `Enabled` body" (R6) |
 //! | `accept_mismatched_payload_digests_without_a_body` | a bodyless request's signed digest is not compared | "bodyless signed digest unchecked" |
 //! | `address_paths_as_legacy_rustfs` | the path decoded whole before the bucket split, `GET //` as `GET /` | "paths, keys and addressing as legacy" (`addressing.rs`, `legacy_addressing.rs`) |
-//! | `answer_aws_chunk_refusals_as_legacy_rustfs` | a malformed aws-chunked body `IncompleteBody` or `EntityTooLarge`, a 1 KiB size line, a short body refused by the decoder | unregistered (rustfs/backlog#2734) |
+//! | `answer_aws_chunk_refusals_as_legacy_rustfs` | a malformed aws-chunked body `IncompleteBody` or `EntityTooLarge`, a 1 KiB size line, a short body refused by the decoder | `rustfs/gateway#1634` (origin: `rustfs/backlog#2734`) |
 //! | `answer_body_refusals_with_legacy_rustfs_sentences` | body refusals worded by code, in the API layer's fixed sentences | "digest and short-body failures use one wording" |
 //! | `answer_checksum_failures_with_bad_digest` | every checksum failure is `BadDigest`, a missed `x-amz-content-sha256` excluded | "checksum failures answer `BadDigest`" |
-//! | `answer_cors_as_legacy_rustfs` | CORS answered in front of the stack, every `OPTIONS` before routing, no fallback origins | unregistered (rustfs/gateway#1120) |
-//! | `answer_credential_refusals_with_legacy_rustfs_sentences` | the two credential refusals in RustFS's words | unregistered (rustfs/gateway#1120) |
-//! | `answer_customer_key_refusals_as_legacy_rustfs` | a refused customer key `400 InvalidRequest`, one sentence per rule, the width named | unregistered (rustfs/backlog#2734) |
-//! | `answer_denials_with_legacy_rustfs_sentence` | every denial is `Access Denied` | unregistered (rustfs/gateway#1349) |
-//! | `answer_head_refusals_without_content_length` | a refused `HEAD` carries no `Content-Length` | unregistered (rustfs/gateway#1120) |
+//! | `answer_cors_as_legacy_rustfs` | CORS answered in front of the stack, every `OPTIONS` before routing, no fallback origins | `rustfs/gateway#1634` (origin: `rustfs/gateway#1120`) |
+//! | `answer_credential_refusals_with_legacy_rustfs_sentences` | the two credential refusals in RustFS's words | `rustfs/gateway#1634` (origin: `rustfs/gateway#1120`) |
+//! | `answer_customer_key_refusals_as_legacy_rustfs` | a refused customer key `400 InvalidRequest`, one sentence per rule, the width named | `rustfs/gateway#1634` (origin: `rustfs/backlog#2734`) |
+//! | `answer_denials_with_legacy_rustfs_sentence` | every denial is `Access Denied` | `rustfs/gateway#1634` (origin: `rustfs/gateway#1349`) |
+//! | `answer_head_refusals_without_content_length` | a refused `HEAD` carries no `Content-Length` | `rustfs/gateway#1634` (origin: `rustfs/gateway#1120`) |
 //! | `answer_header_signatures_as_legacy_rustfs` | header-signature refusals before the credential lookup, naming the field | "signature verification as legacy" (GW-SIG, item 4) |
 //! | `answer_heads_as_legacy_rustfs` | `HeadBucket` without a region, policy write `204`, restore `200`, policy read untyped | "response heads and statuses as legacy" |
 //! | `answer_not_modified_with_legacy_rustfs_headers` | a `304` retaining stored validators, caching fields and evaluated version id on `GET` and `HEAD` | "RustFS errors answered as legacy" |
 //! | `answer_presigned_urls_as_legacy_rustfs` | presigned refusals before the credential lookup, naming the parameter | "signature verification as legacy" (GW-SIG, item 5) |
-//! | `authorize_header_permissions_as_legacy_rustfs` | tagging and ACL headers ask the base permission only | unregistered (GHSA-3ppv-adjacent) |
-//! | `authorize_versions_as_legacy_rustfs` | `HEAD`, tag and ACL reads of a version ask the unversioned action | unregistered (GHSA-3ppv) |
-//! | `bound_aws_chunk_trailers_as_legacy_rustfs` | a trailer section of up to 16 KiB and a hundred fields, undeclared fields signature-covered and dropped | unregistered (rustfs/backlog#2734) |
-//! | `bound_buffered_bodies_as_legacy_rustfs` | buffered bodies read up to 20 MiB with no XML bound below it | unregistered (rustfs/gateway#1173) |
-//! | `bound_claimed_route_bodies_as_legacy_rustfs` | a claimed route's body over 1 MiB refused before its access check | unregistered (rustfs/gateway#1173) |
+//! | `authorize_header_permissions_as_legacy_rustfs` | tagging and ACL headers ask the base permission only | `rustfs/gateway#1634` (security; origin: `GHSA-3ppv`-adjacent) |
+//! | `authorize_versions_as_legacy_rustfs` | `HEAD`, tag and ACL reads of a version ask the unversioned action | `rustfs/gateway#1634` (security; origin: `GHSA-3ppv`) |
+//! | `bound_aws_chunk_trailers_as_legacy_rustfs` | a trailer section of up to 16 KiB and a hundred fields, undeclared fields signature-covered and dropped | `rustfs/gateway#1634` (origin: `rustfs/backlog#2734`) |
+//! | `bound_buffered_bodies_as_legacy_rustfs` | buffered bodies read up to 20 MiB with no XML bound below it | `rustfs/gateway#1634` (DoS; origin: `rustfs/gateway#1173`) |
+//! | `bound_claimed_route_bodies_as_legacy_rustfs` | a claimed route's body over 1 MiB refused before its access check | `rustfs/gateway#1634` (origin: `rustfs/gateway#1173`) |
 //! | `clamp_oversized_max_keys` | `max-keys` above 1000 lowered, not refused | "`max-keys` above 1000 silently lowered" |
-//! | `drain_unread_request_bodies` (300 s idle) | an unread HTTP/1 body drained behind the answer, then the connection closed | unregistered (rustfs/gateway#1120) |
-//! | `enforce_unsigned_post_policies_as_legacy_rustfs` | a form policy no signature covers enforced, its refusals in RustFS's codes and words | unregistered (rustfs/backlog#2734) |
-//! | `identify_requests_as_legacy_rustfs` | one UUID in `x-amz-request-id` and `x-request-id`, no `x-amz-id-2` | unregistered (ruling R10) |
+//! | `drain_unread_request_bodies` (300 s idle) | an unread HTTP/1 body drained behind the answer, then the connection closed | `rustfs/gateway#1634` (DoS; origin: `rustfs/gateway#1120`, `rustfs/rustfs#7019`) |
+//! | `enforce_unsigned_post_policies_as_legacy_rustfs` | a form policy no signature covers enforced, its refusals in RustFS's codes and words | `rustfs/gateway#1634` (security; origin: `rustfs/backlog#2734`) |
+//! | `identify_requests_as_legacy_rustfs` | one UUID in `x-amz-request-id` and `x-request-id`, no `x-amz-id-2` | `rustfs/gateway#1634` (origin: ruling R10) |
 //! | `ignore_unknown_checksum_algorithms` | an unknown checksum algorithm header ignored | "unknown-algorithm checksum headers ignored" |
 //! | `leave_anonymous_streaming_payloads_undecoded` | an anonymous aws-chunked upload refused, not decoded | "anonymous aws-chunked upload not decoded" |
-//! | `leave_bodies_of_bodyless_operations_unread` | a body on a bodyless operation never polled | unregistered (rustfs/gateway#1173) |
+//! | `leave_bodies_of_bodyless_operations_unread` | a body on a bodyless operation never polled | `rustfs/gateway#1634` (origin: `rustfs/gateway#1173`) |
 //! | `legacy_rustfs_post_forms` | browser forms read with the legacy grammar | "POST forms parsed with the legacy grammar" (GW-FORM) |
-//! | `read_aws_chunks_as_legacy_rustfs` | aws-chunked framing with no chunk-count or share bound | unregistered (rustfs/gateway#1173) |
-//! | `read_checksum_declarations_as_legacy_rustfs` | a doubled `x-amz-checksum-algorithm` and a two-checksum trailer refused with RustFS's codes | unregistered (rustfs/gateway#1349) |
+//! | `read_aws_chunks_as_legacy_rustfs` | aws-chunked framing with no chunk-count or share bound | `rustfs/gateway#1634` (DoS; origin: `rustfs/gateway#1173`) |
+//! | `read_checksum_declarations_as_legacy_rustfs` | a doubled `x-amz-checksum-algorithm` and a two-checksum trailer refused with RustFS's codes | `rustfs/gateway#1634` (origin: `rustfs/gateway#1349`) |
 //! | `read_checksums_as_legacy_rustfs` | claims read as the storage reader reads them; the SDK algorithm header not read | "trailer algorithm ignores `x-amz-sdk-checksum-algorithm`" |
 //! | `read_empty_headers_as_absent` | an empty optional header claims nothing | "empty request headers read as absent" |
-//! | `read_request_documents_as_rustfs` | request documents refused by shape with `MalformedXML` | unregistered (rustfs/gateway#1078) |
-//! | `refuse_copy_source_arns_as_not_implemented` | an access-point or Outposts ARN copy source `501` before input authorization | unregistered (ADR-0045, rustfs/gateway#1609) |
+//! | `read_request_documents_as_rustfs` | request documents refused by shape with `MalformedXML` | `rustfs/gateway#1634` (origin: `rustfs/gateway#1078`) |
+//! | `refuse_copy_source_arns_as_not_implemented` | an access-point or Outposts ARN copy source `501` before input authorization | `rustfs/gateway#1634` (origin: `ADR-0045`, `rustfs/gateway#1609`) |
 //! | `refuse_plaintext_customer_keys_before_routing` | a customer key over cleartext refused before routing, copy source included | "SSE-C TLS gate" (R11) |
 //! | `refuse_unreadable_date_conditions` | a conditional date in one spelling, the rest refused | "conditional dates read strictly" (R14) |
 //! | `refuse_unsigned_amz_headers_before_routing` | a swapped algorithm token, an unreadable header or an unsigned `x-amz-*` refused before routing | "signature verification as legacy" (GW-SIG) |
-//! | `refuse_unsized_buffered_bodies_as_legacy_rustfs` | a buffered write RustFS cannot size refused | unregistered (rustfs/gateway#1173) |
+//! | `refuse_unsized_buffered_bodies_as_legacy_rustfs` | a buffered write RustFS cannot size refused | `rustfs/gateway#1634` (origin: `rustfs/gateway#1173`) |
 //! | `select_operations_as_legacy_rustfs` | `x-id` first, two operation keys ordered by RustFS's table | "paths, keys and addressing as legacy" (`route/legacy_rustfs.rs`) |
 //! | `sign_base64_payload_digests_as_hex` | a base64 payload digest signed as its hex | "signature verification as legacy" (GW-SIG, item 3) |
 //! | `sign_presigned_payloads_as_unsigned` | every presigned request signed over `UNSIGNED-PAYLOAD` | "presigned payload digest not covered by the signature" |
 //! | `slash_policy(SlashPolicy::RustfsLegacy)` | leading slashes of a key folded | "paths, keys and addressing as legacy" (`slash.rs`) |
 //! | `url_encode_listings_like_rustfs` | `encoding-type=url` echoed as sent, only some members encoded | "listing echoes `encoding-type`, encodes some members" |
-//! | `write_responses_as_rustfs` | members in RustFS's order, no line end after the declaration, no namespace on a payload root, a listing entry's unheld `LastModified` or `StorageClass` written as no element | unregistered (rustfs/gateway#1078, #1613) |
-//! | `framework_governor_rates` (every layer unlimited) | no pre-authentication limit on any layer | "failed signatures and anonymous requests unlimited" |
-//! | floor: `delegate_anonymous_to_authorizer_after_listing_in_the_posture_report` | every request decided by policy, anonymous ones included | unregistered (ADR-0021) |
-//! | floor: `enable_sigv2_presigned_compatibility` | SigV2 presigned URLs accepted | unregistered (rustfs/gateway#913) |
+//! | `write_responses_as_rustfs` | members in RustFS's order, no line end after the declaration, no namespace on a payload root, a listing entry's unheld `LastModified` or `StorageClass` written as no element | `rustfs/gateway#1634` (origin: `rustfs/gateway#1078`, `#1613`) |
+//! | `framework_governor_rates` (every layer unlimited) | no pre-authentication limit on any layer | "failed signatures and anonymous requests unlimited" (DoS; `rustfs/gateway#1634`) |
+//! | floor: `delegate_anonymous_to_authorizer_after_listing_in_the_posture_report` | every request decided by policy, anonymous ones included | `rustfs/gateway#1634` (deployment choice; origin: `ADR-0021`) |
+//! | floor: `enable_sigv2_presigned_compatibility` | SigV2 presigned URLs accepted | `rustfs/gateway#1634` (origin: `rustfs/gateway#913`) |
 //! | floor: `with_presigned_expiry_rule(LegacyRustfs)` | `X-Amz-Expires` as a `u32` with `0`, SigV2 `Expires` without the seven-day ceiling | "`X-Amz-Expires` spellings, SigV2 links to 9999" |
-//! | floor: `admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report` | a presigned URL on every standard operation, never on a privileged one | unregistered (rustfs/gateway#1052) |
+//! | floor: `admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report` | a presigned URL on every standard operation, never on a privileged one | `rustfs/gateway#1634` (origin: `rustfs/gateway#1052`) |
 //! | floor: `recognize_signatures_as_legacy_rustfs` | a query or form is signed only when it carries the signature | "signature verification as legacy" (GW-SIG, item 9) |
 //!
 //! Authenticator half, `SigV4Authenticator::rustfs_profile`:
 //!
-//! | Switch | Legacy RustFS behaviour kept | #2684 entry |
+//! | Switch | Legacy RustFS behaviour kept | Tracking entry |
 //! | --- | --- | --- |
-//! | `accept_any_signing_region` | any region of the grammar verified | unregistered (ADR-0023) |
+//! | `accept_any_signing_region` | any region of the grammar verified | `rustfs/gateway#1634` (deployment choice; origin: `ADR-0023`) |
 //! | `accept_empty_signing_region` | an empty scope region verified | "empty signing region verified" |
 //! | `refuse_unreadable_signing_regions_after_verification` | a region outside the grammar refused after the signature, `InvalidRequest` | "region outside the grammar verified, then refused" |
 //! | `accept_signing_regions_of_any_length` | no ceiling on the region's length | "no region length ceiling" |
-//! | `verify_paths_as_legacy_rustfs` | the path decoded once for signing, malformed percent literal, the raw candidate by the native rule | unregistered (rustfs/gateway#1314, #1315) |
+//! | `verify_paths_as_legacy_rustfs` | the path decoded once for signing, malformed percent literal, the raw candidate by the native rule | `rustfs/gateway#1634` (origin: `rustfs/gateway#1314`, `#1315`) |
 //! | `accept_legacy_rustfs_signing_services` | `s3`, `sts` and `s3tables` verified on every operation, others `501` | "signature verification as legacy" (GW-SIG, items 1–2) |
 //! | `answer_credential_scope_refusals_as_legacy_rustfs` | a scope date or region refusal in RustFS's code and words | "signature verification as legacy" (GW-SIG, item 6) |
 //! | `read_signed_headers_as_legacy_rustfs` | `SignedHeaders` read verbatim, refusals in RustFS's words | "signature verification as legacy" (GW-SIG, items 7–8) |
+//! | `accept_unsigned_cloudfront_id_as_legacy_rustfs` | a request with an unsigned `x-amz-cf-id` header served | `rustfs/gateway#1634` (origin: `rustfs/backlog#2684`) |
 //! | `answer_credential_store_faults_as_unavailable` | a credential-store fault answered `500 InternalError` | R-068 (rustfs/gateway#1585, ADR-0051) |
 //!
 //! # Why one method and not a configuration file

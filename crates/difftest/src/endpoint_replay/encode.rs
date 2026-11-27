@@ -35,7 +35,7 @@ use super::{
     CorpusEntry, Endpoint, Options, Report, Target, ensure_bucket, maybe_mark_dead, record_failure, send_checked,
     send_signed_if_configured,
 };
-use crate::fuzz::outputs_of;
+use crate::fuzz::endpoint_replay_outputs_of;
 use crate::project::OracleOutput;
 use crate::request::RawRequest;
 
@@ -51,7 +51,7 @@ pub(super) fn replay_encode_diff(
     ensure_bucket(endpoint, &options.bucket, options.credentials.as_ref(), options.timeout)?;
     for (index, entry) in entries.iter().enumerate() {
         report.replayed += 1;
-        let samples = outputs_of(&entry.bytes);
+        let samples = endpoint_replay_outputs_of(&entry.bytes);
         let mut entry_error = None;
         for sample in samples {
             match (sample.output)() {

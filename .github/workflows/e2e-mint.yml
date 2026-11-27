@@ -103,9 +103,9 @@ jobs:
         run: bash scripts/ci_install_host_tools.sh --with-gh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
-          toolchain: stable
+          toolchain: 1.97.1
 
       - name: Build the compatibility SUT
         run: cargo build --release -p rustfs-gateway-compat-sut

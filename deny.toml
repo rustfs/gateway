@@ -26,6 +26,9 @@ exceptions = [
     { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
     # Reached only through the test-oracle git revisions allowed under [sources] below.
     { crate = "xxhash-rust", allow = ["BSL-1.0"] },
+    # Reached only through the excluded fuzz/ workspace for LLVM libFuzzer integration;
+    # no production gateway crate links it.
+    { crate = "libfuzzer-sys", allow = ["NCSA"] },
 ]
 
 [bans]

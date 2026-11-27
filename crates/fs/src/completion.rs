@@ -25,7 +25,6 @@
 //! `super::completion_replay`, and the publication in `super::versioning`.
 
 use std::io;
-use std::sync::atomic::Ordering;
 
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{CompleteMultipartUpload, CompleteMultipartUploadOutput};
@@ -139,9 +138,10 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",
             std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
+            super::staging::next_temporary_id()
         ));
-        tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
+        std::fs::rename(&upload, &tombstone).map_err(|_| no_such_upload())?;
+        let mut tombstone_guard = super::staging::CompletionTombstoneGuard::new(tombstone.clone(), upload);
         // The completion's write conditions are the same verdict `PutObject` gives, evaluated
         // inside the publication's version lock (rustfs/gateway#1002, #808).
         let write_conditions = conditions::conditions(
@@ -151,7 +151,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             None,
             Timestamp::from_secs(self.clock.now().unix_seconds()),
         )?;
-        let published = match self
+        let published = self
             .publish_object_if(
                 input.bucket.as_str(),
                 input.key.as_str(),
@@ -160,15 +160,12 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 &attributes,
                 conditions::any(&write_conditions).then_some(&write_conditions),
             )
-            .await
-        {
-            Ok(published) => published,
-            Err(error) => {
-                let _ = tokio::fs::rename(&tombstone, &upload).await;
-                return Err(error);
-            }
-        };
-        let _ = tokio::fs::remove_dir_all(tombstone).await;
+            .await?;
+        tombstone_guard.mark_published();
+        #[cfg(test)]
+        super::staging::test_hooks::maybe_pause("complete_remove").await;
+        let _ = tokio::fs::remove_dir_all(&tombstone).await;
+        tombstone_guard.disarm();
         let parts = requested.iter().map(|(number, e_tag, _)| (*number, e_tag));
         completion_replay::record_completion(&published.directory, &upload_id, published.version_id.as_deref(), parts).await;
         let mut output = CompleteMultipartUploadOutput {

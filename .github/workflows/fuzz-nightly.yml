@@ -91,6 +91,12 @@ jobs:
           - sigv2_parse
           - presigned_query_parse
           - self_held_http1
+          - dialect_admin_routes
+          - s3vectors_auth
+          - sig_token_and_sts
+          - server_http_conn
+          - http_metadata_query
+          - sse_context_json
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -152,7 +158,7 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload crashes
         if: failure()
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fuzz-crash-${{ matrix.target }}-${{ github.run_id }}
           path: |
@@ -183,9 +189,9 @@ jobs:
           path: candidate/rustfs
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
-          toolchain: stable
+          toolchain: 1.97.1
       - name: Cache gateway replay build
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -347,7 +353,7 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload endpoint replay crash artifacts
         if: failure()
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fuzz-endpoint-replay-crash-${{ github.run_id }}
           path: |

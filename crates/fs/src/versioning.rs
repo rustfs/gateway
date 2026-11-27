@@ -395,7 +395,16 @@ impl FsBackend {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { return Err(storage_error()) };
             if name.starts_with(".tmp-") {
-                return Err(storage_error());
+                let file_type = entry.file_type().await.map_err(|_| storage_error())?;
+                if !file_type.is_dir() || file_type.is_symlink() {
+                    return Err(HandlerError::new(
+                        ErrorCode::INVALID_REQUEST,
+                        "the version path is not a safe record directory",
+                    ));
+                }
+                // An interrupted staging directory left by a killed writer holds no committed
+                // version; skip it instead of permanently failing every read on the bucket.
+                continue;
             }
             let file_type = entry.file_type().await.map_err(|_| storage_error())?;
             if !file_type.is_dir() || file_type.is_symlink() || !name.starts_with("v-") {
@@ -452,12 +461,8 @@ impl FsBackend {
         let digest = Sha256::digest(format!("{sequence}\0{key}\0{version_id}").as_bytes());
         let versions = self.versions_path(bucket);
         let destination = versions.join(format!("v-{sequence:020}-{}", hex::encode(digest)));
-        let temporary = versions.join(format!(
-            ".tmp-{}-{}",
-            std::process::id(),
-            self.temporary_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        tokio::fs::create_dir(&temporary).await.map_err(|_| storage_error())?;
+        let temporary = versions.join(format!(".tmp-{}-{}", std::process::id(), super::staging::next_temporary_id()));
+        let mut temp_guard = super::staging::TempDirGuard::create(temporary.clone())?;
         let object_metadata = match (body, e_tag) {
             (Some(bytes), Some(e_tag)) => {
                 Some((e_tag.opaque_tag().to_owned(), i64::try_from(bytes.len()).map_err(|_| storage_error())?))
@@ -465,50 +470,49 @@ impl FsBackend {
             (None, None) => None,
             _ => return Err(storage_error()),
         };
-        let result = async {
-            let (tag, size) = match (body, object_metadata) {
-                (Some(bytes), Some((tag, size))) => {
-                    tokio::fs::write(temporary.join(BODY_FILE), bytes).await?;
-                    (tag, size)
-                }
-                _ => (String::new(), 0),
-            };
-            // Written into the temporary directory, so the tags a write carried become visible in
-            // the same rename as the version itself — never a version first and its tags later.
-            if !attributes.tags.is_empty() {
-                tokio::fs::write(temporary.join(TAGS_FILE), serialize_tags(&attributes.tags)).await?;
+        let (tag, size) = match (body, object_metadata) {
+            (Some(bytes), Some((tag, size))) => {
+                // Open synchronously and flush to completion before renaming so neither cancellation
+                // cleanup nor an immediate post-rename read can observe an in-flight write.
+                super::staging::create_and_write_file(&temporary.join(BODY_FILE), bytes).await?;
+                (tag, size)
             }
-            let record = encode_version_record(&VersionRecord {
-                path: destination.clone(),
-                sequence,
-                key: key.to_owned(),
-                version_id: version_id.clone(),
-                kind: if body.is_some() {
-                    RecordKind::Object
-                } else {
-                    RecordKind::DeleteMarker
-                },
-                modified,
-                e_tag: tag,
-                size,
-                storage_class: attributes.storage_class.clone().unwrap_or(StorageClass::STANDARD),
-                metadata: attributes.metadata.clone(),
-                headers: attributes.headers.clone(),
-                checksum: attributes.checksum,
-                part_lengths: attributes.part_lengths.clone(),
-                part_metadata: attributes.part_metadata.clone(),
-                lock: attributes.lock.clone(),
-            });
-            #[cfg(test)]
+            _ => (String::new(), 0),
+        };
+        // Written into the temporary directory, so the tags a write carried become visible in
+        // the same rename as the version itself — never a version first and its tags later.
+        if !attributes.tags.is_empty() {
+            super::staging::create_and_write_file(&temporary.join(TAGS_FILE), serialize_tags(&attributes.tags).as_ref()).await?;
+        }
+        let record = encode_version_record(&VersionRecord {
+            path: destination.clone(),
+            sequence,
+            key: key.to_owned(),
+            version_id: version_id.clone(),
+            kind: if body.is_some() {
+                RecordKind::Object
+            } else {
+                RecordKind::DeleteMarker
+            },
+            modified,
+            e_tag: tag,
+            size,
+            storage_class: attributes.storage_class.clone().unwrap_or(StorageClass::STANDARD),
+            metadata: attributes.metadata.clone(),
+            headers: attributes.headers.clone(),
+            checksum: attributes.checksum,
+            part_lengths: attributes.part_lengths.clone(),
+            part_metadata: attributes.part_metadata.clone(),
+            lock: attributes.lock.clone(),
+        });
+        #[cfg(test)]
+        {
             tests::block_version_record_write(&temporary);
-            tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
-            tokio::fs::rename(&temporary, &destination).await
+            super::staging::test_hooks::maybe_pause("publish_version").await;
         }
-        .await;
-        if result.is_err() {
-            let _ = tokio::fs::remove_dir_all(&temporary).await;
-            return Err(storage_error());
-        }
+        super::staging::create_and_write_file(&temporary.join(RECORD_FILE), record.as_bytes()).await?;
+        std::fs::rename(&temporary, &destination).map_err(|_| storage_error())?;
+        temp_guard.disarm();
         self.read_version_record(destination).await
     }
 

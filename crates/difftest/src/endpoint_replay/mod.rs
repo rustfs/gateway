@@ -39,7 +39,7 @@ use rustfs_gateway::{MonotonicClock, SystemMonotonic};
 use sha2::{Digest as _, Sha256};
 
 use self::encode::replay_encode_diff;
-use self::http_client::{HttpResponse, preview_body, send_http_request};
+use self::http_client::{HttpResponse, expects_xml_body, preview_body, send_http_request, validate_xml_document};
 use crate::corpus::PRESIGN_PARAMETERS;
 use crate::fuzz::request_of;
 use crate::request::RawRequest;
@@ -480,6 +480,25 @@ fn replay_decode_diff(
                         request.target,
                         response.status,
                         preview_body(&response.body)
+                    );
+                    record_failure(
+                        report,
+                        options.artifacts_dir.as_deref(),
+                        Target::DecodeDiff,
+                        &entry.label,
+                        &entry.bytes,
+                        &detail,
+                    );
+                    if maybe_mark_dead(options, endpoint, report) {
+                        break;
+                    }
+                } else if (response.status == 200 || (400..500).contains(&response.status))
+                    && expects_xml_body(&response)
+                    && let Err(xml_err) = validate_xml_document(&response.body)
+                {
+                    let detail = format!(
+                        "{} {} returned HTTP {} with malformed XML: {xml_err}",
+                        request.method, request.target, response.status
                     );
                     record_failure(
                         report,

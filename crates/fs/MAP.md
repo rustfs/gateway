@@ -5,7 +5,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
-| `src/lib.rs` | Filesystem paths, capability authority, served region and owner, and four multipart handlers (`CreateMultipartUpload`, `UploadPart`, `ListParts`, `AbortMultipartUpload`). | Changing shared storage behavior or the registered operation set. |
+| `src/lib.rs`, `src/staging.rs`, `src/cancellation_tests.rs` | Filesystem paths, RAII staging cleanup guards, capability authority, served region and owner, four multipart handlers, and cancellation/concurrency negative tests. | Changing shared storage behavior, staging cleanup, or the registered operation set. |
 | `src/deletes.rs` | `DeleteObjects`: every requested key through the single-key deletion, reported once as deleted or as an error; quiet mode; the keys a stood-in storage refuses answered alone and left alone (`refusing_batch_deletes_of`). | Changing batch deletion or its per-key report. |
 | `src/put_object.rs`, `src/upload_part.rs`, `src/external_input.rs` | Shared ordinary/external object admission and verified publication. | Implementing external-data storage handlers. |
 | `tests/crud/external_payload.rs` | Persisted object/part success, refused publication and selected external GET bytes. | Changing external-data integration. |

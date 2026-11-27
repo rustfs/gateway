@@ -7437,6 +7437,140 @@ PY
 expect_fail check_rust_toolchain_msrv.sh \
     'a single-quoted YAML key allowing the MSRV check to fail' mut_rust_toolchain_ci_check_allowed_to_fail_with_quoted_key
 
+mut_rust_toolchain_rdma_msrv_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("rdma/Cargo.toml")
+text = path.read_text()
+old = 'rust-version = "1.97.1"'
+if old not in text:
+    raise SystemExit("rdma rust-version fixture missing")
+path.write_text(text.replace(old, 'rust-version = "1.98.1"', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'rdma/Cargo.toml rust-version drifting ahead of workspace MSRV' mut_rust_toolchain_rdma_msrv_drift \
+    'rdma/Cargo.toml rust-version'
+
+mut_rust_toolchain_build_rdma_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("scripts/build-rdma.sh")
+text = path.read_text()
+old = 'RUSTFS_RDMA_TOOLCHAIN:-1.97.1'
+if old not in text:
+    raise SystemExit("build-rdma.sh default toolchain fixture missing")
+path.write_text(text.replace(old, 'RUSTFS_RDMA_TOOLCHAIN:-1.98.1', 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'scripts/build-rdma.sh default toolchain drifting from workspace MSRV' mut_rust_toolchain_build_rdma_drift \
+    'scripts/build-rdma.sh default toolchain'
+
+mut_rust_toolchain_fuzz_nightly_moving_stable() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text()
+old = "          toolchain: 1.97.1\n"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly.yml pinned toolchain fixture missing")
+path.write_text(text.replace(old, "          toolchain: stable\n", 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'fuzz-nightly.yml rustfs-endpoint-replay reverting to moving toolchain: stable' \
+    mut_rust_toolchain_fuzz_nightly_moving_stable \
+    'fuzz-nightly.yml job rustfs-endpoint-replay installs'
+
+mut_rust_toolchain_e2e_mint_moving_stable() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/e2e-mint.yml")
+text = path.read_text()
+old = "          toolchain: 1.97.1\n"
+if text.count(old) != 1:
+    raise SystemExit("e2e-mint.yml pinned toolchain fixture missing")
+path.write_text(text.replace(old, "          toolchain: stable\n", 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'e2e-mint.yml reverting to moving toolchain: stable' \
+    mut_rust_toolchain_e2e_mint_moving_stable \
+    'e2e-mint.yml job mint installs'
+
+mut_rust_toolchain_action_sha_drift() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/perf-evidence.yml")
+text = path.read_text()
+old = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+if old not in text:
+    raise SystemExit("perf-evidence.yml upload-artifact pin fixture missing")
+path.write_text(text.replace(old, "actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b", 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'a GitHub Action SHA pin drifting in perf-evidence.yml' \
+    mut_rust_toolchain_action_sha_drift \
+    'GitHub Action actions/upload-artifact pins drifted across workflows'
+
+mut_rustfs_profile_doc_missing() {
+    rm -f docs/rustfs-profile.md
+}
+expect_fail check_rustfs_profile_registered.sh \
+    'docs/rustfs-profile.md deleted, which must fail closed rather than skip' \
+    mut_rustfs_profile_doc_missing \
+    'required input is missing: docs/rustfs-profile.md'
+
+mut_rustfs_profile_unregistered_reintroduced() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("docs/rustfs-profile.md")
+text = path.read_text()
+old = '`rustfs/gateway#1634` (origin: `rustfs/gateway#1120`)'
+if old not in text:
+    raise SystemExit("rustfs-profile.md tracking fixture missing")
+path.write_text(text.replace(old, "unregistered (rustfs/gateway#1120)", 1))
+PY
+}
+expect_fail check_rustfs_profile_registered.sh \
+    'an unregistered switch entry reintroduced into docs/rustfs-profile.md' \
+    mut_rustfs_profile_unregistered_reintroduced \
+    'still marked unregistered'
+
+mut_rustfs_profile_register_placeholder_exit() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("docs/rustfs-profile.md")
+text = path.read_text()
+old = "use the core's CORS runtime"
+if old not in text:
+    raise SystemExit("rustfs-profile.md exit condition fixture missing")
+path.write_text(text.replace(old, "register; then the core's CORS runtime", 1))
+PY
+}
+expect_fail check_rustfs_profile_registered.sh \
+    'a placeholder register; exit condition reintroduced into docs/rustfs-profile.md' \
+    mut_rustfs_profile_register_placeholder_exit \
+    'lacks a concrete retirement/exit condition'
+
+mut_rustfs_profile_undocumented_switch() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path("crates/gateway/src/builder/rustfs_profile.rs")
+text = path.read_text()
+old = "            .authorize_header_permissions_as_legacy_rustfs()\n"
+if old not in text:
+    raise SystemExit("rustfs_profile.rs switch fixture missing")
+path.write_text(text.replace(old, old + "            .undocumented_legacy_switch()\n", 1))
+PY
+}
+expect_fail check_rustfs_profile_registered.sh \
+    'a new switch added to ServiceBuilder::rustfs_profile without documenting it' \
+    mut_rustfs_profile_undocumented_switch \
+    'missing from docs/rustfs-profile.md'
+
 mut_governance_relationship_removed() {
     python3 - <<'PY'
 from pathlib import Path
@@ -14525,7 +14659,7 @@ import pathlib
 
 path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
 text = path.read_text()
-old = "uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87"
+old = "uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision"
 if old not in text:
     raise SystemExit("s3-tests Rust toolchain pin fixture is missing")
 path.write_text(text.replace(old, "uses: dtolnay/rust-toolchain@stable", 1))
@@ -14543,13 +14677,13 @@ import sys
 
 path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
 text = path.read_text()
-old = "        with:\n          toolchain: stable\n"
+old = "        with:\n          toolchain: 1.97.1\n"
 if text.count(old) != 1:
     raise SystemExit("s3-tests explicit Rust toolchain fixture is missing or ambiguous")
 mode = sys.argv[1]
 replacement = {
     "deleted": "",
-    "changed": "        with:\n          toolchain: beta\n",
+    "changed": "        with:\n          toolchain: stable\n",
     "misplaced": "",
 }[mode]
 text = text.replace(old, replacement, 1)
@@ -14565,15 +14699,15 @@ mut_s3tests_toolchain_selection_misplaced() { mut_s3tests_toolchain_selection mi
 expect_fail check_suites_pinned.sh \
     'the weekly Rust action loses its explicit toolchain input' \
     mut_s3tests_toolchain_selection_deleted \
-    'must set with.toolchain to stable on the pinned Rust action step'
+    'must set with.toolchain to the pinned 1.97.1 on the pinned Rust action step'
 expect_fail check_suites_pinned.sh \
-    'the weekly Rust action selects beta instead of stable' \
+    'the weekly Rust action selects moving stable instead of the pinned toolchain' \
     mut_s3tests_toolchain_selection_changed \
-    'must set with.toolchain to stable on the pinned Rust action step'
+    'must set with.toolchain to the pinned 1.97.1 on the pinned Rust action step'
 expect_fail check_suites_pinned.sh \
-    'the stable toolchain input is attached to the build step instead of the Rust action' \
+    'the pinned toolchain input is attached to the build step instead of the Rust action' \
     mut_s3tests_toolchain_selection_misplaced \
-    'must set with.toolchain to stable on the pinned Rust action step'
+    'must set with.toolchain to the pinned 1.97.1 on the pinned Rust action step'
 
 mut_s3tests_release_build_deleted() {
     python3 - <<'PYEOF'
@@ -19406,6 +19540,41 @@ expect_fail check_ci_time_gate.sh \
     'the driver cargo-deny step running before cargo-deny is installed' mut_ci_time_driver_deny_before_install \
     "must install cargo-deny before the driver's advisories"
 
+mut_ci_time_fuzz_deny_removed() {
+    replace_ci_text '      - name: Dependency policy of the fuzz workspace
+        run: cargo deny --locked --manifest-path fuzz/Cargo.toml --config deny.toml check advisories bans licenses sources
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'Static checks no longer judging the fuzz workspace lock' mut_ci_time_fuzz_deny_removed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_fuzz_deny_failure_swallowed() {
+    replace_ci_text '--manifest-path fuzz/Cargo.toml --config deny.toml check advisories bans licenses sources' \
+        '--manifest-path fuzz/Cargo.toml --config deny.toml check advisories bans licenses sources || true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the fuzz cargo-deny step swallowing its failure' mut_ci_time_fuzz_deny_failure_swallowed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_fuzz_deny_before_install() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+step = """      - name: Dependency policy of the fuzz workspace
+        run: cargo deny --locked --manifest-path fuzz/Cargo.toml --config deny.toml check advisories bans licenses sources
+"""
+anchor = "      - name: Model integrity\n"
+if step not in text or anchor not in text:
+    raise SystemExit("missing mutation subject")
+path.write_text(text.replace(step, "", 1).replace(anchor, step + anchor, 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'the fuzz cargo-deny step running before cargo-deny is installed' mut_ci_time_fuzz_deny_before_install \
+    'must install cargo-deny before the fuzz workspace check'
+
 mut_ci_time_deny_install_fallback() {
     replace_ci_text '          fallback: none' '          fallback: cargo-install'
 }
@@ -19893,6 +20062,13 @@ mut_ci_external_payload_backend_missing() {
 }
 expect_fail check_ci_test_split.sh \
     'the external payload job dropping filesystem publication tests' mut_ci_external_payload_backend_missing
+
+mut_ci_external_payload_rdma_check_missing() {
+    replace_ci_text '          scripts/ci_budget.sh 90 "rdma manifest compile check" bash scripts/verify_rdma_manifest.sh
+' ''
+}
+expect_fail check_ci_test_split.sh \
+    'the external payload job dropping the rdma manifest compile check' mut_ci_external_payload_rdma_check_missing
 
 mut_ci_external_payload_dependency_missing() {
     replace_ci_text ', external-payload-tests]' ']'

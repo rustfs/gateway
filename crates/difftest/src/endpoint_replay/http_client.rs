@@ -117,6 +117,7 @@ fn split_host_port(authority: &str) -> Result<(&str, u16), String> {
 #[derive(Debug)]
 pub(super) struct HttpResponse {
     pub(super) status: u16,
+    pub(super) headers: Vec<(String, String)>,
     pub(super) body: Vec<u8>,
 }
 
@@ -192,6 +193,7 @@ fn read_http_response(stream: &mut TcpStream, head_request: bool) -> Result<Http
         };
         return Ok(HttpResponse {
             status: head.status,
+            headers: head.headers,
             body,
         });
     }
@@ -366,8 +368,31 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|window| window == needle)
 }
 
+/// Whether a non-empty response body is expected to be an XML document — either because the
+/// response advertises an XML media type (`application/xml`, `text/xml`, `*+xml`) or because the
+/// body begins with `<`.
+pub(super) fn expects_xml_body(response: &HttpResponse) -> bool {
+    if response.body.is_empty() {
+        return false;
+    }
+    let has_xml_content_type = response.headers.iter().any(|(name, value)| {
+        if name != "content-type" {
+            return false;
+        }
+        let media = value.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+        media == "application/xml" || media == "text/xml" || media.ends_with("+xml")
+    });
+    if has_xml_content_type {
+        return true;
+    }
+    response.body.trim_ascii_start().starts_with(b"<")
+}
+
 pub(super) fn validate_xml_document(body: &[u8]) -> Result<(), String> {
     let text = std::str::from_utf8(body).map_err(|error| format!("non-UTF-8 XML response: {error}"))?;
+    if !text.chars().all(xmltree::is_xml_1_0_char) {
+        return Err(format!("document contains disallowed XML 1.0 character: {}", preview_body(body)));
+    }
     let trimmed = text.trim_start();
     let without_decl = if let Some(rest) = trimmed.strip_prefix("<?xml") {
         let end = rest.find("?>").ok_or_else(|| "unterminated XML declaration".to_owned())?;

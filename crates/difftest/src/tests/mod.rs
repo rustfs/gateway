@@ -29,6 +29,7 @@ mod controls;
 mod encode_controls;
 mod encoding;
 mod endpoint_replay;
+mod endpoint_replay_xml;
 mod fuzz;
 mod matrix;
 mod register;

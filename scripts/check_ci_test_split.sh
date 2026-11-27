@@ -305,7 +305,8 @@ end
 require_equal(workspace_runs.uniq.length, 3,
               "the workspace test runners do not cover three distinct shards")
 external_payload_run = <<~'RUN'
-  scripts/ci_budget.sh 480 "external payload tests" cargo test --package rustfs-gateway --package rustfs-gateway-fs --features rustfs-gateway/external-payload,rustfs-gateway-fs/external-payload external_payload
+  scripts/ci_budget.sh 420 "external payload tests" cargo test --package rustfs-gateway --package rustfs-gateway-fs --features rustfs-gateway/external-payload,rustfs-gateway-fs/external-payload external_payload
+  scripts/ci_budget.sh 90 "rdma manifest compile check" bash scripts/verify_rdma_manifest.sh
 RUN
 require_equal(external_payload.fetch("steps").last.fetch("run"), external_payload_run,
               "external-payload-tests command changed, lost feature coverage, or can hide a failure")

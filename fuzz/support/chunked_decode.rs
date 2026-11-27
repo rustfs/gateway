@@ -28,15 +28,15 @@
 //!
 //! | Offset | Meaning |
 //! | --- | --- |
-//! | 0 | bit 0 set: `STREAMING-AWS4-HMAC-SHA256-PAYLOAD`, signed with [`SIGNING_KEY`]; clear: unsigned framing with no trailer section |
+//! | 0 | bit 0 set: signed chunks (`STREAMING-AWS4-HMAC-SHA256-PAYLOAD*`), signed with [`SIGNING_KEY`]; bit 1 set: declares a trailer section (`ingest/trailer.rs`); bits 2..=3: declared checksum header index into [`TRAILER_DECLARATIONS`]; bit 4 set (with bit 1): enables legacy trailer bounds (`empty_line_before_trailers` + `undeclared_trailer_fields_discarded`) |
 //! | 1 | bytes handed out per wire read, minus one (`0` = one byte per read) |
 //! | 2 | chunk ceiling: index into [`MAX_CHUNK_SIZES`], modulo its length |
 //! | 3..7 | `x-amz-decoded-content-length`, big-endian `u32` |
 //! | 7.. | the wire body |
 //!
-//! The unsigned mode is not one a real `x-amz-content-sha256` value selects — the unsigned
-//! streaming form always declares a trailer — but it is the same decoder on its strictest terminal
-//! path, and it lets the fuzzer reach accepted bodies without forging an HMAC.
+//! When bit 1 is clear, unsigned mode runs with no trailer section (matching the historical
+//! pre-trailer seeds); when bit 1 is set, both `STREAMING-UNSIGNED-PAYLOAD-TRAILER` and
+//! `STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER` drive `ingest/trailer.rs` through `TrailerDeclaration`.
 //!
 //! # What is asserted, beyond "it did not panic"
 //!
@@ -62,7 +62,8 @@ use std::rc::Rc;
 
 use rustfs_gateway_http::{
     ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, DecodedLength, Framing,
-    IngestPipeline, IngestPolicy, Limits, MIN_CHUNK_META_BYTES, PayloadFramingSource, validate_decoded_length,
+    IngestPipeline, IngestPolicy, Limits, MIN_CHUNK_META_BYTES, PayloadFramingSource, TrailerDeclaration,
+    validate_decoded_length,
 };
 use rustfs_gateway_stream::{AsyncPayloadRead, PayloadCaps, ReadProgress, StreamError, TrailingHeaders};
 
@@ -78,6 +79,13 @@ pub(crate) const AMZ_DATE: &str = "20130524T000000Z";
 pub(crate) const HEADER_BYTES: usize = 7;
 /// The chunk ceilings an input can select: two small enough for a fuzzer to cross, and production's.
 pub(crate) const MAX_CHUNK_SIZES: [u32; 3] = [16, 4096, ChunkLimits::DEFAULT_MAX_CHUNK_SIZE];
+/// The `x-amz-trailer` declarations selectable when bit 1 of byte 0 is set.
+pub(crate) const TRAILER_DECLARATIONS: [&str; 4] = [
+    "x-amz-checksum-crc32",
+    "x-amz-checksum-crc32c",
+    "x-amz-checksum-sha256",
+    "x-amz-checksum-crc64nvme",
+];
 /// The longest accepted body whose every truncation is replayed.
 pub(crate) const SWEEP_LIMIT: usize = 512;
 
@@ -85,6 +93,8 @@ pub(crate) const SWEEP_LIMIT: usize = 512;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Case<'a> {
     pub(crate) signed: bool,
+    pub(crate) trailers: bool,
+    pub(crate) trailer_header: &'static str,
     pub(crate) slice: usize,
     pub(crate) limits: ChunkLimits,
     pub(crate) declared: u64,
@@ -97,10 +107,21 @@ impl<'a> Case<'a> {
         let (header, body) = input.split_first_chunk::<HEADER_BYTES>()?;
         let [flags, slice, ceiling, d0, d1, d2, d3] = *header;
         let ceiling = MAX_CHUNK_SIZES[usize::from(ceiling) % MAX_CHUNK_SIZES.len()];
+        let signed = flags & 1 == 1;
+        let trailers = flags & 2 != 0;
+        let trailer_header = TRAILER_DECLARATIONS[usize::from((flags >> 2) & 0b11)];
+        let mut limits = ChunkLimits::default().with_max_chunk_size(ceiling);
+        if trailers && (flags & 16 != 0) {
+            limits = limits
+                .with_empty_line_before_trailers()
+                .with_undeclared_trailer_fields_discarded();
+        }
         Some(Self {
-            signed: flags & 1 == 1,
+            signed,
+            trailers,
+            trailer_header,
             slice: usize::from(slice) + 1,
-            limits: ChunkLimits::default().with_max_chunk_size(ceiling),
+            limits,
             declared: u64::from(u32::from_be_bytes([d0, d1, d2, d3])),
             body,
         })
@@ -122,6 +143,8 @@ pub(crate) struct Outcome {
     pub(crate) bytes_read: usize,
     /// How many chunk signatures verified, for a signed case.
     pub(crate) chunks_verified: Option<u32>,
+    /// Whether trailers were delivered on EOF.
+    pub(crate) trailers_seen: bool,
 }
 
 /// Runs one input through the pipeline and asserts every property in the module docs.
@@ -151,11 +174,19 @@ pub(crate) fn check(input: &[u8]) -> Option<Outcome> {
     if outcome.verdict.is_ok() && case.body.len() <= SWEEP_LIMIT {
         for cut in 0..case.body.len() {
             let truncated = run(&case, &case.body[..cut]);
-            assert_eq!(
-                truncated.verdict.as_ref().err(),
-                Some(&ChunkReject::TruncatedStream),
-                "the first {cut} bytes of an accepted {}-byte body were not refused as truncated",
+            let expected_truncation = if case.trailers {
+                matches!(
+                    truncated.verdict.as_ref().err(),
+                    Some(ChunkReject::TruncatedStream | ChunkReject::TruncatedBeforeTrailer)
+                )
+            } else {
+                truncated.verdict.as_ref().err() == Some(&ChunkReject::TruncatedStream)
+            };
+            assert!(
+                expected_truncation,
+                "the first {cut} bytes of an accepted {}-byte body were refused as {:?}, not truncated",
                 case.body.len(),
+                truncated.verdict,
             );
         }
     }
@@ -165,8 +196,11 @@ pub(crate) fn check(input: &[u8]) -> Option<Outcome> {
 /// Builds the pipeline for `case` over `body`, drives it to its end, and asserts the invariants
 /// that hold for every body.
 fn run(case: &Case<'_>, body: &[u8]) -> Outcome {
-    let framing = ChunkFraming::derive(&Mode { signed: case.signed })
-        .expect("Mode answers framed and decoded-length-required together, so it is consistent");
+    let framing = ChunkFraming::derive(&Mode {
+        signed: case.signed,
+        trailers: case.trailers,
+    })
+    .expect("Mode answers framed and decoded-length-required together, so it is consistent");
     let signer = case.signed.then(|| {
         let scope = ChunkScope::new(SCOPE_LINE, AMZ_DATE).expect("SCOPE_LINE and AMZ_DATE are a valid constant scope");
         ChunkSigner::new(
@@ -192,11 +226,20 @@ fn run(case: &Case<'_>, body: &[u8]) -> Outcome {
         IngestPolicy::verify_before_deliver(),
     )
     .expect("the framing is framed and the signer is present exactly when it signs");
+    if case.trailers {
+        let header = http::HeaderValue::from_static(case.trailer_header);
+        let declaration = TrailerDeclaration::parse(&header, case.signed)
+            .expect("TRAILER_DECLARATIONS entries are valid single checksum headers");
+        pipeline = pipeline
+            .with_trailer_declaration(declaration)
+            .expect("the framing declares trailers and agrees on signing");
+    }
     let initial_window = pipeline.window_bytes();
 
     let mut cx = Context::from_waker(Waker::noop());
     let mut buf = [0u8; 1024];
     let mut delivered = Vec::new();
+    let mut trailers_seen = false;
     let verdict = loop {
         match Pin::new(&mut pipeline).poll_fill(&mut cx, &mut buf) {
             Poll::Pending => panic!("an in-memory wire never pends, so the pipeline must not either"),
@@ -204,7 +247,10 @@ fn run(case: &Case<'_>, body: &[u8]) -> Outcome {
                 assert!(n > 0 && n <= buf.len(), "a non-empty read filled {n} bytes");
                 delivered.extend_from_slice(&buf[..n]);
             }
-            Poll::Ready(Ok(ReadProgress::Eof { .. })) => break Ok(delivered),
+            Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
+                trailers_seen = !trailers.is_empty();
+                break Ok(delivered);
+            }
             Poll::Ready(Err(error)) => {
                 assert_eq!(error.bytes_before_error(), pipeline.delivered_bytes());
                 break Err(pipeline
@@ -227,7 +273,23 @@ fn run(case: &Case<'_>, body: &[u8]) -> Outcome {
             assert_eq!(body.len() as u64, case.declared, "an accepted body differs from its declared length");
             assert_eq!(pipeline.decoded_bytes(), case.declared);
             assert_eq!(pipeline.delivered_bytes(), case.declared);
-            assert!(pipeline.commit_allowed(), "an accepted body is not committable");
+            if case.trailers {
+                assert!(
+                    pipeline.trailer_section_complete(),
+                    "an accepted trailered body must complete its trailer section"
+                );
+                assert!(
+                    pipeline.trailer_signature_satisfied(),
+                    "an accepted trailered body must satisfy its trailer signature rule"
+                );
+                assert!(trailers_seen, "an accepted trailered body must yield its declared trailers on EOF");
+                assert!(
+                    !pipeline.commit_allowed(),
+                    "parsing a trailered body must not mint commit authority before checksum comparison"
+                );
+            } else {
+                assert!(pipeline.commit_allowed(), "an accepted body is not committable");
+            }
         }
         Err(_) => {
             assert!(!pipeline.commit_allowed(), "a refused body is committable");
@@ -247,6 +309,7 @@ fn run(case: &Case<'_>, body: &[u8]) -> Outcome {
         window_bytes: pipeline.window_bytes(),
         bytes_read: bytes_read.get(),
         chunks_verified: pipeline.signer().map(ChunkSigner::chunks_verified),
+        trailers_seen,
     }
 }
 
@@ -309,9 +372,10 @@ fn declared_length(framing: &ChunkFraming, declared: u64) -> DecodedLength {
         .expect("a framed body always yields a decoded length")
 }
 
-/// The signature-derived framing answers for the two modes an input can select.
+/// The signature-derived framing answers for the modes an input can select.
 struct Mode {
     signed: bool,
+    trailers: bool,
 }
 
 impl PayloadFramingSource for Mode {
@@ -328,7 +392,7 @@ impl PayloadFramingSource for Mode {
     }
 
     fn declares_trailers(&self) -> bool {
-        false
+        self.trailers
     }
 }
 

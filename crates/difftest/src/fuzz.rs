@@ -236,13 +236,21 @@ fn fields(input: &[u8], limit: usize) -> Vec<String> {
         .collect()
 }
 
-/// A listing member without what makes the gateway percent-encode the whole answer — a C0
-/// control, DEL, or a character XML 1.0 cannot hold (U+FFFE, U+FFFF) — the known class this
+/// A listing member without what makes the gateway percent-encode an unrequested listing answer —
+/// a C0 control, DEL, or a character XML 1.0 cannot hold (U+FFFE, U+FFFF) — the known class this
 /// property found (kd-encode-0051..0057; s3s writes U+FFFF raw, which no XML parser accepts).
 fn listing_member(text: &str) -> String {
     text.chars()
         .filter(|character| !(character.is_ascii_control() || matches!(character, '\u{fffe}' | '\u{ffff}')))
         .collect()
+}
+
+/// A listing member for the control-character encoding checks and live endpoint replay: retains
+/// ASCII control characters (`0x01..=0x1F`, `0x7F`) rather than blindly stripping all
+/// `is_ascii_control()` bytes so both in-process gateway XML 1.0 safety and live RustFS replay
+/// exercise control-byte encoding.
+fn control_preserving_listing_member(text: &str) -> String {
+    text.to_owned()
 }
 
 /// A header value without what no header field can carry at all (C0 controls other than tab,
@@ -350,6 +358,102 @@ pub fn outputs_of(input: &[u8]) -> Vec<OutputSample> {
     ]
 }
 
+/// Builds a `ListObjectsV2` sample from `input` without stripping `is_ascii_control()` bytes,
+/// used both for live endpoint replay and for gateway-side XML 1.0 safety verification.
+#[must_use]
+pub fn control_preserving_listing_sample(input: &[u8]) -> OutputSample {
+    let fields = fields(input, 12);
+    let field = |index: usize| fields.get(index).cloned().unwrap_or_default();
+    let keys: Vec<String> = fields
+        .iter()
+        .skip(4)
+        .map(|key| control_preserving_listing_member(key))
+        .filter(|key| !key.is_empty())
+        .collect();
+    let (prefix, delimiter, token, after) = (
+        control_preserving_listing_member(&field(0)),
+        control_preserving_listing_member(&field(1)),
+        control_preserving_listing_member(&field(2)),
+        control_preserving_listing_member(&field(3)),
+    );
+    let listing = move || {
+        OracleOutput::ListObjectsV2(oracle::ListObjectsV2Output {
+            name: Some("bkt".to_owned()),
+            prefix: Some(prefix.clone()),
+            delimiter: (!delimiter.is_empty()).then(|| delimiter.clone()),
+            max_keys: Some(1000),
+            key_count: i32::try_from(keys.len()).ok(),
+            continuation_token: (!token.is_empty()).then(|| token.clone()),
+            next_continuation_token: None,
+            is_truncated: Some(false),
+            start_after: (!after.is_empty()).then(|| after.clone()),
+            contents: Some(
+                keys.iter()
+                    .map(|key| oracle::Object {
+                        key: Some(key.clone()),
+                        size: Some(5),
+                        e_tag: Some(oracle::ETag::Strong("5d41402abc4b2a76b9719d911017c592".to_owned())),
+                        last_modified: Some(last_modified()),
+                        storage_class: Some(oracle::ObjectStorageClass::from("STANDARD".to_owned())),
+                        ..Default::default()
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        })
+    };
+    OutputSample {
+        name: "fuzz-list-objects-v2-controls".to_owned(),
+        request: RawRequest::get("/bkt?list-type=2"),
+        output: Arc::new(listing),
+    }
+}
+
+/// Samples for out-of-process `endpoint_replay` against a live S3 candidate: keeps ASCII control
+/// bytes intact in listing keys, prefixes, delimiters, and tokens instead of stripping them for
+/// `s3s` differential compatibility.
+#[must_use]
+pub fn endpoint_replay_outputs_of(input: &[u8]) -> Vec<OutputSample> {
+    let mut samples = outputs_of(input);
+    // Replace the s3s-stripped listing sample with the control-preserving one so the live
+    // candidate exercises control-character URL encoding and XML 1.0 escaping directly.
+    if let Some(first) = samples.first_mut() {
+        *first = control_preserving_listing_sample(input);
+    }
+    samples
+}
+
+/// Verifies that the gateway itself encodes arbitrary control-character listing members into a
+/// well-formed XML 1.0 document (never emitting illegal XML 1.0 `Char`s).
+fn check_gateway_xml_1_0_controls(differ: &Differ, input: &[u8]) -> Result<(), String> {
+    let sample = control_preserving_listing_sample(input);
+    let diff = differ.encode(&sample)?;
+    if diff.unconvertible.is_some() {
+        return Ok(());
+    }
+    if diff.status.gateway != 200 {
+        return Err(format!(
+            "{}: gateway returned HTTP {} on control-character listing",
+            sample.name, diff.status.gateway
+        ));
+    }
+    let body = std::str::from_utf8(&diff.body.gateway)
+        .map_err(|error| format!("{}: gateway emitted non-UTF-8 XML body: {error}", sample.name))?;
+    let trimmed = body.trim_start();
+    let without_decl = if let Some(rest) = trimmed.strip_prefix("<?xml") {
+        let Some(end) = rest.find("?>") else {
+            return Err(format!("{}: gateway wrote unterminated XML declaration", sample.name));
+        };
+        &rest[end + 2..]
+    } else {
+        trimmed
+    };
+    if !body.chars().all(crate::xmltree::is_xml_1_0_char) || crate::xmltree::parse(without_decl).is_none() {
+        return Err(format!("{}: gateway emitted invalid XML 1.0 for control-character listing", sample.name));
+    }
+    Ok(())
+}
+
 /// The unregistered encode differences of one sample, other than members the gateway output
 /// cannot hold (those say the conversion refused, which is reported, not a wire difference).
 ///
@@ -384,6 +488,7 @@ pub fn check_encode(input: &[u8]) -> Result<(), String> {
                 return Err(format!("{}: unregistered encode difference: {}", sample.name, describe(&differences)));
             }
         }
+        check_gateway_xml_1_0_controls(differ, input)?;
         Ok(())
     })
 }

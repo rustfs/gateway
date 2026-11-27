@@ -341,3 +341,39 @@ fn n_non_s3_service_unknown_and_unregistered_routes_omit_s3_prose() {
     let err = router.dispatch(&unhandled.parts()).expect_err("unhandled route");
     assert!(!err.message().contains("S3"), "unexpected S3 prose: {}", err.message());
 }
+
+#[path = "../../../fuzz/support/s3vectors_auth.rs"]
+mod s3vectors_auth_fuzz;
+
+fn encode_s3vectors_case(selector: u8, path: &str, query: &str) -> Vec<u8> {
+    let mut bytes = vec![selector];
+    for part in [path, query, "", ""] {
+        bytes.push(u8::try_from(part.len()).expect("short test fixture"));
+        bytes.extend_from_slice(part.as_bytes());
+    }
+    bytes
+}
+
+/// Negative — replays the `s3vectors_auth` fuzz property against its action route, claimed tag
+/// route, and ordinary S3 bucket/object paths, ensuring S3 operations never leak into the S3
+/// Vectors router.
+#[test]
+fn n_s3vectors_auth_fuzz_property_dispatches_only_declared_s3vectors_routes() {
+    let action_case = encode_s3vectors_case(0, "/PutVectors", "");
+    assert_eq!(s3vectors_auth_fuzz::check(&action_case), Some("s3vectors:PutVectors"));
+
+    let tags_case =
+        encode_s3vectors_case(1, "/tags/arn%3Aaws%3As3vectors%3Aus-east-1%3A%3Abucket%2Fvectors", "tagKeys=a&tagKeys=b");
+    assert_eq!(s3vectors_auth_fuzz::check(&tags_case), Some("s3vectors:ListTagsForResource"));
+
+    for s3_selector in [0u8, 1, 2, 3] {
+        let s3_case = encode_s3vectors_case(s3_selector, "/bucket/key", "list-type=2");
+        assert_eq!(
+            s3vectors_auth_fuzz::check(&s3_case),
+            None,
+            "S3 bucket/key route must not match on S3 Vectors router"
+        );
+    }
+    let _ = s3vectors_auth_fuzz::check(b"");
+    let _ = s3vectors_auth_fuzz::check(b"\xff\x08/tags/%2\x04k=v&");
+}
