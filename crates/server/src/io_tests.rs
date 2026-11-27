@@ -293,3 +293,183 @@ async fn n_h2_incomplete_headers_times_out_at_header_timeout_even_with_inflight_
     let error = read.await.expect("read task joins").expect_err("must return TimedOut");
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
 }
+
+struct PrefaceThenDelayed {
+    initial: Option<&'static [u8]>,
+    ready: Pin<Box<Sleep>>,
+    late: Option<&'static [u8]>,
+}
+
+impl PrefaceThenDelayed {
+    fn new(initial: &'static [u8], delay: Duration, late: &'static [u8]) -> Self {
+        Self {
+            initial: Some(initial),
+            ready: Box::pin(sleep(delay)),
+            late: Some(late),
+        }
+    }
+}
+
+impl AsyncRead for PrefaceThenDelayed {
+    fn poll_read(mut self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        if let Some(initial) = self.initial.take() {
+            buffer.put_slice(initial);
+            return Poll::Ready(Ok(()));
+        }
+        if self.ready.as_mut().poll(context).is_pending() {
+            return Poll::Pending;
+        }
+        if let Some(late) = self.late.take() {
+            buffer.put_slice(late);
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncWrite for PrefaceThenDelayed {
+    fn poll_write(self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        Poll::Ready(Ok(bytes.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        true
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        _context: &mut Context<'_>,
+        buffers: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Poll::Ready(Ok(buffers.iter().map(|slice| slice.len()).sum()))
+    }
+}
+
+const H2_CLIENT_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const H2_ERROR_GOAWAY: &[u8] = &[0, 0, 8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+const H2_NO_ERROR_GOAWAY: &[u8] = &[0, 0, 8, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+fn preface_io(
+    initial: &'static [u8],
+    delay: Duration,
+    late: &'static [u8],
+    drained: Arc<AtomicU64>,
+) -> ProgressIo<PrefaceThenDelayed> {
+    ProgressIo::new(
+        PrefaceThenDelayed::new(initial, delay, late),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(true)),
+        deadline_after(Duration::from_secs(60)),
+        Duration::from_secs(60),
+        Duration::from_secs(60),
+        Duration::from_secs(2),
+    )
+    .count_octets_into(Arc::new(AtomicU64::new(0)), drained)
+}
+
+/// Positive — after writing an HTTP/2 error `GOAWAY`, `poll_shutdown` waits inside `LINGER_QUIET`
+/// and drains a late-arriving pipelined frame instead of closing early into a TCP reset.
+#[tokio::test(start_paused = true)]
+async fn h2_error_goaway_waits_for_late_arriving_pipelined_frames_during_shutdown() {
+    let drained = Arc::new(AtomicU64::new(0));
+    let mut io = preface_io(H2_CLIENT_PREFACE, LINGER_QUIET / 2, b"late-h2-headers", Arc::clone(&drained));
+    let mut scratch = [0_u8; 32];
+    assert_eq!(io.read(&mut scratch).await.expect("preface reads"), H2_CLIENT_PREFACE.len());
+    io.write_all(H2_ERROR_GOAWAY).await.expect("error GOAWAY writes");
+    assert!(io.needs_protocol_error_linger());
+
+    let shutdown = tokio::spawn(async move {
+        io.shutdown().await.expect("shutdown succeeds");
+        assert!(!io.needs_protocol_error_linger(), "completed shutdown clears reclaim need");
+    });
+    tokio::task::yield_now().await;
+    assert!(!shutdown.is_finished(), "error GOAWAY shutdown must wait for late pipelined frame");
+    tokio::time::advance(LINGER_QUIET / 2).await;
+    shutdown.await.expect("shutdown task joins");
+    assert_eq!(drained.load(Ordering::Relaxed), 15);
+}
+
+/// Positive — vectored error `GOAWAY` writes across slices also arm error-GOAWAY lingering, and
+/// dropping `ReclaimableIo` without shutdown returns `ProgressIo` requesting post-error linger.
+#[tokio::test(start_paused = true)]
+async fn h2_error_goaway_via_vectored_write_reclaims_unshut_transport() {
+    let drained = Arc::new(AtomicU64::new(0));
+    let io = preface_io(H2_CLIENT_PREFACE, LINGER_QUIET / 2, b"late-frame", Arc::clone(&drained));
+    let (mut wrapped, mut reclaim_rx) = reclaimable(io);
+    let mut scratch = [0_u8; 32];
+    assert_eq!(wrapped.read(&mut scratch).await.expect("preface reads"), H2_CLIENT_PREFACE.len());
+    let (head, tail) = H2_ERROR_GOAWAY.split_at_checked(11).expect("17-byte GOAWAY");
+    let slices = [io::IoSlice::new(head), io::IoSlice::new(tail)];
+    assert_eq!(wrapped.write_vectored(&slices).await.expect("vectored write"), H2_ERROR_GOAWAY.len());
+    drop(wrapped);
+
+    let mut reclaimed = reclaim_rx.try_recv().expect("dropped ReclaimableIo returns ProgressIo");
+    assert!(reclaimed.needs_protocol_error_linger());
+    let shutdown = tokio::spawn(async move { reclaimed.shutdown().await });
+    tokio::task::yield_now().await;
+    tokio::time::advance(LINGER_QUIET / 2).await;
+    shutdown.await.expect("shutdown joins").expect("shutdown succeeds");
+    assert_eq!(drained.load(Ordering::Relaxed), 10);
+}
+
+/// Negative — graceful HTTP/2 `GOAWAY(NO_ERROR)` must not linger on an initially-pending read.
+#[tokio::test(start_paused = true)]
+async fn n_h2_no_error_goaway_does_not_linger_when_pending() {
+    let mut io = preface_io(H2_CLIENT_PREFACE, Duration::from_secs(60), b"never", Arc::new(AtomicU64::new(0)));
+    let mut scratch = [0_u8; 32];
+    assert_eq!(io.read(&mut scratch).await.expect("preface reads"), H2_CLIENT_PREFACE.len());
+    io.write_all(H2_NO_ERROR_GOAWAY).await.expect("NO_ERROR GOAWAY writes");
+    assert!(!io.needs_protocol_error_linger());
+    let started = transport_now();
+    io.shutdown().await.expect("NO_ERROR close retires immediately");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+}
+
+/// Negative — HTTP/1.1 bytes matching a GOAWAY frame never arm HTTP/2 error-GOAWAY lingering.
+#[tokio::test(start_paused = true)]
+async fn n_http1_response_containing_goaway_bytes_never_triggers_h2_linger() {
+    let mut io = preface_io(b"GET / HTTP/1.1\r\n\r\n", Duration::from_secs(60), b"never", Arc::new(AtomicU64::new(0)));
+    let mut scratch = [0_u8; 32];
+    assert_eq!(io.read(&mut scratch).await.expect("H1 head reads"), 18);
+    io.write_all(H2_ERROR_GOAWAY).await.expect("raw bytes write");
+    assert!(!io.needs_protocol_error_linger());
+    let started = transport_now();
+    io.shutdown().await.expect("HTTP/1.1 close retires immediately");
+    assert_eq!(started.elapsed(), Duration::ZERO);
+}
+
+/// Negative — if the peer already sent EOF before drop, reclaim linger must stay disabled.
+#[tokio::test(start_paused = true)]
+async fn n_h2_error_goaway_after_peer_eof_does_not_request_reclaim_linger() {
+    let mut io = preface_io(H2_CLIENT_PREFACE, Duration::ZERO, b"", Arc::new(AtomicU64::new(0)));
+    let mut scratch = [0_u8; 32];
+    assert_eq!(io.read(&mut scratch).await.expect("preface reads"), H2_CLIENT_PREFACE.len());
+    io.write_all(H2_ERROR_GOAWAY).await.expect("error GOAWAY writes");
+    assert!(io.needs_protocol_error_linger());
+    assert_eq!(io.read(&mut scratch).await.expect("peer EOF reads"), 0);
+    assert!(!io.needs_protocol_error_linger());
+}
+
+/// Negative — an error `GOAWAY` followed by a silent peer stays bounded by `LINGER_QUIET`, not
+/// the outer two-second linger budget.
+#[tokio::test(start_paused = true)]
+async fn n_h2_error_goaway_with_silent_peer_is_bounded_by_quiet_grace() {
+    let mut io = preface_io(H2_CLIENT_PREFACE, Duration::from_secs(60), b"silent", Arc::new(AtomicU64::new(0)));
+    let mut scratch = [0_u8; 32];
+    assert_eq!(io.read(&mut scratch).await.expect("preface reads"), H2_CLIENT_PREFACE.len());
+    io.write_all(H2_ERROR_GOAWAY).await.expect("error GOAWAY writes");
+    let started = transport_now();
+    let shutdown = tokio::spawn(async move { io.shutdown().await });
+    tokio::task::yield_now().await;
+    assert!(!shutdown.is_finished());
+    tokio::time::advance(LINGER_QUIET + Duration::from_millis(1)).await;
+    shutdown.await.expect("shutdown joins").expect("shutdown succeeds");
+    assert_eq!(started.elapsed(), LINGER_QUIET + Duration::from_millis(1));
+}
