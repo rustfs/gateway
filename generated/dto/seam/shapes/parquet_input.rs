@@ -32,13 +32,13 @@ pub fn parquet_input_to_s3s(value: crate::ops::shapes::ParquetInput) -> Result<s
     })
 }
 
-/// Converts one `ParquetInput` from the s3s shape to the gateway shape.
+/// Converts one `ParquetInput` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn parquet_input_from_s3s(value: s3s::dto::ParquetInput) -> Result<crate::ops::shapes::ParquetInput, ConversionError> {
+pub fn parquet_input_input_from_s3s(value: s3s::dto::ParquetInput) -> Result<crate::ops::shapes::ParquetInput, ConversionError> {
     let s3s::dto::ParquetInput {
     } = value;
     Ok(crate::ops::shapes::ParquetInput {

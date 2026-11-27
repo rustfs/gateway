@@ -58,7 +58,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketCorsInput) -> Result<crate::ops:
     } = input;
     Ok(crate::ops::put_bucket_cors::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        cors_configuration: { let x = cors_configuration; super::super::shapes::cors_configuration::cors_configuration_from_s3s(x)? },
+        cors_configuration: { let x = cors_configuration; super::super::shapes::cors_configuration::cors_configuration_input_from_s3s(x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
         expected_bucket_owner,

@@ -42,13 +42,13 @@ pub fn checksum_to_s3s(value: crate::ops::shapes::Checksum) -> Result<s3s::dto::
     })
 }
 
-/// Converts one `Checksum` from the s3s shape to the gateway shape.
+/// Converts one `Checksum` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn checksum_from_s3s(value: s3s::dto::Checksum) -> Result<crate::ops::shapes::Checksum, ConversionError> {
+pub fn checksum_output_from_s3s(value: s3s::dto::Checksum) -> Result<crate::ops::shapes::Checksum, ConversionError> {
     let s3s::dto::Checksum {
         checksum_crc32,
         checksum_crc32c,

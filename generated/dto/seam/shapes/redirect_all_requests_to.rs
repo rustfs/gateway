@@ -33,13 +33,30 @@ pub fn redirect_all_requests_to_to_s3s(value: crate::ops::shapes::RedirectAllReq
     })
 }
 
-/// Converts one `RedirectAllRequestsTo` from the s3s shape to the gateway shape.
+/// Converts one `RedirectAllRequestsTo` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn redirect_all_requests_to_from_s3s(value: s3s::dto::RedirectAllRequestsTo) -> Result<crate::ops::shapes::RedirectAllRequestsTo, ConversionError> {
+pub fn redirect_all_requests_to_input_from_s3s(value: s3s::dto::RedirectAllRequestsTo) -> Result<crate::ops::shapes::RedirectAllRequestsTo, ConversionError> {
+    let s3s::dto::RedirectAllRequestsTo {
+        host_name,
+        protocol,
+    } = value;
+    Ok(crate::ops::shapes::RedirectAllRequestsTo {
+        host_name,
+        protocol: protocol.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Protocol::custom(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `RedirectAllRequestsTo` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn redirect_all_requests_to_output_from_s3s(value: s3s::dto::RedirectAllRequestsTo) -> Result<crate::ops::shapes::RedirectAllRequestsTo, ConversionError> {
     let s3s::dto::RedirectAllRequestsTo {
         host_name,
         protocol,

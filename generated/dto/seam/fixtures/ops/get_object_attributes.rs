@@ -163,12 +163,4 @@ mod tests {
         let error = ops::get_object_attributes::output_from_s3s(value).expect_err("an instant neither side spells with four digits");
         assert_eq!(error.field, "last_modified", "an instant neither side spells with four digits");
     }
-
-    #[test]
-    fn n_output_refuses_e_tag_invalid() {
-        let mut value = super::output();
-        value.e_tag = Some(s3s::dto::ETag::Strong(String::new()));
-        let error = ops::get_object_attributes::output_from_s3s(value).expect_err("not an entity tag the gateway can write");
-        assert_eq!(error.field, "e_tag", "not an entity tag the gateway can write");
-    }
 }

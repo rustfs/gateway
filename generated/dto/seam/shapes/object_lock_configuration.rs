@@ -33,19 +33,36 @@ pub fn object_lock_configuration_to_s3s(value: crate::ops::shapes::ObjectLockCon
     })
 }
 
-/// Converts one `ObjectLockConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `ObjectLockConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_lock_configuration_from_s3s(value: s3s::dto::ObjectLockConfiguration) -> Result<crate::ops::shapes::ObjectLockConfiguration, ConversionError> {
+pub fn object_lock_configuration_input_from_s3s(value: s3s::dto::ObjectLockConfiguration) -> Result<crate::ops::shapes::ObjectLockConfiguration, ConversionError> {
     let s3s::dto::ObjectLockConfiguration {
         object_lock_enabled,
         rule,
     } = value;
     Ok(crate::ops::shapes::ObjectLockConfiguration {
         object_lock_enabled: object_lock_enabled.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ObjectLockEnabled::custom(x.as_str().to_owned())) }).transpose()?,
-        rule: rule.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_rule::object_lock_rule_from_s3s(x)?) }).transpose()?,
+        rule: rule.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_rule::object_lock_rule_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `ObjectLockConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn object_lock_configuration_output_from_s3s(value: s3s::dto::ObjectLockConfiguration) -> Result<crate::ops::shapes::ObjectLockConfiguration, ConversionError> {
+    let s3s::dto::ObjectLockConfiguration {
+        object_lock_enabled,
+        rule,
+    } = value;
+    Ok(crate::ops::shapes::ObjectLockConfiguration {
+        object_lock_enabled: object_lock_enabled.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ObjectLockEnabled::custom(x.as_str().to_owned())) }).transpose()?,
+        rule: rule.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_rule::object_lock_rule_output_from_s3s(x)?) }).transpose()?,
     })
 }

@@ -96,7 +96,7 @@ pub fn input_from_s3s(input: s3s::dto::CompleteMultipartUploadInput) -> Result<c
     Ok(crate::ops::complete_multipart_upload::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         key: { let x = key; leaf::object_key("key", x)? },
-        multipart_upload: match multipart_upload { Some(x) => super::super::shapes::completed_multipart_upload::completed_multipart_upload_from_s3s(x)?, None => return Err(ConversionError { field: "multipart_upload", reason: "the gateway shape requires this member" }) },
+        multipart_upload: match multipart_upload { Some(x) => super::super::shapes::completed_multipart_upload::completed_multipart_upload_input_from_s3s(x)?, None => return Err(ConversionError { field: "multipart_upload", reason: "the gateway shape requires this member" }) },
         upload_id: { let x = upload_id; crate::UploadIdClaim::from_wire(x) },
         checksum_spec: leaf::checksum_spec_from_s3s([("checksum_crc32", crate::ChecksumAlgorithm::Crc32, checksum_crc32), ("checksum_crc32c", crate::ChecksumAlgorithm::Crc32c, checksum_crc32c), ("checksum_crc64nvme", crate::ChecksumAlgorithm::Crc64Nvme, checksum_crc64nvme), ("checksum_md5", crate::ChecksumAlgorithm::Md5, checksum_md5), ("checksum_sha1", crate::ChecksumAlgorithm::Sha1, checksum_sha1), ("checksum_sha256", crate::ChecksumAlgorithm::Sha256, checksum_sha256), ("checksum_sha512", crate::ChecksumAlgorithm::Sha512, checksum_sha512), ("checksum_xxhash128", crate::ChecksumAlgorithm::XxHash128, checksum_xxhash128), ("checksum_xxhash3", crate::ChecksumAlgorithm::XxHash3, checksum_xxhash3), ("checksum_xxhash64", crate::ChecksumAlgorithm::XxHash64, checksum_xxhash64)])?,
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
@@ -150,7 +150,7 @@ pub fn output_from_s3s(output: s3s::dto::CompleteMultipartUploadOutput) -> Resul
         bucket: bucket.map(|x| -> Result<_, ConversionError> { Ok(leaf::bucket_name("bucket", x)?) }).transpose()?,
         key: key.map(|x| -> Result<_, ConversionError> { Ok(leaf::object_key("key", x)?) }).transpose()?,
         expiration: expiration.map(|x| -> Result<_, ConversionError> { Ok(crate::OpaqueString::from(x)) }).transpose()?,
-        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::stored_etag_from_s3s("e_tag", x)?) }).transpose()?,
         checksum_crc32,
         checksum_crc32c,
         checksum_crc64nvme,

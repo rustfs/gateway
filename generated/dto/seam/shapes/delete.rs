@@ -33,19 +33,19 @@ pub fn delete_to_s3s(value: crate::ops::shapes::Delete) -> Result<s3s::dto::Dele
     })
 }
 
-/// Converts one `Delete` from the s3s shape to the gateway shape.
+/// Converts one `Delete` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn delete_from_s3s(value: s3s::dto::Delete) -> Result<crate::ops::shapes::Delete, ConversionError> {
+pub fn delete_input_from_s3s(value: s3s::dto::Delete) -> Result<crate::ops::shapes::Delete, ConversionError> {
     let s3s::dto::Delete {
         objects,
         quiet,
     } = value;
     Ok(crate::ops::shapes::Delete {
-        objects: { let x = objects; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object_identifier::object_identifier_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        objects: { let x = objects; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object_identifier::object_identifier_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
         quiet,
     })
 }

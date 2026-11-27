@@ -68,7 +68,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketLifecycleConfigurationOutput) 
         transition_default_minimum_object_size,
     } = output;
     Ok(crate::ops::get_bucket_lifecycle_configuration::Output {
-        rules: match rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule::lifecycle_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        rules: match rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule::lifecycle_rule_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         transition_default_minimum_object_size: transition_default_minimum_object_size.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::TransitionDefaultMinimumObjectSize::custom(x.as_str().to_owned())) }).transpose()?,
     })
 }

@@ -586,3 +586,168 @@ fn unheld_version_and_delete_marker_facts_cross_as_the_placeholder() {
     assert!(gateway.versions[0].storage_class.is_wire_placeholder());
     assert!(gateway.delete_markers[0].last_modified.is_wire_placeholder());
 }
+
+// ── stored entity tags on outputs vs strict entity tags on inputs (rustfs/gateway#1618) ──────
+
+/// Stored tags outside `ETag::new`'s grammar: empty, quoted empty, control characters, and a tab.
+const UNSTRICT_STORED_TAGS: &[&str] = &["", "\"\"", "a\tb", "a\u{1}b", "a\nb"];
+
+/// Stored tags `ETag::new` would rewrite or refuse: all unstrict shapes plus literal quotes, a
+/// literal `W/` prefix, XML markup, and `*`.
+const VERBATIM_STORED_TAGS: &[&str] = &[
+    "",
+    "\"\"",
+    "a\tb",
+    "a\u{1}b",
+    "a\nb",
+    "\"abc\"",
+    "W/\"abc\"",
+    "<x>&amp;</ETag>",
+    "*",
+];
+
+#[test]
+fn stored_etag_leaf_keeps_unstrict_strong_tags_and_valid_weak_tags() {
+    use crate::WirePlaceholder as _;
+    for raw in VERBATIM_STORED_TAGS {
+        let tag = leaf::stored_etag_from_s3s("e_tag", oracle::ETag::Strong((*raw).to_owned())).expect(raw);
+        assert_eq!(tag.opaque_tag(), *raw, "stored bytes must cross verbatim");
+        assert!(!tag.is_weak(), "{raw:?} must stay strong");
+        assert!(!tag.is_wire_placeholder(), "{raw:?} must never look like the placeholder");
+        assert_eq!(leaf::etag_to_s3s(&tag), oracle::ETag::Strong((*raw).to_owned()));
+    }
+    let weak = leaf::stored_etag_from_s3s("e_tag", oracle::ETag::Weak("tag".to_owned())).expect("valid weak tag");
+    assert!(weak.is_weak());
+    assert_eq!(weak.opaque_tag(), "tag");
+    assert_eq!(leaf::etag_to_s3s(&weak), oracle::ETag::Weak("tag".to_owned()));
+}
+
+#[test]
+fn n_stored_etag_leaf_refuses_invalid_weak_tags_by_member() {
+    for raw in UNSTRICT_STORED_TAGS {
+        let error = leaf::stored_etag_from_s3s("e_tag", oracle::ETag::Weak((*raw).to_owned())).expect_err(raw);
+        assert_eq!(error.field, "e_tag", "{raw:?}");
+    }
+}
+
+#[test]
+fn stored_entity_tags_cross_generated_and_hand_written_outputs_byte_for_byte() {
+    use crate::WirePlaceholder as _;
+    for raw in UNSTRICT_STORED_TAGS {
+        // Control: the strict constructor and input leaf still refuse every one of these tags.
+        assert!(ETag::new(*raw).is_err(), "control: ETag::new admitted {raw:?}");
+        assert!(
+            leaf::etag_from_s3s("e_tag", oracle::ETag::Strong((*raw).to_owned())).is_err(),
+            "control: strict leaf admitted {raw:?}"
+        );
+    }
+    for raw in VERBATIM_STORED_TAGS {
+        let legacy_tag = || oracle::ETag::Strong((*raw).to_owned());
+
+        // Generated nested output shape (`Object.e_tag` inside `ListObjectsV2Output`).
+        let mut item = entry("k", true);
+        item.e_tag = Some(legacy_tag());
+        let listed = super::generated::ops::list_objects_v2::output_from_s3s(entries(vec![item])).expect(raw);
+        let listed_tag = listed.contents[0].e_tag.as_ref().expect("present tag");
+        assert_eq!(listed_tag.opaque_tag(), *raw);
+        assert!(!listed_tag.is_wire_placeholder());
+        let listed_back = super::generated::ops::list_objects_v2::output_to_s3s(listed).expect("back");
+        assert_eq!(listed_back.contents.expect("contents")[0].e_tag, Some(legacy_tag()));
+
+        // Generated top-level output (`HeadObjectOutput.e_tag`).
+        let head = super::generated::ops::head_object::output_from_s3s(oracle::HeadObjectOutput {
+            e_tag: Some(legacy_tag()),
+            ..Default::default()
+        })
+        .expect(raw);
+        assert_eq!(head.e_tag.as_ref().expect("present tag").opaque_tag(), *raw);
+        let head_back = super::generated::ops::head_object::output_to_s3s(head).expect("back");
+        assert_eq!(head_back.e_tag, Some(legacy_tag()));
+
+        // Generated `Rule::Nested` output (`CopyObjectOutput.copy_object_result.e_tag`).
+        let copy = super::generated::ops::copy_object::output_from_s3s(oracle::CopyObjectOutput {
+            copy_object_result: Some(oracle::CopyObjectResult {
+                e_tag: Some(legacy_tag()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .expect(raw);
+        assert_eq!(copy.e_tag.as_ref().expect("present tag").opaque_tag(), *raw);
+        let copy_back = super::generated::ops::copy_object::output_to_s3s(copy).expect("back");
+        assert_eq!(copy_back.copy_object_result.expect("result").e_tag, Some(legacy_tag()));
+
+        // Hand-written output (`PutObjectOutput.e_tag`).
+        let put = put_object::output_from_s3s(oracle::PutObjectOutput {
+            e_tag: Some(legacy_tag()),
+            ..Default::default()
+        })
+        .expect(raw);
+        assert_eq!(put.e_tag.opaque_tag(), *raw);
+        assert!(!put.e_tag.is_wire_placeholder());
+        assert_eq!(put_object::output_to_s3s(put).e_tag, Some(legacy_tag()));
+    }
+}
+
+#[test]
+fn n_completed_part_input_still_refuses_unstrict_entity_tags_by_member() {
+    for raw in UNSTRICT_STORED_TAGS {
+        let input = oracle::CompleteMultipartUploadInput {
+            bucket: "fixture-bucket".to_owned(),
+            key: "k".to_owned(),
+            upload_id: "u-1".to_owned(),
+            multipart_upload: Some(oracle::CompletedMultipartUpload {
+                parts: Some(vec![oracle::CompletedPart {
+                    e_tag: Some(oracle::ETag::Strong((*raw).to_owned())),
+                    part_number: Some(1),
+                    ..Default::default()
+                }]),
+            }),
+            ..Default::default()
+        };
+        let error = super::generated::ops::complete_multipart_upload::input_from_s3s(input).expect_err(raw);
+        assert_eq!(error.field, "e_tag", "{raw:?}");
+    }
+}
+
+#[test]
+fn n_delete_objects_input_still_refuses_unstrict_entity_tags_by_member() {
+    for raw in UNSTRICT_STORED_TAGS {
+        let input = oracle::DeleteObjectsInput {
+            bucket: "fixture-bucket".to_owned(),
+            bypass_governance_retention: None,
+            checksum_algorithm: None,
+            delete: oracle::Delete {
+                objects: vec![oracle::ObjectIdentifier {
+                    key: "k".to_owned(),
+                    e_tag: Some(oracle::ETag::Strong((*raw).to_owned())),
+                    ..Default::default()
+                }],
+                quiet: None,
+            },
+            expected_bucket_owner: None,
+            mfa: None,
+            request_payer: None,
+        };
+        let error = super::generated::ops::delete_objects::input_from_s3s(input).expect_err(raw);
+        assert_eq!(error.field, "e_tag", "{raw:?}");
+    }
+}
+
+#[test]
+fn n_put_object_output_still_refuses_missing_or_invalid_weak_entity_tags() {
+    let missing = put_object::output_from_s3s(oracle::PutObjectOutput {
+        e_tag: None,
+        ..Default::default()
+    })
+    .expect_err("absent e_tag");
+    assert_eq!(missing.field, "e_tag");
+    for raw in UNSTRICT_STORED_TAGS {
+        let weak = put_object::output_from_s3s(oracle::PutObjectOutput {
+            e_tag: Some(oracle::ETag::Weak((*raw).to_owned())),
+            ..Default::default()
+        })
+        .expect_err(raw);
+        assert_eq!(weak.field, "e_tag", "{raw:?}");
+    }
+}

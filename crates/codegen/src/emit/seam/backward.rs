@@ -27,7 +27,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Binding, Field, Type};
 
-use super::expr::Ctx;
+use super::expr::{Ctx, Side};
 use super::facts::S3sType;
 use super::overrides::Rule;
 use super::render::{
@@ -60,8 +60,9 @@ pub(super) fn backward_struct(
     fields: &[Field],
     gw_type: &str,
     src: &str,
+    side: Side,
 ) -> Result<String, Vec<String>> {
-    backward_struct_with(ctx, owner, fields, gw_type, src, LegacyMembers::Refuse)
+    backward_struct_with(ctx, owner, fields, gw_type, src, LegacyMembers::Refuse, side)
 }
 
 /// [`backward_struct`], with the legacy-only members handled as `legacy` says: handed back, the
@@ -73,6 +74,7 @@ pub(super) fn backward_struct_with(
     gw_type: &str,
     src: &str,
     legacy: LegacyMembers,
+    side: Side,
 ) -> Result<String, Vec<String>> {
     let Some(s3s) = ctx.facts.structs.get(owner) else {
         return Err(vec![format!("{owner}: not an s3s struct")]);
@@ -119,7 +121,7 @@ pub(super) fn backward_struct_with(
                     }
                 }
                 let (core, optional) = ty.unwrap_option();
-                match ctx.backward(core, &field.ty, &field.name, "x", &name) {
+                match ctx.backward(core, &field.ty, &field.name, "x", &name, side) {
                     Err(error) => errors.push(format!("{owner}.{name}: {error}")),
                     Ok(conv) => {
                         let source = format!("{parent}.{member}");
@@ -144,7 +146,7 @@ pub(super) fn backward_struct_with(
                         _ => Err(format!("no s3s → gateway conversion from {core:?} to CopySourceValue")),
                     }
                 } else {
-                    ctx.backward(core, &field.ty, &field.name, "x", &name)
+                    ctx.backward(core, &field.ty, &field.name, "x", &name, side)
                 };
                 match conv {
                     Err(error) => errors.push(format!("{owner}.{name}: {error}")),

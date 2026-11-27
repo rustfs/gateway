@@ -34,13 +34,13 @@ pub fn encryption_to_s3s(value: crate::ops::shapes::Encryption) -> Result<s3s::d
     })
 }
 
-/// Converts one `Encryption` from the s3s shape to the gateway shape.
+/// Converts one `Encryption` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn encryption_from_s3s(value: s3s::dto::Encryption) -> Result<crate::ops::shapes::Encryption, ConversionError> {
+pub fn encryption_input_from_s3s(value: s3s::dto::Encryption) -> Result<crate::ops::shapes::Encryption, ConversionError> {
     let s3s::dto::Encryption {
         encryption_type,
         kms_context,

@@ -76,7 +76,7 @@ pub fn input_from_s3s(input: s3s::dto::PutObjectAclInput) -> Result<crate::ops::
     } = input;
     Ok(crate::ops::put_object_acl::Input {
         acl: acl.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Acl::custom(x.as_str().to_owned())) }).transpose()?,
-        access_control_policy: access_control_policy.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::access_control_policy::access_control_policy_from_s3s(x)?) }).transpose()?,
+        access_control_policy: access_control_policy.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::access_control_policy::access_control_policy_input_from_s3s(x)?) }).transpose()?,
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,

@@ -62,7 +62,7 @@ pub fn input_from_s3s(input: s3s::dto::PutObjectLockConfigurationInput) -> Resul
     } = input;
     Ok(crate::ops::put_object_lock_configuration::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        object_lock_configuration: match object_lock_configuration { Some(x) => super::super::shapes::object_lock_configuration::object_lock_configuration_from_s3s(x)?, None => return Err(ConversionError { field: "object_lock_configuration", reason: "the gateway shape requires this member" }) },
+        object_lock_configuration: match object_lock_configuration { Some(x) => super::super::shapes::object_lock_configuration::object_lock_configuration_input_from_s3s(x)?, None => return Err(ConversionError { field: "object_lock_configuration", reason: "the gateway shape requires this member" }) },
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
         token,
         content_md5,

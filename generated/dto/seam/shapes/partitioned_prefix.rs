@@ -32,13 +32,28 @@ pub fn partitioned_prefix_to_s3s(value: crate::ops::shapes::PartitionedPrefix) -
     })
 }
 
-/// Converts one `PartitionedPrefix` from the s3s shape to the gateway shape.
+/// Converts one `PartitionedPrefix` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn partitioned_prefix_from_s3s(value: s3s::dto::PartitionedPrefix) -> Result<crate::ops::shapes::PartitionedPrefix, ConversionError> {
+pub fn partitioned_prefix_input_from_s3s(value: s3s::dto::PartitionedPrefix) -> Result<crate::ops::shapes::PartitionedPrefix, ConversionError> {
+    let s3s::dto::PartitionedPrefix {
+        partition_date_source,
+    } = value;
+    Ok(crate::ops::shapes::PartitionedPrefix {
+        partition_date_source: partition_date_source.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::PartitionDateSource::custom(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `PartitionedPrefix` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn partitioned_prefix_output_from_s3s(value: s3s::dto::PartitionedPrefix) -> Result<crate::ops::shapes::PartitionedPrefix, ConversionError> {
     let s3s::dto::PartitionedPrefix {
         partition_date_source,
     } = value;

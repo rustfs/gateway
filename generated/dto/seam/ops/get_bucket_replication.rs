@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketReplicationOutput) -> Result<c
         replication_configuration,
     } = output;
     Ok(crate::ops::get_bucket_replication::Output {
-        replication_configuration: replication_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_configuration::replication_configuration_from_s3s(x)?) }).transpose()?,
+        replication_configuration: replication_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_configuration::replication_configuration_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

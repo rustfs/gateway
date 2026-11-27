@@ -33,13 +33,13 @@ pub fn initiator_to_s3s(value: crate::ops::shapes::Initiator) -> Result<s3s::dto
     })
 }
 
-/// Converts one `Initiator` from the s3s shape to the gateway shape.
+/// Converts one `Initiator` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn initiator_from_s3s(value: s3s::dto::Initiator) -> Result<crate::ops::shapes::Initiator, ConversionError> {
+pub fn initiator_output_from_s3s(value: s3s::dto::Initiator) -> Result<crate::ops::shapes::Initiator, ConversionError> {
     let s3s::dto::Initiator {
         display_name,
         id,

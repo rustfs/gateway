@@ -251,14 +251,6 @@ mod tests {
     }
 
     #[test]
-    fn n_output_refuses_e_tag_invalid() {
-        let mut value = super::output();
-        value.e_tag = Some(s3s::dto::ETag::Strong(String::new()));
-        let error = ops::head_object::output_from_s3s(value).expect_err("not an entity tag the gateway can write");
-        assert_eq!(error.field, "e_tag", "not an entity tag the gateway can write");
-    }
-
-    #[test]
     fn n_output_refuses_object_lock_retain_until_date_invalid() {
         let mut value = super::output();
         value.object_lock_retain_until_date = Some(s3s::dto::Timestamp::parse(s3s::dto::TimestampFormat::EpochSeconds, "-70000000000").expect("an instant before the year 0"));

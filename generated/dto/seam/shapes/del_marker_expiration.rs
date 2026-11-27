@@ -32,13 +32,28 @@ pub fn del_marker_expiration_to_s3s(value: crate::ops::shapes::DelMarkerExpirati
     })
 }
 
-/// Converts one `DelMarkerExpiration` from the s3s shape to the gateway shape.
+/// Converts one `DelMarkerExpiration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn del_marker_expiration_from_s3s(value: s3s::dto::DelMarkerExpiration) -> Result<crate::ops::shapes::DelMarkerExpiration, ConversionError> {
+pub fn del_marker_expiration_input_from_s3s(value: s3s::dto::DelMarkerExpiration) -> Result<crate::ops::shapes::DelMarkerExpiration, ConversionError> {
+    let s3s::dto::DelMarkerExpiration {
+        days,
+    } = value;
+    Ok(crate::ops::shapes::DelMarkerExpiration {
+        days,
+    })
+}
+
+/// Converts one `DelMarkerExpiration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn del_marker_expiration_output_from_s3s(value: s3s::dto::DelMarkerExpiration) -> Result<crate::ops::shapes::DelMarkerExpiration, ConversionError> {
     let s3s::dto::DelMarkerExpiration {
         days,
     } = value;

@@ -32,13 +32,28 @@ pub fn access_control_translation_to_s3s(value: crate::ops::shapes::AccessContro
     })
 }
 
-/// Converts one `AccessControlTranslation` from the s3s shape to the gateway shape.
+/// Converts one `AccessControlTranslation` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn access_control_translation_from_s3s(value: s3s::dto::AccessControlTranslation) -> Result<crate::ops::shapes::AccessControlTranslation, ConversionError> {
+pub fn access_control_translation_input_from_s3s(value: s3s::dto::AccessControlTranslation) -> Result<crate::ops::shapes::AccessControlTranslation, ConversionError> {
+    let s3s::dto::AccessControlTranslation {
+        owner,
+    } = value;
+    Ok(crate::ops::shapes::AccessControlTranslation {
+        owner: { let x = owner; x.as_str().to_owned() },
+    })
+}
+
+/// Converts one `AccessControlTranslation` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn access_control_translation_output_from_s3s(value: s3s::dto::AccessControlTranslation) -> Result<crate::ops::shapes::AccessControlTranslation, ConversionError> {
     let s3s::dto::AccessControlTranslation {
         owner,
     } = value;

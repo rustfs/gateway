@@ -32,17 +32,17 @@ pub fn bucket_logging_status_to_s3s(value: crate::ops::shapes::BucketLoggingStat
     })
 }
 
-/// Converts one `BucketLoggingStatus` from the s3s shape to the gateway shape.
+/// Converts one `BucketLoggingStatus` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn bucket_logging_status_from_s3s(value: s3s::dto::BucketLoggingStatus) -> Result<crate::ops::shapes::BucketLoggingStatus, ConversionError> {
+pub fn bucket_logging_status_input_from_s3s(value: s3s::dto::BucketLoggingStatus) -> Result<crate::ops::shapes::BucketLoggingStatus, ConversionError> {
     let s3s::dto::BucketLoggingStatus {
         logging_enabled,
     } = value;
     Ok(crate::ops::shapes::BucketLoggingStatus {
-        logging_enabled: logging_enabled.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::logging_enabled::logging_enabled_from_s3s(x)?) }).transpose()?,
+        logging_enabled: logging_enabled.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::logging_enabled::logging_enabled_input_from_s3s(x)?) }).transpose()?,
     })
 }

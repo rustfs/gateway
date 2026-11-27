@@ -32,13 +32,28 @@ pub fn delete_marker_replication_to_s3s(value: crate::ops::shapes::DeleteMarkerR
     })
 }
 
-/// Converts one `DeleteMarkerReplication` from the s3s shape to the gateway shape.
+/// Converts one `DeleteMarkerReplication` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn delete_marker_replication_from_s3s(value: s3s::dto::DeleteMarkerReplication) -> Result<crate::ops::shapes::DeleteMarkerReplication, ConversionError> {
+pub fn delete_marker_replication_input_from_s3s(value: s3s::dto::DeleteMarkerReplication) -> Result<crate::ops::shapes::DeleteMarkerReplication, ConversionError> {
+    let s3s::dto::DeleteMarkerReplication {
+        status,
+    } = value;
+    Ok(crate::ops::shapes::DeleteMarkerReplication {
+        status: status.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Status::custom(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `DeleteMarkerReplication` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn delete_marker_replication_output_from_s3s(value: s3s::dto::DeleteMarkerReplication) -> Result<crate::ops::shapes::DeleteMarkerReplication, ConversionError> {
     let s3s::dto::DeleteMarkerReplication {
         status,
     } = value;

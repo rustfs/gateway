@@ -56,7 +56,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketAccelerateConfigurationInput) ->
     } = input;
     Ok(crate::ops::put_bucket_accelerate_configuration::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        accelerate_configuration: { let x = accelerate_configuration; super::super::shapes::accelerate_configuration::accelerate_configuration_from_s3s(x)? },
+        accelerate_configuration: { let x = accelerate_configuration; super::super::shapes::accelerate_configuration::accelerate_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
     })

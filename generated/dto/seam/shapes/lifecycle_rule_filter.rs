@@ -37,13 +37,13 @@ pub fn lifecycle_rule_filter_to_s3s(value: crate::ops::shapes::LifecycleRuleFilt
     })
 }
 
-/// Converts one `LifecycleRuleFilter` from the s3s shape to the gateway shape.
+/// Converts one `LifecycleRuleFilter` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn lifecycle_rule_filter_from_s3s(value: s3s::dto::LifecycleRuleFilter) -> Result<crate::ops::shapes::LifecycleRuleFilter, ConversionError> {
+pub fn lifecycle_rule_filter_input_from_s3s(value: s3s::dto::LifecycleRuleFilter) -> Result<crate::ops::shapes::LifecycleRuleFilter, ConversionError> {
     let s3s::dto::LifecycleRuleFilter {
         and,
         cached_tags: _,
@@ -54,9 +54,33 @@ pub fn lifecycle_rule_filter_from_s3s(value: s3s::dto::LifecycleRuleFilter) -> R
     } = value;
     Ok(crate::ops::shapes::LifecycleRuleFilter {
         prefix,
-        tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_from_s3s(x)?) }).transpose()?,
+        tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_input_from_s3s(x)?) }).transpose()?,
         object_size_greater_than,
         object_size_less_than,
-        and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_and_operator::lifecycle_rule_and_operator_from_s3s(x)?) }).transpose()?,
+        and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_and_operator::lifecycle_rule_and_operator_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `LifecycleRuleFilter` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn lifecycle_rule_filter_output_from_s3s(value: s3s::dto::LifecycleRuleFilter) -> Result<crate::ops::shapes::LifecycleRuleFilter, ConversionError> {
+    let s3s::dto::LifecycleRuleFilter {
+        and,
+        cached_tags: _,
+        object_size_greater_than,
+        object_size_less_than,
+        prefix,
+        tag,
+    } = value;
+    Ok(crate::ops::shapes::LifecycleRuleFilter {
+        prefix,
+        tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(x)?) }).transpose()?,
+        object_size_greater_than,
+        object_size_less_than,
+        and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_and_operator::lifecycle_rule_and_operator_output_from_s3s(x)?) }).transpose()?,
     })
 }

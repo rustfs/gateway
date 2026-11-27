@@ -32,13 +32,13 @@ pub fn common_prefix_to_s3s(value: crate::ops::shapes::CommonPrefix) -> Result<s
     })
 }
 
-/// Converts one `CommonPrefix` from the s3s shape to the gateway shape.
+/// Converts one `CommonPrefix` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn common_prefix_from_s3s(value: s3s::dto::CommonPrefix) -> Result<crate::ops::shapes::CommonPrefix, ConversionError> {
+pub fn common_prefix_output_from_s3s(value: s3s::dto::CommonPrefix) -> Result<crate::ops::shapes::CommonPrefix, ConversionError> {
     let s3s::dto::CommonPrefix {
         prefix,
     } = value;

@@ -35,13 +35,13 @@ pub fn replication_rule_filter_to_s3s(value: crate::ops::shapes::ReplicationRule
     })
 }
 
-/// Converts one `ReplicationRuleFilter` from the s3s shape to the gateway shape.
+/// Converts one `ReplicationRuleFilter` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn replication_rule_filter_from_s3s(value: s3s::dto::ReplicationRuleFilter) -> Result<crate::ops::shapes::ReplicationRuleFilter, ConversionError> {
+pub fn replication_rule_filter_input_from_s3s(value: s3s::dto::ReplicationRuleFilter) -> Result<crate::ops::shapes::ReplicationRuleFilter, ConversionError> {
     let s3s::dto::ReplicationRuleFilter {
         and,
         cached_tags: _,
@@ -50,7 +50,27 @@ pub fn replication_rule_filter_from_s3s(value: s3s::dto::ReplicationRuleFilter) 
     } = value;
     Ok(crate::ops::shapes::ReplicationRuleFilter {
         prefix,
-        tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_from_s3s(x)?) }).transpose()?,
-        and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_and_operator::replication_rule_and_operator_from_s3s(x)?) }).transpose()?,
+        tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_input_from_s3s(x)?) }).transpose()?,
+        and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_and_operator::replication_rule_and_operator_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `ReplicationRuleFilter` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn replication_rule_filter_output_from_s3s(value: s3s::dto::ReplicationRuleFilter) -> Result<crate::ops::shapes::ReplicationRuleFilter, ConversionError> {
+    let s3s::dto::ReplicationRuleFilter {
+        and,
+        cached_tags: _,
+        prefix,
+        tag,
+    } = value;
+    Ok(crate::ops::shapes::ReplicationRuleFilter {
+        prefix,
+        tag: tag.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(x)?) }).transpose()?,
+        and: and.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_and_operator::replication_rule_and_operator_output_from_s3s(x)?) }).transpose()?,
     })
 }

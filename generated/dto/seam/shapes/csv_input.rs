@@ -38,13 +38,13 @@ pub fn csv_input_to_s3s(value: crate::ops::shapes::CsvInput) -> Result<s3s::dto:
     })
 }
 
-/// Converts one `CSVInput` from the s3s shape to the gateway shape.
+/// Converts one `CSVInput` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn csv_input_from_s3s(value: s3s::dto::CSVInput) -> Result<crate::ops::shapes::CsvInput, ConversionError> {
+pub fn csv_input_input_from_s3s(value: s3s::dto::CSVInput) -> Result<crate::ops::shapes::CsvInput, ConversionError> {
     let s3s::dto::CSVInput {
         allow_quoted_record_delimiter,
         comments,

@@ -241,7 +241,7 @@ pub fn output_from_s3s(output: s3s::dto::CopyObjectOutput) -> Result<crate::ops:
         ssekms_encryption_context,
         bucket_key_enabled,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
-        e_tag: copy_object_result.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        e_tag: copy_object_result.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::stored_etag_from_s3s("e_tag", x)?) }).transpose()?,
         last_modified: copy_object_result.last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
         checksum_type: copy_object_result.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(x.as_str().to_owned()) }).transpose()?,
         checksum_crc32: copy_object_result.checksum_crc32,

@@ -43,13 +43,13 @@ pub fn object_part_to_s3s(value: crate::ops::shapes::ObjectPart) -> Result<s3s::
     })
 }
 
-/// Converts one `ObjectPart` from the s3s shape to the gateway shape.
+/// Converts one `ObjectPart` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_part_from_s3s(value: s3s::dto::ObjectPart) -> Result<crate::ops::shapes::ObjectPart, ConversionError> {
+pub fn object_part_output_from_s3s(value: s3s::dto::ObjectPart) -> Result<crate::ops::shapes::ObjectPart, ConversionError> {
     let s3s::dto::ObjectPart {
         checksum_crc32,
         checksum_crc32c,

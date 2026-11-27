@@ -58,7 +58,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketLoggingInput) -> Result<crate::o
     } = input;
     Ok(crate::ops::put_bucket_logging::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        bucket_logging_status: { let x = bucket_logging_status; super::super::shapes::bucket_logging_status::bucket_logging_status_from_s3s(x)? },
+        bucket_logging_status: { let x = bucket_logging_status; super::super::shapes::bucket_logging_status::bucket_logging_status_input_from_s3s(x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
         expected_bucket_owner,

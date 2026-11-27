@@ -33,19 +33,36 @@ pub fn routing_rule_to_s3s(value: crate::ops::shapes::RoutingRule) -> Result<s3s
     })
 }
 
-/// Converts one `RoutingRule` from the s3s shape to the gateway shape.
+/// Converts one `RoutingRule` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn routing_rule_from_s3s(value: s3s::dto::RoutingRule) -> Result<crate::ops::shapes::RoutingRule, ConversionError> {
+pub fn routing_rule_input_from_s3s(value: s3s::dto::RoutingRule) -> Result<crate::ops::shapes::RoutingRule, ConversionError> {
     let s3s::dto::RoutingRule {
         condition,
         redirect,
     } = value;
     Ok(crate::ops::shapes::RoutingRule {
-        condition: condition.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::condition::condition_from_s3s(x)?) }).transpose()?,
-        redirect: { let x = redirect; super::super::shapes::redirect::redirect_from_s3s(x)? },
+        condition: condition.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::condition::condition_input_from_s3s(x)?) }).transpose()?,
+        redirect: { let x = redirect; super::super::shapes::redirect::redirect_input_from_s3s(x)? },
+    })
+}
+
+/// Converts one `RoutingRule` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn routing_rule_output_from_s3s(value: s3s::dto::RoutingRule) -> Result<crate::ops::shapes::RoutingRule, ConversionError> {
+    let s3s::dto::RoutingRule {
+        condition,
+        redirect,
+    } = value;
+    Ok(crate::ops::shapes::RoutingRule {
+        condition: condition.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::condition::condition_output_from_s3s(x)?) }).transpose()?,
+        redirect: { let x = redirect; super::super::shapes::redirect::redirect_output_from_s3s(x)? },
     })
 }

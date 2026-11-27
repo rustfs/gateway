@@ -37,13 +37,38 @@ pub fn cors_rule_to_s3s(value: crate::ops::shapes::CorsRule) -> Result<s3s::dto:
     })
 }
 
-/// Converts one `CORSRule` from the s3s shape to the gateway shape.
+/// Converts one `CORSRule` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn cors_rule_from_s3s(value: s3s::dto::CORSRule) -> Result<crate::ops::shapes::CorsRule, ConversionError> {
+pub fn cors_rule_input_from_s3s(value: s3s::dto::CORSRule) -> Result<crate::ops::shapes::CorsRule, ConversionError> {
+    let s3s::dto::CORSRule {
+        allowed_headers,
+        allowed_methods,
+        allowed_origins,
+        expose_headers,
+        id,
+        max_age_seconds,
+    } = value;
+    Ok(crate::ops::shapes::CorsRule {
+        id,
+        allowed_headers: allowed_headers.unwrap_or_default(),
+        allowed_methods,
+        allowed_origins,
+        expose_headers: expose_headers.unwrap_or_default(),
+        max_age_seconds,
+    })
+}
+
+/// Converts one `CORSRule` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn cors_rule_output_from_s3s(value: s3s::dto::CORSRule) -> Result<crate::ops::shapes::CorsRule, ConversionError> {
     let s3s::dto::CORSRule {
         allowed_headers,
         allowed_methods,

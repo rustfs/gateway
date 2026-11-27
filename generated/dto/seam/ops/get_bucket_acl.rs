@@ -68,8 +68,8 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketAclOutput) -> Result<crate::op
         owner,
     } = output;
     Ok(crate::ops::get_bucket_acl::Output {
-        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_from_s3s(x)?) }).transpose()?,
-        grants: grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_output_from_s3s(x)?) }).transpose()?,
+        grants: grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
     })
 }
 

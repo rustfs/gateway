@@ -106,9 +106,9 @@ pub fn output_from_s3s(output: s3s::dto::GetObjectAttributesOutput) -> Result<cr
         last_modified: last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
         version_id,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
-        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
-        checksum: checksum.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::checksum::checksum_from_s3s(x)?) }).transpose()?,
-        object_parts: object_parts.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::get_object_attributes_parts::get_object_attributes_parts_from_s3s(x)?) }).transpose()?,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::stored_etag_from_s3s("e_tag", x)?) }).transpose()?,
+        checksum: checksum.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::checksum::checksum_output_from_s3s(x)?) }).transpose()?,
+        object_parts: object_parts.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::get_object_attributes_parts::get_object_attributes_parts_output_from_s3s(x)?) }).transpose()?,
         storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
         object_size,
     })

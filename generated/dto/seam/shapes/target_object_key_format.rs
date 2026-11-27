@@ -33,19 +33,36 @@ pub fn target_object_key_format_to_s3s(value: crate::ops::shapes::TargetObjectKe
     })
 }
 
-/// Converts one `TargetObjectKeyFormat` from the s3s shape to the gateway shape.
+/// Converts one `TargetObjectKeyFormat` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn target_object_key_format_from_s3s(value: s3s::dto::TargetObjectKeyFormat) -> Result<crate::ops::shapes::TargetObjectKeyFormat, ConversionError> {
+pub fn target_object_key_format_input_from_s3s(value: s3s::dto::TargetObjectKeyFormat) -> Result<crate::ops::shapes::TargetObjectKeyFormat, ConversionError> {
     let s3s::dto::TargetObjectKeyFormat {
         partitioned_prefix,
         simple_prefix,
     } = value;
     Ok(crate::ops::shapes::TargetObjectKeyFormat {
-        simple_prefix: simple_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::simple_prefix::simple_prefix_from_s3s(x)?) }).transpose()?,
-        partitioned_prefix: partitioned_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::partitioned_prefix::partitioned_prefix_from_s3s(x)?) }).transpose()?,
+        simple_prefix: simple_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::simple_prefix::simple_prefix_input_from_s3s(x)?) }).transpose()?,
+        partitioned_prefix: partitioned_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::partitioned_prefix::partitioned_prefix_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `TargetObjectKeyFormat` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn target_object_key_format_output_from_s3s(value: s3s::dto::TargetObjectKeyFormat) -> Result<crate::ops::shapes::TargetObjectKeyFormat, ConversionError> {
+    let s3s::dto::TargetObjectKeyFormat {
+        partitioned_prefix,
+        simple_prefix,
+    } = value;
+    Ok(crate::ops::shapes::TargetObjectKeyFormat {
+        simple_prefix: simple_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::simple_prefix::simple_prefix_output_from_s3s(x)?) }).transpose()?,
+        partitioned_prefix: partitioned_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::partitioned_prefix::partitioned_prefix_output_from_s3s(x)?) }).transpose()?,
     })
 }

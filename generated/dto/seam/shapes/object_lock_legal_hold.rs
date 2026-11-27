@@ -32,13 +32,28 @@ pub fn object_lock_legal_hold_to_s3s(value: crate::ops::shapes::ObjectLockLegalH
     })
 }
 
-/// Converts one `ObjectLockLegalHold` from the s3s shape to the gateway shape.
+/// Converts one `ObjectLockLegalHold` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_lock_legal_hold_from_s3s(value: s3s::dto::ObjectLockLegalHold) -> Result<crate::ops::shapes::ObjectLockLegalHold, ConversionError> {
+pub fn object_lock_legal_hold_input_from_s3s(value: s3s::dto::ObjectLockLegalHold) -> Result<crate::ops::shapes::ObjectLockLegalHold, ConversionError> {
+    let s3s::dto::ObjectLockLegalHold {
+        status,
+    } = value;
+    Ok(crate::ops::shapes::ObjectLockLegalHold {
+        status: status.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Status::custom(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `ObjectLockLegalHold` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn object_lock_legal_hold_output_from_s3s(value: s3s::dto::ObjectLockLegalHold) -> Result<crate::ops::shapes::ObjectLockLegalHold, ConversionError> {
     let s3s::dto::ObjectLockLegalHold {
         status,
     } = value;

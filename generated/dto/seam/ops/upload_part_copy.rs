@@ -133,7 +133,7 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartCopyOutput) -> Result<crate::
         ssekms_key_id,
         bucket_key_enabled,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
-        e_tag: match copy_part_result.e_tag { Some(x) => leaf::etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
+        e_tag: match copy_part_result.e_tag { Some(x) => leaf::stored_etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
         last_modified: copy_part_result.last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
         checksum_crc32: copy_part_result.checksum_crc32,
         checksum_crc32c: copy_part_result.checksum_crc32c,

@@ -32,17 +32,32 @@ pub fn s3key_filter_to_s3s(value: crate::ops::shapes::S3KeyFilter) -> Result<s3s
     })
 }
 
-/// Converts one `S3KeyFilter` from the s3s shape to the gateway shape.
+/// Converts one `S3KeyFilter` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn s3key_filter_from_s3s(value: s3s::dto::S3KeyFilter) -> Result<crate::ops::shapes::S3KeyFilter, ConversionError> {
+pub fn s3key_filter_input_from_s3s(value: s3s::dto::S3KeyFilter) -> Result<crate::ops::shapes::S3KeyFilter, ConversionError> {
     let s3s::dto::S3KeyFilter {
         filter_rules,
     } = value;
     Ok(crate::ops::shapes::S3KeyFilter {
-        filter_rules: match filter_rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::filter_rule::filter_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        filter_rules: match filter_rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::filter_rule::filter_rule_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+    })
+}
+
+/// Converts one `S3KeyFilter` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn s3key_filter_output_from_s3s(value: s3s::dto::S3KeyFilter) -> Result<crate::ops::shapes::S3KeyFilter, ConversionError> {
+    let s3s::dto::S3KeyFilter {
+        filter_rules,
+    } = value;
+    Ok(crate::ops::shapes::S3KeyFilter {
+        filter_rules: match filter_rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::filter_rule::filter_rule_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
     })
 }

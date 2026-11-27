@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketEncryptionOutput) -> Result<cr
         server_side_encryption_configuration,
     } = output;
     Ok(crate::ops::get_bucket_encryption::Output {
-        server_side_encryption_configuration: server_side_encryption_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_configuration::server_side_encryption_configuration_from_s3s(x)?) }).transpose()?,
+        server_side_encryption_configuration: server_side_encryption_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_configuration::server_side_encryption_configuration_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

@@ -76,8 +76,8 @@ pub fn output_from_s3s(output: s3s::dto::ListBucketsOutput) -> Result<crate::ops
         prefix,
     } = output;
     Ok(crate::ops::list_buckets::Output {
-        buckets: match buckets { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::bucket::bucket_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        owner: match owner { Some(x) => super::super::shapes::owner::owner_from_s3s(x)?, None => return Err(ConversionError { field: "owner", reason: "the gateway shape requires this member" }) },
+        buckets: match buckets { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::bucket::bucket_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        owner: match owner { Some(x) => super::super::shapes::owner::owner_output_from_s3s(x)?, None => return Err(ConversionError { field: "owner", reason: "the gateway shape requires this member" }) },
         continuation_token: continuation_token.map(|x| -> Result<_, ConversionError> { Ok(crate::OpaqueString::from(x)) }).transpose()?,
         prefix,
     })

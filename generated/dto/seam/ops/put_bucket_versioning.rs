@@ -63,7 +63,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketVersioningInput) -> Result<crate
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
         mfa,
-        versioning_configuration: { let x = versioning_configuration; super::super::shapes::versioning_configuration::versioning_configuration_from_s3s(x)? },
+        versioning_configuration: { let x = versioning_configuration; super::super::shapes::versioning_configuration::versioning_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
     })
 }

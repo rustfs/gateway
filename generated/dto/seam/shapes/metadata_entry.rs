@@ -33,13 +33,13 @@ pub fn metadata_entry_to_s3s(value: crate::ops::shapes::MetadataEntry) -> Result
     })
 }
 
-/// Converts one `MetadataEntry` from the s3s shape to the gateway shape.
+/// Converts one `MetadataEntry` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn metadata_entry_from_s3s(value: s3s::dto::MetadataEntry) -> Result<crate::ops::shapes::MetadataEntry, ConversionError> {
+pub fn metadata_entry_input_from_s3s(value: s3s::dto::MetadataEntry) -> Result<crate::ops::shapes::MetadataEntry, ConversionError> {
     let s3s::dto::MetadataEntry {
         name,
         value,

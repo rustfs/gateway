@@ -39,13 +39,13 @@ pub fn s3location_to_s3s(value: crate::ops::shapes::S3Location) -> Result<s3s::d
     })
 }
 
-/// Converts one `S3Location` from the s3s shape to the gateway shape.
+/// Converts one `S3Location` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn s3location_from_s3s(value: s3s::dto::S3Location) -> Result<crate::ops::shapes::S3Location, ConversionError> {
+pub fn s3location_input_from_s3s(value: s3s::dto::S3Location) -> Result<crate::ops::shapes::S3Location, ConversionError> {
     let s3s::dto::S3Location {
         access_control_list,
         bucket_name,
@@ -59,11 +59,11 @@ pub fn s3location_from_s3s(value: s3s::dto::S3Location) -> Result<crate::ops::sh
     Ok(crate::ops::shapes::S3Location {
         bucket_name: { let x = bucket_name; leaf::bucket_name("bucket_name", x)? },
         prefix,
-        encryption: encryption.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::encryption::encryption_from_s3s(x)?) }).transpose()?,
+        encryption: encryption.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::encryption::encryption_input_from_s3s(x)?) }).transpose()?,
         canned_acl: canned_acl.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::CannedAcl::custom(x.as_str().to_owned())) }).transpose()?,
-        access_control_list: access_control_list.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
-        tagging: tagging.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tagging::tagging_from_s3s(x)?) }).transpose()?,
-        user_metadata: user_metadata.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::metadata_entry::metadata_entry_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        access_control_list: access_control_list.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        tagging: tagging.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tagging::tagging_input_from_s3s(x)?) }).transpose()?,
+        user_metadata: user_metadata.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::metadata_entry::metadata_entry_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
         storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
     })
 }

@@ -35,13 +35,13 @@ pub fn logging_enabled_to_s3s(value: crate::ops::shapes::LoggingEnabled) -> Resu
     })
 }
 
-/// Converts one `LoggingEnabled` from the s3s shape to the gateway shape.
+/// Converts one `LoggingEnabled` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn logging_enabled_from_s3s(value: s3s::dto::LoggingEnabled) -> Result<crate::ops::shapes::LoggingEnabled, ConversionError> {
+pub fn logging_enabled_input_from_s3s(value: s3s::dto::LoggingEnabled) -> Result<crate::ops::shapes::LoggingEnabled, ConversionError> {
     let s3s::dto::LoggingEnabled {
         target_bucket,
         target_grants,
@@ -50,8 +50,29 @@ pub fn logging_enabled_from_s3s(value: s3s::dto::LoggingEnabled) -> Result<crate
     } = value;
     Ok(crate::ops::shapes::LoggingEnabled {
         target_bucket,
-        target_grants: target_grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::target_grant::target_grant_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        target_grants: target_grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::target_grant::target_grant_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
         target_prefix,
-        target_object_key_format: target_object_key_format.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::target_object_key_format::target_object_key_format_from_s3s(x)?) }).transpose()?,
+        target_object_key_format: target_object_key_format.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::target_object_key_format::target_object_key_format_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `LoggingEnabled` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn logging_enabled_output_from_s3s(value: s3s::dto::LoggingEnabled) -> Result<crate::ops::shapes::LoggingEnabled, ConversionError> {
+    let s3s::dto::LoggingEnabled {
+        target_bucket,
+        target_grants,
+        target_object_key_format,
+        target_prefix,
+    } = value;
+    Ok(crate::ops::shapes::LoggingEnabled {
+        target_bucket,
+        target_grants: target_grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::target_grant::target_grant_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        target_prefix,
+        target_object_key_format: target_object_key_format.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::target_object_key_format::target_object_key_format_output_from_s3s(x)?) }).transpose()?,
     })
 }

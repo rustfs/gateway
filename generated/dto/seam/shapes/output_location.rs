@@ -32,17 +32,17 @@ pub fn output_location_to_s3s(value: crate::ops::shapes::OutputLocation) -> Resu
     })
 }
 
-/// Converts one `OutputLocation` from the s3s shape to the gateway shape.
+/// Converts one `OutputLocation` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn output_location_from_s3s(value: s3s::dto::OutputLocation) -> Result<crate::ops::shapes::OutputLocation, ConversionError> {
+pub fn output_location_input_from_s3s(value: s3s::dto::OutputLocation) -> Result<crate::ops::shapes::OutputLocation, ConversionError> {
     let s3s::dto::OutputLocation {
         s3,
     } = value;
     Ok(crate::ops::shapes::OutputLocation {
-        s3: s3.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::s3location::s3location_from_s3s(x)?) }).transpose()?,
+        s3: s3.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::s3location::s3location_input_from_s3s(x)?) }).transpose()?,
     })
 }

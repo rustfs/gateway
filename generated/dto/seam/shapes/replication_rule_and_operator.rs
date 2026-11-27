@@ -33,19 +33,36 @@ pub fn replication_rule_and_operator_to_s3s(value: crate::ops::shapes::Replicati
     })
 }
 
-/// Converts one `ReplicationRuleAndOperator` from the s3s shape to the gateway shape.
+/// Converts one `ReplicationRuleAndOperator` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn replication_rule_and_operator_from_s3s(value: s3s::dto::ReplicationRuleAndOperator) -> Result<crate::ops::shapes::ReplicationRuleAndOperator, ConversionError> {
+pub fn replication_rule_and_operator_input_from_s3s(value: s3s::dto::ReplicationRuleAndOperator) -> Result<crate::ops::shapes::ReplicationRuleAndOperator, ConversionError> {
     let s3s::dto::ReplicationRuleAndOperator {
         prefix,
         tags,
     } = value;
     Ok(crate::ops::shapes::ReplicationRuleAndOperator {
         prefix,
-        tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+    })
+}
+
+/// Converts one `ReplicationRuleAndOperator` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn replication_rule_and_operator_output_from_s3s(value: s3s::dto::ReplicationRuleAndOperator) -> Result<crate::ops::shapes::ReplicationRuleAndOperator, ConversionError> {
+    let s3s::dto::ReplicationRuleAndOperator {
+        prefix,
+        tags,
+    } = value;
+    Ok(crate::ops::shapes::ReplicationRuleAndOperator {
+        prefix,
+        tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
     })
 }

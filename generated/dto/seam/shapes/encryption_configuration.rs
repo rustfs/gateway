@@ -32,13 +32,28 @@ pub fn encryption_configuration_to_s3s(value: crate::ops::shapes::EncryptionConf
     })
 }
 
-/// Converts one `EncryptionConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `EncryptionConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn encryption_configuration_from_s3s(value: s3s::dto::EncryptionConfiguration) -> Result<crate::ops::shapes::EncryptionConfiguration, ConversionError> {
+pub fn encryption_configuration_input_from_s3s(value: s3s::dto::EncryptionConfiguration) -> Result<crate::ops::shapes::EncryptionConfiguration, ConversionError> {
+    let s3s::dto::EncryptionConfiguration {
+        replica_kms_key_id,
+    } = value;
+    Ok(crate::ops::shapes::EncryptionConfiguration {
+        replica_kms_key_id,
+    })
+}
+
+/// Converts one `EncryptionConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn encryption_configuration_output_from_s3s(value: s3s::dto::EncryptionConfiguration) -> Result<crate::ops::shapes::EncryptionConfiguration, ConversionError> {
     let s3s::dto::EncryptionConfiguration {
         replica_kms_key_id,
     } = value;

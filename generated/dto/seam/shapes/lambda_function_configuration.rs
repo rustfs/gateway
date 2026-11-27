@@ -35,13 +35,13 @@ pub fn lambda_function_configuration_to_s3s(value: crate::ops::shapes::LambdaFun
     })
 }
 
-/// Converts one `LambdaFunctionConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `LambdaFunctionConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn lambda_function_configuration_from_s3s(value: s3s::dto::LambdaFunctionConfiguration) -> Result<crate::ops::shapes::LambdaFunctionConfiguration, ConversionError> {
+pub fn lambda_function_configuration_input_from_s3s(value: s3s::dto::LambdaFunctionConfiguration) -> Result<crate::ops::shapes::LambdaFunctionConfiguration, ConversionError> {
     let s3s::dto::LambdaFunctionConfiguration {
         events,
         filter,
@@ -52,6 +52,27 @@ pub fn lambda_function_configuration_from_s3s(value: s3s::dto::LambdaFunctionCon
         id,
         lambda_function_arn,
         events: { let x = events; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::Events::custom(String::from(e))) }).collect::<Result<Vec<_>, ConversionError>>()? },
-        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::notification_configuration_filter::notification_configuration_filter_from_s3s(x)?) }).transpose()?,
+        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::notification_configuration_filter::notification_configuration_filter_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `LambdaFunctionConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn lambda_function_configuration_output_from_s3s(value: s3s::dto::LambdaFunctionConfiguration) -> Result<crate::ops::shapes::LambdaFunctionConfiguration, ConversionError> {
+    let s3s::dto::LambdaFunctionConfiguration {
+        events,
+        filter,
+        id,
+        lambda_function_arn,
+    } = value;
+    Ok(crate::ops::shapes::LambdaFunctionConfiguration {
+        id,
+        lambda_function_arn,
+        events: { let x = events; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::Events::custom(String::from(e))) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::notification_configuration_filter::notification_configuration_filter_output_from_s3s(x)?) }).transpose()?,
     })
 }

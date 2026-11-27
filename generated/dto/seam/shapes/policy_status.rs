@@ -32,13 +32,13 @@ pub fn policy_status_to_s3s(value: crate::ops::shapes::PolicyStatus) -> Result<s
     })
 }
 
-/// Converts one `PolicyStatus` from the s3s shape to the gateway shape.
+/// Converts one `PolicyStatus` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn policy_status_from_s3s(value: s3s::dto::PolicyStatus) -> Result<crate::ops::shapes::PolicyStatus, ConversionError> {
+pub fn policy_status_output_from_s3s(value: s3s::dto::PolicyStatus) -> Result<crate::ops::shapes::PolicyStatus, ConversionError> {
     let s3s::dto::PolicyStatus {
         is_public,
     } = value;

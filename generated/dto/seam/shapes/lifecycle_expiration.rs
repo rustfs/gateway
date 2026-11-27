@@ -35,13 +35,34 @@ pub fn lifecycle_expiration_to_s3s(value: crate::ops::shapes::LifecycleExpiratio
     })
 }
 
-/// Converts one `LifecycleExpiration` from the s3s shape to the gateway shape.
+/// Converts one `LifecycleExpiration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn lifecycle_expiration_from_s3s(value: s3s::dto::LifecycleExpiration) -> Result<crate::ops::shapes::LifecycleExpiration, ConversionError> {
+pub fn lifecycle_expiration_input_from_s3s(value: s3s::dto::LifecycleExpiration) -> Result<crate::ops::shapes::LifecycleExpiration, ConversionError> {
+    let s3s::dto::LifecycleExpiration {
+        date,
+        days,
+        expired_object_all_versions,
+        expired_object_delete_marker,
+    } = value;
+    Ok(crate::ops::shapes::LifecycleExpiration {
+        date: date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("date", &x)?) }).transpose()?,
+        days,
+        expired_object_delete_marker,
+        expired_object_all_versions,
+    })
+}
+
+/// Converts one `LifecycleExpiration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn lifecycle_expiration_output_from_s3s(value: s3s::dto::LifecycleExpiration) -> Result<crate::ops::shapes::LifecycleExpiration, ConversionError> {
     let s3s::dto::LifecycleExpiration {
         date,
         days,

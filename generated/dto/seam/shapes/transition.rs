@@ -34,13 +34,32 @@ pub fn transition_to_s3s(value: crate::ops::shapes::Transition) -> Result<s3s::d
     })
 }
 
-/// Converts one `Transition` from the s3s shape to the gateway shape.
+/// Converts one `Transition` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn transition_from_s3s(value: s3s::dto::Transition) -> Result<crate::ops::shapes::Transition, ConversionError> {
+pub fn transition_input_from_s3s(value: s3s::dto::Transition) -> Result<crate::ops::shapes::Transition, ConversionError> {
+    let s3s::dto::Transition {
+        date,
+        days,
+        storage_class,
+    } = value;
+    Ok(crate::ops::shapes::Transition {
+        date: date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("date", &x)?) }).transpose()?,
+        days,
+        storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `Transition` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn transition_output_from_s3s(value: s3s::dto::Transition) -> Result<crate::ops::shapes::Transition, ConversionError> {
     let s3s::dto::Transition {
         date,
         days,

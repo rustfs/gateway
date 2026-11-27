@@ -35,13 +35,13 @@ pub fn versioning_configuration_to_s3s(value: crate::ops::shapes::VersioningConf
     })
 }
 
-/// Converts one `VersioningConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `VersioningConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn versioning_configuration_from_s3s(value: s3s::dto::VersioningConfiguration) -> Result<crate::ops::shapes::VersioningConfiguration, ConversionError> {
+pub fn versioning_configuration_input_from_s3s(value: s3s::dto::VersioningConfiguration) -> Result<crate::ops::shapes::VersioningConfiguration, ConversionError> {
     let s3s::dto::VersioningConfiguration {
         exclude_folders,
         excluded_prefixes,
@@ -51,7 +51,7 @@ pub fn versioning_configuration_from_s3s(value: s3s::dto::VersioningConfiguratio
     Ok(crate::ops::shapes::VersioningConfiguration {
         mfa_delete: mfa_delete.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::MfaDelete::custom(x.as_str().to_owned())) }).transpose()?,
         status: status.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Status::custom(x.as_str().to_owned())) }).transpose()?,
-        excluded_prefixes: match excluded_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::excluded_prefix::excluded_prefix_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        excluded_prefixes: match excluded_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::excluded_prefix::excluded_prefix_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         exclude_folders,
     })
 }

@@ -32,13 +32,13 @@ pub fn glacier_job_parameters_to_s3s(value: crate::ops::shapes::GlacierJobParame
     })
 }
 
-/// Converts one `GlacierJobParameters` from the s3s shape to the gateway shape.
+/// Converts one `GlacierJobParameters` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn glacier_job_parameters_from_s3s(value: s3s::dto::GlacierJobParameters) -> Result<crate::ops::shapes::GlacierJobParameters, ConversionError> {
+pub fn glacier_job_parameters_input_from_s3s(value: s3s::dto::GlacierJobParameters) -> Result<crate::ops::shapes::GlacierJobParameters, ConversionError> {
     let s3s::dto::GlacierJobParameters {
         tier,
     } = value;

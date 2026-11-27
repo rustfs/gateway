@@ -35,13 +35,13 @@ pub fn input_serialization_to_s3s(value: crate::ops::shapes::InputSerialization)
     })
 }
 
-/// Converts one `InputSerialization` from the s3s shape to the gateway shape.
+/// Converts one `InputSerialization` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn input_serialization_from_s3s(value: s3s::dto::InputSerialization) -> Result<crate::ops::shapes::InputSerialization, ConversionError> {
+pub fn input_serialization_input_from_s3s(value: s3s::dto::InputSerialization) -> Result<crate::ops::shapes::InputSerialization, ConversionError> {
     let s3s::dto::InputSerialization {
         csv,
         compression_type,
@@ -49,9 +49,9 @@ pub fn input_serialization_from_s3s(value: s3s::dto::InputSerialization) -> Resu
         parquet,
     } = value;
     Ok(crate::ops::shapes::InputSerialization {
-        csv: csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_input::csv_input_from_s3s(x)?) }).transpose()?,
+        csv: csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_input::csv_input_input_from_s3s(x)?) }).transpose()?,
         compression_type: compression_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::CompressionType::custom(x.as_str().to_owned())) }).transpose()?,
-        json: json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_input::json_input_from_s3s(x)?) }).transpose()?,
-        parquet: parquet.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::parquet_input::parquet_input_from_s3s(x)?) }).transpose()?,
+        json: json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_input::json_input_input_from_s3s(x)?) }).transpose()?,
+        parquet: parquet.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::parquet_input::parquet_input_input_from_s3s(x)?) }).transpose()?,
     })
 }

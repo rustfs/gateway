@@ -37,13 +37,13 @@ pub fn get_object_attributes_parts_to_s3s(value: crate::ops::shapes::GetObjectAt
     })
 }
 
-/// Converts one `GetObjectAttributesParts` from the s3s shape to the gateway shape.
+/// Converts one `GetObjectAttributesParts` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn get_object_attributes_parts_from_s3s(value: s3s::dto::GetObjectAttributesParts) -> Result<crate::ops::shapes::GetObjectAttributesParts, ConversionError> {
+pub fn get_object_attributes_parts_output_from_s3s(value: s3s::dto::GetObjectAttributesParts) -> Result<crate::ops::shapes::GetObjectAttributesParts, ConversionError> {
     let s3s::dto::GetObjectAttributesParts {
         is_truncated,
         max_parts,
@@ -58,6 +58,6 @@ pub fn get_object_attributes_parts_from_s3s(value: s3s::dto::GetObjectAttributes
         next_part_number_marker: next_part_number_marker.map(|x| -> Result<_, ConversionError> { Ok(x.to_string()) }).transpose()?,
         max_parts: match max_parts { Some(x) => x, None => return Err(ConversionError { field: "max_parts", reason: "the gateway shape requires this member" }) },
         is_truncated: match is_truncated { Some(x) => x, None => return Err(ConversionError { field: "is_truncated", reason: "the gateway shape requires this member" }) },
-        parts: match parts { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object_part::object_part_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        parts: match parts { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object_part::object_part_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
     })
 }

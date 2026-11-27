@@ -32,13 +32,26 @@ pub fn simple_prefix_to_s3s(value: crate::ops::shapes::SimplePrefix) -> Result<s
     })
 }
 
-/// Converts one `SimplePrefix` from the s3s shape to the gateway shape.
+/// Converts one `SimplePrefix` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn simple_prefix_from_s3s(value: s3s::dto::SimplePrefix) -> Result<crate::ops::shapes::SimplePrefix, ConversionError> {
+pub fn simple_prefix_input_from_s3s(value: s3s::dto::SimplePrefix) -> Result<crate::ops::shapes::SimplePrefix, ConversionError> {
+    let s3s::dto::SimplePrefix {
+    } = value;
+    Ok(crate::ops::shapes::SimplePrefix {
+    })
+}
+
+/// Converts one `SimplePrefix` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn simple_prefix_output_from_s3s(value: s3s::dto::SimplePrefix) -> Result<crate::ops::shapes::SimplePrefix, ConversionError> {
     let s3s::dto::SimplePrefix {
     } = value;
     Ok(crate::ops::shapes::SimplePrefix {

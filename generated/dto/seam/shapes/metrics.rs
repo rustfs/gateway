@@ -33,19 +33,36 @@ pub fn metrics_to_s3s(value: crate::ops::shapes::Metrics) -> Result<s3s::dto::Me
     })
 }
 
-/// Converts one `Metrics` from the s3s shape to the gateway shape.
+/// Converts one `Metrics` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn metrics_from_s3s(value: s3s::dto::Metrics) -> Result<crate::ops::shapes::Metrics, ConversionError> {
+pub fn metrics_input_from_s3s(value: s3s::dto::Metrics) -> Result<crate::ops::shapes::Metrics, ConversionError> {
     let s3s::dto::Metrics {
         event_threshold,
         status,
     } = value;
     Ok(crate::ops::shapes::Metrics {
         status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
-        event_threshold: event_threshold.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_time_value::replication_time_value_from_s3s(x)?) }).transpose()?,
+        event_threshold: event_threshold.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_time_value::replication_time_value_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `Metrics` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn metrics_output_from_s3s(value: s3s::dto::Metrics) -> Result<crate::ops::shapes::Metrics, ConversionError> {
+    let s3s::dto::Metrics {
+        event_threshold,
+        status,
+    } = value;
+    Ok(crate::ops::shapes::Metrics {
+        status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
+        event_threshold: event_threshold.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_time_value::replication_time_value_output_from_s3s(x)?) }).transpose()?,
     })
 }

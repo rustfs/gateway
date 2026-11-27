@@ -35,13 +35,13 @@ pub fn lifecycle_rule_and_operator_to_s3s(value: crate::ops::shapes::LifecycleRu
     })
 }
 
-/// Converts one `LifecycleRuleAndOperator` from the s3s shape to the gateway shape.
+/// Converts one `LifecycleRuleAndOperator` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn lifecycle_rule_and_operator_from_s3s(value: s3s::dto::LifecycleRuleAndOperator) -> Result<crate::ops::shapes::LifecycleRuleAndOperator, ConversionError> {
+pub fn lifecycle_rule_and_operator_input_from_s3s(value: s3s::dto::LifecycleRuleAndOperator) -> Result<crate::ops::shapes::LifecycleRuleAndOperator, ConversionError> {
     let s3s::dto::LifecycleRuleAndOperator {
         object_size_greater_than,
         object_size_less_than,
@@ -50,7 +50,28 @@ pub fn lifecycle_rule_and_operator_from_s3s(value: s3s::dto::LifecycleRuleAndOpe
     } = value;
     Ok(crate::ops::shapes::LifecycleRuleAndOperator {
         prefix,
-        tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        object_size_greater_than,
+        object_size_less_than,
+    })
+}
+
+/// Converts one `LifecycleRuleAndOperator` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn lifecycle_rule_and_operator_output_from_s3s(value: s3s::dto::LifecycleRuleAndOperator) -> Result<crate::ops::shapes::LifecycleRuleAndOperator, ConversionError> {
+    let s3s::dto::LifecycleRuleAndOperator {
+        object_size_greater_than,
+        object_size_less_than,
+        prefix,
+        tags,
+    } = value;
+    Ok(crate::ops::shapes::LifecycleRuleAndOperator {
+        prefix,
+        tags: match tags { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         object_size_greater_than,
         object_size_less_than,
     })

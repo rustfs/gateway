@@ -39,13 +39,32 @@ pub fn object_lock_retention_to_s3s(value: crate::ops::shapes::ObjectLockRetenti
     })
 }
 
-/// Converts one `ObjectLockRetention` from the s3s shape to the gateway shape.
+/// Converts one `ObjectLockRetention` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_lock_retention_from_s3s(value: s3s::dto::ObjectLockRetention) -> Result<crate::ops::shapes::ObjectLockRetention, ConversionError> {
+pub fn object_lock_retention_input_from_s3s(value: s3s::dto::ObjectLockRetention) -> Result<crate::ops::shapes::ObjectLockRetention, ConversionError> {
+    let s3s::dto::ObjectLockRetention {
+        mode,
+        retain_until_date,
+    } = value;
+    Ok(crate::ops::shapes::ObjectLockRetention {
+        mode: mode.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Mode::custom(x.as_str().to_owned())) }).transpose()?,
+        retain_until_date: retain_until_date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("retain_until_date", &x)?) }).transpose()?,
+        event_hold: Default::default(),
+        event_hold_duration: Default::default(),
+    })
+}
+
+/// Converts one `ObjectLockRetention` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn object_lock_retention_output_from_s3s(value: s3s::dto::ObjectLockRetention) -> Result<crate::ops::shapes::ObjectLockRetention, ConversionError> {
     let s3s::dto::ObjectLockRetention {
         mode,
         retain_until_date,

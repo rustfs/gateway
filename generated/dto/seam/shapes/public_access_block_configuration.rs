@@ -35,13 +35,34 @@ pub fn public_access_block_configuration_to_s3s(value: crate::ops::shapes::Publi
     })
 }
 
-/// Converts one `PublicAccessBlockConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `PublicAccessBlockConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn public_access_block_configuration_from_s3s(value: s3s::dto::PublicAccessBlockConfiguration) -> Result<crate::ops::shapes::PublicAccessBlockConfiguration, ConversionError> {
+pub fn public_access_block_configuration_input_from_s3s(value: s3s::dto::PublicAccessBlockConfiguration) -> Result<crate::ops::shapes::PublicAccessBlockConfiguration, ConversionError> {
+    let s3s::dto::PublicAccessBlockConfiguration {
+        block_public_acls,
+        block_public_policy,
+        ignore_public_acls,
+        restrict_public_buckets,
+    } = value;
+    Ok(crate::ops::shapes::PublicAccessBlockConfiguration {
+        block_public_acls,
+        ignore_public_acls,
+        block_public_policy,
+        restrict_public_buckets,
+    })
+}
+
+/// Converts one `PublicAccessBlockConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn public_access_block_configuration_output_from_s3s(value: s3s::dto::PublicAccessBlockConfiguration) -> Result<crate::ops::shapes::PublicAccessBlockConfiguration, ConversionError> {
     let s3s::dto::PublicAccessBlockConfiguration {
         block_public_acls,
         block_public_policy,

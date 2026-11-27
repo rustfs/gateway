@@ -233,9 +233,9 @@ fn a_generated_output_carries_nested_shapes() {
 #[test]
 fn n_a_nested_member_the_gateway_cannot_hold_is_refused_by_name() {
     let mut object = listed_object("k");
-    object.e_tag = Some(oracle::ETag::Strong("a\u{1}b".to_owned()));
-    let error = ops::list_objects_v2::output_from_s3s(listing(vec![object])).expect_err("bad tag");
-    assert_eq!(error.field, "e_tag");
+    object.key = Some(String::new());
+    let error = ops::list_objects_v2::output_from_s3s(listing(vec![object])).expect_err("empty key");
+    assert_eq!(error.field, "key");
 }
 
 #[test]

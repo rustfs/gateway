@@ -33,19 +33,36 @@ pub fn source_selection_criteria_to_s3s(value: crate::ops::shapes::SourceSelecti
     })
 }
 
-/// Converts one `SourceSelectionCriteria` from the s3s shape to the gateway shape.
+/// Converts one `SourceSelectionCriteria` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn source_selection_criteria_from_s3s(value: s3s::dto::SourceSelectionCriteria) -> Result<crate::ops::shapes::SourceSelectionCriteria, ConversionError> {
+pub fn source_selection_criteria_input_from_s3s(value: s3s::dto::SourceSelectionCriteria) -> Result<crate::ops::shapes::SourceSelectionCriteria, ConversionError> {
     let s3s::dto::SourceSelectionCriteria {
         replica_modifications,
         sse_kms_encrypted_objects,
     } = value;
     Ok(crate::ops::shapes::SourceSelectionCriteria {
-        sse_kms_encrypted_objects: sse_kms_encrypted_objects.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::sse_kms_encrypted_objects::sse_kms_encrypted_objects_from_s3s(x)?) }).transpose()?,
-        replica_modifications: replica_modifications.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replica_modifications::replica_modifications_from_s3s(x)?) }).transpose()?,
+        sse_kms_encrypted_objects: sse_kms_encrypted_objects.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::sse_kms_encrypted_objects::sse_kms_encrypted_objects_input_from_s3s(x)?) }).transpose()?,
+        replica_modifications: replica_modifications.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replica_modifications::replica_modifications_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `SourceSelectionCriteria` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn source_selection_criteria_output_from_s3s(value: s3s::dto::SourceSelectionCriteria) -> Result<crate::ops::shapes::SourceSelectionCriteria, ConversionError> {
+    let s3s::dto::SourceSelectionCriteria {
+        replica_modifications,
+        sse_kms_encrypted_objects,
+    } = value;
+    Ok(crate::ops::shapes::SourceSelectionCriteria {
+        sse_kms_encrypted_objects: sse_kms_encrypted_objects.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::sse_kms_encrypted_objects::sse_kms_encrypted_objects_output_from_s3s(x)?) }).transpose()?,
+        replica_modifications: replica_modifications.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replica_modifications::replica_modifications_output_from_s3s(x)?) }).transpose()?,
     })
 }

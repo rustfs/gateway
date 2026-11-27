@@ -40,13 +40,13 @@ pub fn object_to_s3s(value: crate::ops::shapes::Object) -> Result<s3s::dto::Obje
     })
 }
 
-/// Converts one `Object` from the s3s shape to the gateway shape.
+/// Converts one `Object` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_from_s3s(value: s3s::dto::Object) -> Result<crate::ops::shapes::Object, ConversionError> {
+pub fn object_output_from_s3s(value: s3s::dto::Object) -> Result<crate::ops::shapes::Object, ConversionError> {
     let s3s::dto::Object {
         checksum_algorithm,
         checksum_type,
@@ -61,12 +61,12 @@ pub fn object_from_s3s(value: s3s::dto::Object) -> Result<crate::ops::shapes::Ob
     Ok(crate::ops::shapes::Object {
         key: match key { Some(x) => leaf::object_key("key", x)?, None => return Err(ConversionError { field: "key", reason: "the gateway shape requires this member" }) },
         last_modified: match last_modified { Some(x) => { let v = leaf::timestamp_from_s3s("last_modified", &x)?; if crate::WirePlaceholder::is_wire_placeholder(&v) { return Err(ConversionError { field: "last_modified", reason: "a legacy value the gateway would write as unheld" }); } v }, None => Default::default() },
-        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::stored_etag_from_s3s("e_tag", x)?) }).transpose()?,
         checksum_algorithm: match checksum_algorithm { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
         size: match size { Some(x) => x, None => return Err(ConversionError { field: "size", reason: "the gateway shape requires this member" }) },
         storage_class: match storage_class { Some(x) => { let v = crate::ops::enums::StorageClass::custom(x.as_str().to_owned()); if crate::WirePlaceholder::is_wire_placeholder(&v) { return Err(ConversionError { field: "storage_class", reason: "a legacy value the gateway would write as unheld" }); } v }, None => Default::default() },
-        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_from_s3s(x)?) }).transpose()?,
-        restore_status: restore_status.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::restore_status::restore_status_from_s3s(x)?) }).transpose()?,
+        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_output_from_s3s(x)?) }).transpose()?,
+        restore_status: restore_status.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::restore_status::restore_status_output_from_s3s(x)?) }).transpose()?,
     })
 }

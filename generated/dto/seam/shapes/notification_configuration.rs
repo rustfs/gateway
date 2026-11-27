@@ -35,13 +35,13 @@ pub fn notification_configuration_to_s3s(value: crate::ops::shapes::Notification
     })
 }
 
-/// Converts one `NotificationConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `NotificationConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn notification_configuration_from_s3s(value: s3s::dto::NotificationConfiguration) -> Result<crate::ops::shapes::NotificationConfiguration, ConversionError> {
+pub fn notification_configuration_input_from_s3s(value: s3s::dto::NotificationConfiguration) -> Result<crate::ops::shapes::NotificationConfiguration, ConversionError> {
     let s3s::dto::NotificationConfiguration {
         event_bridge_configuration,
         lambda_function_configurations,
@@ -49,9 +49,9 @@ pub fn notification_configuration_from_s3s(value: s3s::dto::NotificationConfigur
         topic_configurations,
     } = value;
     Ok(crate::ops::shapes::NotificationConfiguration {
-        topic_configurations: match topic_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::topic_configuration::topic_configuration_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        queue_configurations: match queue_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::queue_configuration::queue_configuration_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        lambda_function_configurations: match lambda_function_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lambda_function_configuration::lambda_function_configuration_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        event_bridge_configuration: event_bridge_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::event_bridge_configuration::event_bridge_configuration_from_s3s(x)?) }).transpose()?,
+        topic_configurations: match topic_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::topic_configuration::topic_configuration_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        queue_configurations: match queue_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::queue_configuration::queue_configuration_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        lambda_function_configurations: match lambda_function_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lambda_function_configuration::lambda_function_configuration_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        event_bridge_configuration: event_bridge_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::event_bridge_configuration::event_bridge_configuration_input_from_s3s(x)?) }).transpose()?,
     })
 }

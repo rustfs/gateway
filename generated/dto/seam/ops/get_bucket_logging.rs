@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketLoggingOutput) -> Result<crate
         logging_enabled,
     } = output;
     Ok(crate::ops::get_bucket_logging::Output {
-        logging_enabled: logging_enabled.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::logging_enabled::logging_enabled_from_s3s(x)?) }).transpose()?,
+        logging_enabled: logging_enabled.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::logging_enabled::logging_enabled_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

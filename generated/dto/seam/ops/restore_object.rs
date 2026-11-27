@@ -64,7 +64,7 @@ pub fn input_from_s3s(input: s3s::dto::RestoreObjectInput) -> Result<crate::ops:
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         key: { let x = key; leaf::object_key("key", x)? },
         version_id,
-        restore_request: match restore_request { Some(x) => super::super::shapes::restore_request::restore_request_from_s3s(x)?, None => return Err(ConversionError { field: "restore_request", reason: "the gateway shape requires this member" }) },
+        restore_request: match restore_request { Some(x) => super::super::shapes::restore_request::restore_request_input_from_s3s(x)?, None => return Err(ConversionError { field: "restore_request", reason: "the gateway shape requires this member" }) },
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
         expected_bucket_owner,

@@ -32,17 +32,32 @@ pub fn notification_configuration_filter_to_s3s(value: crate::ops::shapes::Notif
     })
 }
 
-/// Converts one `NotificationConfigurationFilter` from the s3s shape to the gateway shape.
+/// Converts one `NotificationConfigurationFilter` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn notification_configuration_filter_from_s3s(value: s3s::dto::NotificationConfigurationFilter) -> Result<crate::ops::shapes::NotificationConfigurationFilter, ConversionError> {
+pub fn notification_configuration_filter_input_from_s3s(value: s3s::dto::NotificationConfigurationFilter) -> Result<crate::ops::shapes::NotificationConfigurationFilter, ConversionError> {
     let s3s::dto::NotificationConfigurationFilter {
         key,
     } = value;
     Ok(crate::ops::shapes::NotificationConfigurationFilter {
-        key: key.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::s3key_filter::s3key_filter_from_s3s(x)?) }).transpose()?,
+        key: key.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::s3key_filter::s3key_filter_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `NotificationConfigurationFilter` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn notification_configuration_filter_output_from_s3s(value: s3s::dto::NotificationConfigurationFilter) -> Result<crate::ops::shapes::NotificationConfigurationFilter, ConversionError> {
+    let s3s::dto::NotificationConfigurationFilter {
+        key,
+    } = value;
+    Ok(crate::ops::shapes::NotificationConfigurationFilter {
+        key: key.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::s3key_filter::s3key_filter_output_from_s3s(x)?) }).transpose()?,
     })
 }

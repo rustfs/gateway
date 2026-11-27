@@ -109,8 +109,8 @@ pub fn output_from_s3s(output: s3s::dto::ListMultipartUploadsOutput) -> Result<c
         next_upload_id_marker,
         max_uploads: match max_uploads { Some(x) => x, None => return Err(ConversionError { field: "max_uploads", reason: "the gateway shape requires this member" }) },
         is_truncated: match is_truncated { Some(x) => x, None => return Err(ConversionError { field: "is_truncated", reason: "the gateway shape requires this member" }) },
-        uploads: match uploads { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::multipart_upload::multipart_upload_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        common_prefixes: match common_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::common_prefix::common_prefix_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        uploads: match uploads { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::multipart_upload::multipart_upload_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        common_prefixes: match common_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::common_prefix::common_prefix_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         encoding_type: encoding_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::EncodingType::custom(x.as_str().to_owned())) }).transpose()?,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
     })

@@ -33,13 +33,52 @@ use rustfs_gateway_model::overlay::FieldCarrier;
 use super::facts::{S3sFacts, S3sType};
 use crate::emit::dto::naming;
 
+/// Which side of an operation a backward (`s3s → gateway`) conversion is reached from.
+///
+/// Request inputs hold wire values validated by the strict gateway constructors; response outputs
+/// hold values a host stored (for example entity tags built with `ETag::from_stored`,
+/// rustfs/gateway#1618). A nested shape reached from both sides gets one backward conversion per
+/// side so neither direction weakens or tightens the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Side {
+    /// Reached from an operation input (`input_from_s3s`).
+    Input,
+    /// Reached from an operation output (`output_from_s3s`).
+    Output,
+}
+
+/// One direction of a nested shape's conversion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ShapeDirection {
+    /// Gateway shape → s3s shape.
+    Forward,
+    /// s3s shape → gateway shape, on the named operation side.
+    Backward(Side),
+}
+
 /// What the expressions reached, so the generator emits exactly those shape conversions.
 #[derive(Debug, Default)]
 pub struct Reached {
     /// Raw Smithy shape names that need a gateway → s3s conversion.
     pub forward: BTreeSet<String>,
-    /// Raw Smithy shape names that need an s3s → gateway conversion.
-    pub backward: BTreeSet<String>,
+    /// Raw Smithy shape names that need an s3s → gateway conversion on the request side.
+    pub backward_input: BTreeSet<String>,
+    /// Raw Smithy shape names that need an s3s → gateway conversion on the response side.
+    pub backward_output: BTreeSet<String>,
+}
+
+impl Reached {
+    /// Records a nested shape reached by a backward conversion on `side`.
+    pub fn reach_backward(&mut self, raw: String, side: Side) {
+        match side {
+            Side::Input => {
+                self.backward_input.insert(raw);
+            }
+            Side::Output => {
+                self.backward_output.insert(raw);
+            }
+        }
+    }
 }
 
 /// The generator's view of both sides.
@@ -65,11 +104,23 @@ pub fn gateway_shape(raw: &str) -> String {
     format!("crate::ops::shapes::{}", naming::type_name(raw))
 }
 
+/// The function name for one shape conversion direction.
+#[must_use]
+pub fn shape_fn_name(raw: &str, dir: ShapeDirection) -> String {
+    let module = naming::module_name(raw);
+    let suffix = match dir {
+        ShapeDirection::Forward => "to_s3s",
+        ShapeDirection::Backward(Side::Input) => "input_from_s3s",
+        ShapeDirection::Backward(Side::Output) => "output_from_s3s",
+    };
+    format!("{module}_{suffix}")
+}
+
 /// The function converting one shape, in one direction.
 #[must_use]
-pub fn shape_fn(raw: &str, forward: bool) -> String {
+pub fn shape_fn(raw: &str, dir: ShapeDirection) -> String {
     let module = naming::module_name(raw);
-    format!("super::super::shapes::{module}::{module}_{}", if forward { "to_s3s" } else { "from_s3s" })
+    format!("super::super::shapes::{module}::{}", shape_fn_name(raw, dir))
 }
 
 fn leaf(s3s: &S3sType) -> Option<&str> {
@@ -145,11 +196,11 @@ impl Ctx<'_> {
             (Type::Blob { streaming: false }, S3sType::Leaf(l)) if l == "Bytes" => v.to_owned(),
             (Type::Structure(raw), S3sType::Struct(name)) if raw == name => {
                 self.reached.borrow_mut().forward.insert(raw.clone());
-                format!("{}({v})?", shape_fn(raw, true))
+                format!("{}({v})?", shape_fn(raw, ShapeDirection::Forward))
             }
             (Type::Union(raw), S3sType::Union(name)) if raw == name => {
                 self.reached.borrow_mut().forward.insert(raw.clone());
-                format!("{}({v})?", shape_fn(raw, true))
+                format!("{}({v})?", shape_fn(raw, ShapeDirection::Forward))
             }
             (Type::List { member: inner, .. }, S3sType::Vec(s3s_inner)) => {
                 let body = self.forward(inner, s3s_inner, "e", field)?;
@@ -170,12 +221,13 @@ impl Ctx<'_> {
         })
     }
 
-    /// `v`, an s3s value of `s3s`, as the gateway value of `gw` (the IR type of member `member`).
+    /// `v`, an s3s value of `s3s`, as the gateway value of `gw` (the IR type of member `member`),
+    /// reached from `side`.
     ///
     /// # Errors
     ///
     /// A pair the table does not know.
-    pub fn backward(&self, s3s: &S3sType, gw: &Type, member: &str, v: &str, field: &str) -> Result<String, String> {
+    pub fn backward(&self, s3s: &S3sType, gw: &Type, member: &str, v: &str, field: &str, side: Side) -> Result<String, String> {
         let unknown = || Err(format!("no s3s → gateway conversion from {s3s:?} to {gw:?}"));
         Ok(match (s3s, gw) {
             (S3sType::Leaf(l), Type::String) if l == "String" => v.to_owned(),
@@ -198,8 +250,14 @@ impl Ctx<'_> {
             (S3sType::Leaf(l), Type::Integer) if l == "i64" => format!("leaf::narrow(\"{field}\", {v})?"),
             (S3sType::Leaf(l), Type::Boolean) if l == "bool" => v.to_owned(),
             (S3sType::Leaf(l), Type::Timestamp(_)) if l == "Timestamp" => format!("leaf::timestamp_from_s3s(\"{field}\", &{v})?"),
-            (S3sType::Leaf(l), Type::ETag(_)) if l == "ETag" => format!("leaf::etag_from_s3s(\"{field}\", {v})?"),
-            (S3sType::Leaf(l), Type::ETag(_)) if l == "String" => format!("leaf::etag_from_text(\"{field}\", &{v})?"),
+            (S3sType::Leaf(l), Type::ETag(_)) if l == "ETag" => match side {
+                Side::Input => format!("leaf::etag_from_s3s(\"{field}\", {v})?"),
+                Side::Output => format!("leaf::stored_etag_from_s3s(\"{field}\", {v})?"),
+            },
+            (S3sType::Leaf(l), Type::ETag(_)) if l == "String" => match side {
+                Side::Input => format!("leaf::etag_from_text(\"{field}\", &{v})?"),
+                Side::Output => format!("crate::ETag::from_stored({v})"),
+            },
             (S3sType::Leaf(l), Type::Checksum(algo)) if l == "String" => {
                 format!("leaf::digest_from_s3s(\"{field}\", crate::ChecksumAlgorithm::{algo:?}, &{v})?")
             }
@@ -209,15 +267,15 @@ impl Ctx<'_> {
             (S3sType::Leaf(l), Type::Blob { streaming: true }) if l == "StreamingBlob" => format!("leaf::byte_stream({v})"),
             (S3sType::Leaf(l), Type::Blob { streaming: false }) if l == "Bytes" => v.to_owned(),
             (S3sType::Struct(name), Type::Structure(raw)) if raw == name => {
-                self.reached.borrow_mut().backward.insert(raw.clone());
-                format!("{}({v})?", shape_fn(raw, false))
+                self.reached.borrow_mut().reach_backward(raw.clone(), side);
+                format!("{}({v})?", shape_fn(raw, ShapeDirection::Backward(side)))
             }
             (S3sType::Union(name), Type::Union(raw)) if raw == name => {
-                self.reached.borrow_mut().backward.insert(raw.clone());
-                format!("{}({v})?", shape_fn(raw, false))
+                self.reached.borrow_mut().reach_backward(raw.clone(), side);
+                format!("{}({v})?", shape_fn(raw, ShapeDirection::Backward(side)))
             }
             (S3sType::Vec(s3s_inner), Type::List { member: inner, .. }) => {
-                let body = self.backward(s3s_inner, inner, member, "e", field)?;
+                let body = self.backward(s3s_inner, inner, member, "e", field, side)?;
                 if body == "e" {
                     v.to_owned()
                 } else {
@@ -225,8 +283,8 @@ impl Ctx<'_> {
                 }
             }
             (S3sType::Map(s3s_key, s3s_value), Type::Map { key, value }) => {
-                let k = self.backward(s3s_key, key, member, "k", field)?;
-                let val = self.backward(s3s_value, value, member, "v", field)?;
+                let k = self.backward(s3s_key, key, member, "k", field, side)?;
+                let val = self.backward(s3s_value, value, member, "v", field, side)?;
                 format!(
                     "{v}.into_iter().map(|(k, v)| -> Result<_, ConversionError> {{ Ok(({k}, {val})) }}).collect::<Result<std::collections::BTreeMap<_, _>, ConversionError>>()?"
                 )

@@ -33,19 +33,36 @@ pub fn replication_configuration_to_s3s(value: crate::ops::shapes::ReplicationCo
     })
 }
 
-/// Converts one `ReplicationConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `ReplicationConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn replication_configuration_from_s3s(value: s3s::dto::ReplicationConfiguration) -> Result<crate::ops::shapes::ReplicationConfiguration, ConversionError> {
+pub fn replication_configuration_input_from_s3s(value: s3s::dto::ReplicationConfiguration) -> Result<crate::ops::shapes::ReplicationConfiguration, ConversionError> {
     let s3s::dto::ReplicationConfiguration {
         role,
         rules,
     } = value;
     Ok(crate::ops::shapes::ReplicationConfiguration {
         role,
-        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule::replication_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule::replication_rule_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+    })
+}
+
+/// Converts one `ReplicationConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn replication_configuration_output_from_s3s(value: s3s::dto::ReplicationConfiguration) -> Result<crate::ops::shapes::ReplicationConfiguration, ConversionError> {
+    let s3s::dto::ReplicationConfiguration {
+        role,
+        rules,
+    } = value;
+    Ok(crate::ops::shapes::ReplicationConfiguration {
+        role,
+        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule::replication_rule_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
     })
 }

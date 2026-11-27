@@ -150,7 +150,7 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartOutput) -> Result<crate::ops:
     } = output;
     Ok(crate::ops::upload_part::Output {
         server_side_encryption: server_side_encryption.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ServerSideEncryption::custom(x.as_str().to_owned())) }).transpose()?,
-        e_tag: match e_tag { Some(x) => leaf::etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
+        e_tag: match e_tag { Some(x) => leaf::stored_etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
         checksum_spec: leaf::checksum_spec_from_s3s([("checksum_crc32", crate::ChecksumAlgorithm::Crc32, checksum_crc32), ("checksum_crc32c", crate::ChecksumAlgorithm::Crc32c, checksum_crc32c), ("checksum_crc64nvme", crate::ChecksumAlgorithm::Crc64Nvme, checksum_crc64nvme), ("checksum_md5", crate::ChecksumAlgorithm::Md5, checksum_md5), ("checksum_sha1", crate::ChecksumAlgorithm::Sha1, checksum_sha1), ("checksum_sha256", crate::ChecksumAlgorithm::Sha256, checksum_sha256), ("checksum_sha512", crate::ChecksumAlgorithm::Sha512, checksum_sha512), ("checksum_xxhash128", crate::ChecksumAlgorithm::XxHash128, checksum_xxhash128), ("checksum_xxhash3", crate::ChecksumAlgorithm::XxHash3, checksum_xxhash3), ("checksum_xxhash64", crate::ChecksumAlgorithm::XxHash64, checksum_xxhash64)])?,
         sse_customer_algorithm,
         sse_customer_key_md5,

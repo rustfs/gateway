@@ -33,13 +33,30 @@ pub fn noncurrent_version_expiration_to_s3s(value: crate::ops::shapes::Noncurren
     })
 }
 
-/// Converts one `NoncurrentVersionExpiration` from the s3s shape to the gateway shape.
+/// Converts one `NoncurrentVersionExpiration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn noncurrent_version_expiration_from_s3s(value: s3s::dto::NoncurrentVersionExpiration) -> Result<crate::ops::shapes::NoncurrentVersionExpiration, ConversionError> {
+pub fn noncurrent_version_expiration_input_from_s3s(value: s3s::dto::NoncurrentVersionExpiration) -> Result<crate::ops::shapes::NoncurrentVersionExpiration, ConversionError> {
+    let s3s::dto::NoncurrentVersionExpiration {
+        newer_noncurrent_versions,
+        noncurrent_days,
+    } = value;
+    Ok(crate::ops::shapes::NoncurrentVersionExpiration {
+        noncurrent_days,
+        newer_noncurrent_versions,
+    })
+}
+
+/// Converts one `NoncurrentVersionExpiration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn noncurrent_version_expiration_output_from_s3s(value: s3s::dto::NoncurrentVersionExpiration) -> Result<crate::ops::shapes::NoncurrentVersionExpiration, ConversionError> {
     let s3s::dto::NoncurrentVersionExpiration {
         newer_noncurrent_versions,
         noncurrent_days,

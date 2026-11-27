@@ -35,13 +35,13 @@ pub fn select_parameters_to_s3s(value: crate::ops::shapes::SelectParameters) -> 
     })
 }
 
-/// Converts one `SelectParameters` from the s3s shape to the gateway shape.
+/// Converts one `SelectParameters` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn select_parameters_from_s3s(value: s3s::dto::SelectParameters) -> Result<crate::ops::shapes::SelectParameters, ConversionError> {
+pub fn select_parameters_input_from_s3s(value: s3s::dto::SelectParameters) -> Result<crate::ops::shapes::SelectParameters, ConversionError> {
     let s3s::dto::SelectParameters {
         expression,
         expression_type,
@@ -49,9 +49,9 @@ pub fn select_parameters_from_s3s(value: s3s::dto::SelectParameters) -> Result<c
         output_serialization,
     } = value;
     Ok(crate::ops::shapes::SelectParameters {
-        input_serialization: { let x = input_serialization; super::super::shapes::input_serialization::input_serialization_from_s3s(x)? },
+        input_serialization: { let x = input_serialization; super::super::shapes::input_serialization::input_serialization_input_from_s3s(x)? },
         expression_type: { let x = expression_type; crate::ops::enums::ExpressionType::custom(x.as_str().to_owned()) },
         expression,
-        output_serialization: { let x = output_serialization; super::super::shapes::output_serialization::output_serialization_from_s3s(x)? },
+        output_serialization: { let x = output_serialization; super::super::shapes::output_serialization::output_serialization_input_from_s3s(x)? },
     })
 }

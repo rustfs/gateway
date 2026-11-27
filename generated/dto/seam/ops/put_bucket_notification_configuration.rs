@@ -56,7 +56,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketNotificationConfigurationInput) 
     } = input;
     Ok(crate::ops::put_bucket_notification_configuration::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        notification_configuration: { let x = notification_configuration; super::super::shapes::notification_configuration::notification_configuration_from_s3s(x)? },
+        notification_configuration: { let x = notification_configuration; super::super::shapes::notification_configuration::notification_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
         skip_destination_validation,
     })

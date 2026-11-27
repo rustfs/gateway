@@ -32,13 +32,13 @@ pub fn excluded_prefix_to_s3s(value: crate::ops::shapes::ExcludedPrefix) -> Resu
     })
 }
 
-/// Converts one `ExcludedPrefix` from the s3s shape to the gateway shape.
+/// Converts one `ExcludedPrefix` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn excluded_prefix_from_s3s(value: s3s::dto::ExcludedPrefix) -> Result<crate::ops::shapes::ExcludedPrefix, ConversionError> {
+pub fn excluded_prefix_input_from_s3s(value: s3s::dto::ExcludedPrefix) -> Result<crate::ops::shapes::ExcludedPrefix, ConversionError> {
     let s3s::dto::ExcludedPrefix {
         prefix,
     } = value;

@@ -36,13 +36,36 @@ pub fn grantee_to_s3s(value: crate::ops::shapes::Grantee) -> Result<s3s::dto::Gr
     })
 }
 
-/// Converts one `Grantee` from the s3s shape to the gateway shape.
+/// Converts one `Grantee` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn grantee_from_s3s(value: s3s::dto::Grantee) -> Result<crate::ops::shapes::Grantee, ConversionError> {
+pub fn grantee_input_from_s3s(value: s3s::dto::Grantee) -> Result<crate::ops::shapes::Grantee, ConversionError> {
+    let s3s::dto::Grantee {
+        display_name,
+        email_address,
+        id,
+        type_,
+        uri,
+    } = value;
+    Ok(crate::ops::shapes::Grantee {
+        display_name,
+        email_address,
+        id,
+        uri,
+        r#type: Some({ let x = type_; crate::ops::enums::Type::custom(x.as_str().to_owned()) }),
+    })
+}
+
+/// Converts one `Grantee` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn grantee_output_from_s3s(value: s3s::dto::Grantee) -> Result<crate::ops::shapes::Grantee, ConversionError> {
     let s3s::dto::Grantee {
         display_name,
         email_address,

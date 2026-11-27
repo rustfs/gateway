@@ -35,13 +35,13 @@ pub fn deleted_object_to_s3s(value: crate::ops::shapes::DeletedObject) -> Result
     })
 }
 
-/// Converts one `DeletedObject` from the s3s shape to the gateway shape.
+/// Converts one `DeletedObject` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn deleted_object_from_s3s(value: s3s::dto::DeletedObject) -> Result<crate::ops::shapes::DeletedObject, ConversionError> {
+pub fn deleted_object_output_from_s3s(value: s3s::dto::DeletedObject) -> Result<crate::ops::shapes::DeletedObject, ConversionError> {
     let s3s::dto::DeletedObject {
         delete_marker,
         delete_marker_version_id,

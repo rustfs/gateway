@@ -29,7 +29,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::{Field, OperationIr, Shape, ShapeKind};
 
 use super::backward::{self, LegacyMembers};
-use super::expr::{Ctx, gateway_shape};
+use super::expr::{Ctx, ShapeDirection, Side, gateway_shape, shape_fn_name};
 use super::render::{self, Forward, HEADER};
 use crate::emit::dto::naming;
 
@@ -90,9 +90,16 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<Rendered, Vec
     let params: Vec<(String, String)> = ctx.supplied.borrow_mut().drain(..).collect();
     let param_text: String = params.iter().map(|(name, ty)| format!(", {name}: {ty}")).collect();
     let legacy = legacy_input(ctx, &input, &format!("{gw}::Input"));
-    let input_back =
-        backward::backward_struct_with(ctx, &input, &ir.input, &format!("{gw}::Input"), "input", LegacyMembers::HandBack);
-    let backward = backward::backward_struct(ctx, &output, &ir.output, &format!("{gw}::Output"), "output");
+    let input_back = backward::backward_struct_with(
+        ctx,
+        &input,
+        &ir.input,
+        &format!("{gw}::Input"),
+        "input",
+        LegacyMembers::HandBack,
+        Side::Input,
+    );
+    let backward = backward::backward_struct(ctx, &output, &ir.output, &format!("{gw}::Output"), "output", Side::Output);
     let output_forward = render::forward_struct_as(ctx, &output, &ir.output, "output", Forward::Output).and_then(|text| {
         // A parameter is a legacy-only input member decoded from the raw request; an output has none.
         let taken: Vec<String> = ctx.supplied.borrow_mut().drain(..).map(|(name, _)| name).collect();
@@ -161,38 +168,39 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<Rendered, Vec
 }
 
 /// One direction of one nested shape's conversion.
-pub(super) fn shape_fn(ctx: &Ctx<'_>, raw: &str, shape: &Shape, forward: bool) -> Result<String, Vec<String>> {
+pub(super) fn shape_fn(ctx: &Ctx<'_>, raw: &str, shape: &Shape, dir: ShapeDirection) -> Result<String, Vec<String>> {
     let gw = gateway_shape(raw);
-    let name = format!("{}_{}", naming::module_name(raw), if forward { "to_s3s" } else { "from_s3s" });
+    let name = shape_fn_name(raw, dir);
     ctx.supplied.borrow_mut().clear();
-    let body = match (shape.kind, forward) {
-        (ShapeKind::Structure, true) => render::forward_struct(ctx, raw, &shape.fields, "value")?,
-        (ShapeKind::Structure, false) => backward::backward_struct(ctx, raw, &shape.fields, &gw, "value")?,
-        (ShapeKind::Union, forward) => union(ctx, raw, &shape.fields, forward)?,
+    let body = match (shape.kind, dir) {
+        (ShapeKind::Structure, ShapeDirection::Forward) => render::forward_struct(ctx, raw, &shape.fields, "value")?,
+        (ShapeKind::Structure, ShapeDirection::Backward(side)) => {
+            backward::backward_struct(ctx, raw, &shape.fields, &gw, "value", side)?
+        }
+        (ShapeKind::Union, dir) => union(ctx, raw, &shape.fields, dir)?,
     };
     if !ctx.supplied.borrow().is_empty() {
         return Err(vec![format!(
             "{raw}: a nested shape's conversion takes no parameter; supply or decode the member at the operation"
         )]);
     }
-    let (from, to) = if forward {
-        (gw.clone(), format!("s3s::dto::{raw}"))
-    } else {
-        (format!("s3s::dto::{raw}"), gw.clone())
+    let (from, to, doc) = match dir {
+        ShapeDirection::Forward => (gw.clone(), format!("s3s::dto::{raw}"), "from the gateway shape to the s3s shape"),
+        ShapeDirection::Backward(Side::Input) => {
+            (format!("s3s::dto::{raw}"), gw.clone(), "from the s3s input shape to the gateway shape")
+        }
+        ShapeDirection::Backward(Side::Output) => {
+            (format!("s3s::dto::{raw}"), gw.clone(), "from the s3s output shape to the gateway shape")
+        }
     };
     Ok(format!(
-        "/// Converts one `{raw}` {}.\n///\n/// # Errors\n///\n/// [`ConversionError`] naming a member the other side cannot hold.\n\
+        "/// Converts one `{raw}` {doc}.\n///\n/// # Errors\n///\n/// [`ConversionError`] naming a member the other side cannot hold.\n\
          {ALLOWS}\n\
-         pub fn {name}(value: {from}) -> Result<{to}, ConversionError> {{\n{body}}}\n",
-        if forward {
-            "from the gateway shape to the s3s shape"
-        } else {
-            "from the s3s shape to the gateway shape"
-        }
+         pub fn {name}(value: {from}) -> Result<{to}, ConversionError> {{\n{body}}}\n"
     ))
 }
 
-fn union(ctx: &Ctx<'_>, raw: &str, fields: &[Field], forward: bool) -> Result<String, Vec<String>> {
+fn union(ctx: &Ctx<'_>, raw: &str, fields: &[Field], dir: ShapeDirection) -> Result<String, Vec<String>> {
     let Some(variants) = ctx.facts.unions.get(raw) else {
         return Err(vec![format!("{raw}: not an s3s union")]);
     };
@@ -205,22 +213,21 @@ fn union(ctx: &Ctx<'_>, raw: &str, fields: &[Field], forward: bool) -> Result<St
             errors.push(format!("{raw}::{variant}: the s3s union has no such variant"));
             continue;
         };
-        let conv = if forward {
-            ctx.forward(&field.ty, ty, "x", &variant)
-        } else {
-            ctx.backward(ty, &field.ty, &field.name, "x", &variant)
+        let conv = match dir {
+            ShapeDirection::Forward => ctx.forward(&field.ty, ty, "x", &variant),
+            ShapeDirection::Backward(side) => ctx.backward(ty, &field.ty, &field.name, "x", &variant, side),
         };
-        match conv {
-            Err(error) => errors.push(format!("{raw}::{variant}: {error}")),
-            Ok(conv) if forward => {
+        match (conv, dir) {
+            (Err(error), _) => errors.push(format!("{raw}::{variant}: {error}")),
+            (Ok(conv), ShapeDirection::Forward) => {
                 let _ = writeln!(arms, "        {gw}::{variant}(x) => s3s::dto::{raw}::{s3s_variant}({conv}),");
             }
-            Ok(conv) => {
+            (Ok(conv), ShapeDirection::Backward(_)) => {
                 let _ = writeln!(arms, "        s3s::dto::{raw}::{s3s_variant}(x) => {gw}::{variant}({conv}),");
             }
         }
     }
-    if !forward {
+    if matches!(dir, ShapeDirection::Backward(_)) {
         let _ = writeln!(
             arms,
             "        _ => {},",
