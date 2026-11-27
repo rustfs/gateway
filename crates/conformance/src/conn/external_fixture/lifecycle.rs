@@ -81,15 +81,19 @@ impl Conn {
                         name: bucket.name,
                         region: bucket.region,
                         versioned: false,
+                        object_lock: false,
                     });
                 }
                 continue;
             }
             let create_body = bucket.region.create_body();
-            let headers = (!create_body.is_empty())
-                .then(|| ("content-type".to_owned(), "application/xml".to_owned()))
-                .into_iter()
-                .collect::<Vec<_>>();
+            let mut headers = Vec::new();
+            if !create_body.is_empty() {
+                headers.push(("content-type".to_owned(), "application/xml".to_owned()));
+            }
+            if bucket.object_lock {
+                headers.push(("x-amz-bucket-object-lock-enabled".to_owned(), "true".to_owned()));
+            }
             let status = match self.fixture_control_status("PUT", &target, &bucket.region, create_body, &headers) {
                 Ok(status) => status,
                 Err(error) => return Err(self.abort_external_prepare(error)),
@@ -104,8 +108,11 @@ impl Conn {
                 name: bucket.name,
                 region: bucket.region,
                 versioned: bucket.versioned,
+                object_lock: bucket.object_lock,
             };
-            let enablement = if owned.versioned {
+            let enablement = if owned.object_lock {
+                self.verify_fixture_object_lock(&owned)
+            } else if owned.versioned {
                 self.enable_fixture_versioning(&owned)
             } else {
                 Ok(())
@@ -141,7 +148,7 @@ impl Conn {
                 .external_fixtures
                 .owned_buckets
                 .iter()
-                .any(|bucket| bucket.name == object.bucket && bucket.versioned)
+                .any(|bucket| bucket.name == object.bucket && (bucket.versioned || bucket.object_lock))
             {
                 if let Err(error) = self.put_fixture_version(&object) {
                     return Err(self.abort_external_prepare(error));
@@ -262,6 +269,13 @@ impl Conn {
         }
         failed_uploads.reverse();
         self.external_fixtures.owned_uploads = failed_uploads;
+        let locked_buckets: BTreeSet<String> = self
+            .external_fixtures
+            .owned_buckets
+            .iter()
+            .filter(|bucket| bucket.object_lock)
+            .map(|bucket| bucket.name.clone())
+            .collect();
         let mut failed_versions = Vec::new();
         while let Some(version) = self.external_fixtures.owned_versions.pop() {
             let Some(id) = version.version_id.as_deref() else {
@@ -269,6 +283,20 @@ impl Conn {
                 failed_versions.push(version);
                 continue;
             };
+            if self.external_fixtures.writes && locked_buckets.contains(&version.bucket) {
+                if let Err(error) = self.delete_locked_fixture_version(
+                    &version.bucket,
+                    &version.target,
+                    id,
+                    &version.region,
+                    !version.delete_marker,
+                    true,
+                ) {
+                    messages.push(error.to_string());
+                    failed_versions.push(version);
+                }
+                continue;
+            }
             let target = super::object::query_target(&version.target, "versionId", id);
             match self.fixture_control_status("DELETE", &target, &version.region, &[], &[]) {
                 Ok(204) => {}

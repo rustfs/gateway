@@ -94,7 +94,7 @@ pub(super) fn plans(setup: &Value, buckets: &[BucketPlan], decoder: &InProcess) 
         };
         let headers = object_headers(content_type, storage_class, metadata)?;
         let target = object_target(bucket, key)?;
-        if bucket_plan.versioned {
+        if bucket_plan.versioned || bucket_plan.object_lock {
             super::versioned::object_bucket(&target)?;
         }
         plans.push(ObjectPlan {
@@ -179,6 +179,18 @@ pub(super) fn object_target(bucket: &str, key: &str) -> Result<String, SutError>
 /// `target` with one query parameter, its value percent-encoded as an unreserved-only string.
 pub(super) fn query_target(target: &str, name: &str, value: &str) -> String {
     let mut target = format!("{target}?{name}=");
+    append_query_value(&mut target, value);
+    target
+}
+
+/// `target` with a bare subresource and one percent-encoded query parameter (e.g. `?legal-hold&versionId=...`).
+pub(super) fn subresource_query_target(target: &str, subresource: &str, name: &str, value: &str) -> String {
+    let mut target = format!("{target}?{subresource}&{name}=");
+    append_query_value(&mut target, value);
+    target
+}
+
+fn append_query_value(target: &mut String, value: &str) {
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
             target.push(char::from(byte));
@@ -188,7 +200,6 @@ pub(super) fn query_target(target: &str, name: &str, value: &str) -> String {
             target.push(char::from(hex_digit(byte & 0x0f)));
         }
     }
-    target
 }
 
 const fn hex_digit(nibble: u8) -> u8 {

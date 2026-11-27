@@ -31,7 +31,7 @@ pub(in crate::conn) struct OwnedVersion {
     pub(super) target: String,
     pub(super) region: FixtureRegion,
     pub(super) version_id: Option<String>,
-    delete_marker: bool,
+    pub(super) delete_marker: bool,
 }
 
 impl ExternalFixtures {
@@ -39,7 +39,10 @@ impl ExternalFixtures {
         // Granted writes are not tracked one by one: cleanup empties every declared bucket.
         if self.writes
             || self.active_case.is_none()
-            || !self.owned_buckets.iter().any(|bucket| bucket.versioned)
+            || !self
+                .owned_buckets
+                .iter()
+                .any(|bucket| bucket.versioned && !bucket.object_lock)
             || self.active_case.as_deref() != Some(case_id)
             || wire.raw_head.is_some()
             || !wire.h2_frames.is_empty()
@@ -68,8 +71,8 @@ impl ExternalFixtures {
         let name = object_bucket(target)?;
         self.owned_buckets
             .iter()
-            .find(|bucket| bucket.name == name && bucket.versioned)
-            .ok_or_else(|| unsupported("the object bucket is not an owned versioning-enabled bucket"))
+            .find(|bucket| bucket.name == name && bucket.versioned && !bucket.object_lock)
+            .ok_or_else(|| unsupported("the object bucket is not an owned unlocked versioning-enabled bucket"))
     }
 
     pub(in crate::conn) fn validate_version_head(&self, wire: &Wire, head: &Head, authority: &str) -> Result<(), SutError> {
@@ -261,7 +264,7 @@ fn refused(reason: &str) -> SutError {
     SutError::Refused(format!("external versioned fixture: {reason}"))
 }
 
-fn enabled(body: &[u8]) -> bool {
+pub(super) fn enabled(body: &[u8]) -> bool {
     let Some(items) = super::response_xml::element_texts(body, &[b"VersioningConfiguration"]) else {
         return false;
     };
