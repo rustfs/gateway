@@ -33,19 +33,19 @@ pub fn output_serialization_to_s3s(value: crate::ops::shapes::OutputSerializatio
     })
 }
 
-/// Converts one `OutputSerialization` from the s3s shape to the gateway shape.
+/// Converts one `OutputSerialization` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn output_serialization_from_s3s(value: s3s::dto::OutputSerialization) -> Result<crate::ops::shapes::OutputSerialization, ConversionError> {
+pub fn output_serialization_input_from_s3s(value: s3s::dto::OutputSerialization) -> Result<crate::ops::shapes::OutputSerialization, ConversionError> {
     let s3s::dto::OutputSerialization {
         csv,
         json,
     } = value;
     Ok(crate::ops::shapes::OutputSerialization {
-        csv: csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_output::csv_output_from_s3s(x)?) }).transpose()?,
-        json: json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_output::json_output_from_s3s(x)?) }).transpose()?,
+        csv: csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_output::csv_output_input_from_s3s(x)?) }).transpose()?,
+        json: json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_output::json_output_input_from_s3s(x)?) }).transpose()?,
     })
 }

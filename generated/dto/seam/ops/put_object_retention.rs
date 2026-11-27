@@ -67,7 +67,7 @@ pub fn input_from_s3s(input: s3s::dto::PutObjectRetentionInput) -> Result<crate:
     Ok(crate::ops::put_object_retention::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         key: { let x = key; leaf::object_key("key", x)? },
-        retention: match retention { Some(x) => super::super::shapes::object_lock_retention::object_lock_retention_from_s3s(x)?, None => return Err(ConversionError { field: "retention", reason: "the gateway shape requires this member" }) },
+        retention: match retention { Some(x) => super::super::shapes::object_lock_retention::object_lock_retention_input_from_s3s(x)?, None => return Err(ConversionError { field: "retention", reason: "the gateway shape requires this member" }) },
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
         version_id,
         bypass_governance_retention,

@@ -32,17 +32,17 @@ pub fn completed_multipart_upload_to_s3s(value: crate::ops::shapes::CompletedMul
     })
 }
 
-/// Converts one `CompletedMultipartUpload` from the s3s shape to the gateway shape.
+/// Converts one `CompletedMultipartUpload` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn completed_multipart_upload_from_s3s(value: s3s::dto::CompletedMultipartUpload) -> Result<crate::ops::shapes::CompletedMultipartUpload, ConversionError> {
+pub fn completed_multipart_upload_input_from_s3s(value: s3s::dto::CompletedMultipartUpload) -> Result<crate::ops::shapes::CompletedMultipartUpload, ConversionError> {
     let s3s::dto::CompletedMultipartUpload {
         parts,
     } = value;
     Ok(crate::ops::shapes::CompletedMultipartUpload {
-        parts: match parts { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::completed_part::completed_part_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        parts: match parts { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::completed_part::completed_part_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
     })
 }

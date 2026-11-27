@@ -36,13 +36,13 @@ pub fn object_identifier_to_s3s(value: crate::ops::shapes::ObjectIdentifier) -> 
     })
 }
 
-/// Converts one `ObjectIdentifier` from the s3s shape to the gateway shape.
+/// Converts one `ObjectIdentifier` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_identifier_from_s3s(value: s3s::dto::ObjectIdentifier) -> Result<crate::ops::shapes::ObjectIdentifier, ConversionError> {
+pub fn object_identifier_input_from_s3s(value: s3s::dto::ObjectIdentifier) -> Result<crate::ops::shapes::ObjectIdentifier, ConversionError> {
     let s3s::dto::ObjectIdentifier {
         e_tag,
         key,

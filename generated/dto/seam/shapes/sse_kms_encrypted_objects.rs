@@ -32,13 +32,28 @@ pub fn sse_kms_encrypted_objects_to_s3s(value: crate::ops::shapes::SseKmsEncrypt
     })
 }
 
-/// Converts one `SseKmsEncryptedObjects` from the s3s shape to the gateway shape.
+/// Converts one `SseKmsEncryptedObjects` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn sse_kms_encrypted_objects_from_s3s(value: s3s::dto::SseKmsEncryptedObjects) -> Result<crate::ops::shapes::SseKmsEncryptedObjects, ConversionError> {
+pub fn sse_kms_encrypted_objects_input_from_s3s(value: s3s::dto::SseKmsEncryptedObjects) -> Result<crate::ops::shapes::SseKmsEncryptedObjects, ConversionError> {
+    let s3s::dto::SseKmsEncryptedObjects {
+        status,
+    } = value;
+    Ok(crate::ops::shapes::SseKmsEncryptedObjects {
+        status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
+    })
+}
+
+/// Converts one `SseKmsEncryptedObjects` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn sse_kms_encrypted_objects_output_from_s3s(value: s3s::dto::SseKmsEncryptedObjects) -> Result<crate::ops::shapes::SseKmsEncryptedObjects, ConversionError> {
     let s3s::dto::SseKmsEncryptedObjects {
         status,
     } = value;

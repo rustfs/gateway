@@ -32,13 +32,28 @@ pub fn abort_incomplete_multipart_upload_to_s3s(value: crate::ops::shapes::Abort
     })
 }
 
-/// Converts one `AbortIncompleteMultipartUpload` from the s3s shape to the gateway shape.
+/// Converts one `AbortIncompleteMultipartUpload` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn abort_incomplete_multipart_upload_from_s3s(value: s3s::dto::AbortIncompleteMultipartUpload) -> Result<crate::ops::shapes::AbortIncompleteMultipartUpload, ConversionError> {
+pub fn abort_incomplete_multipart_upload_input_from_s3s(value: s3s::dto::AbortIncompleteMultipartUpload) -> Result<crate::ops::shapes::AbortIncompleteMultipartUpload, ConversionError> {
+    let s3s::dto::AbortIncompleteMultipartUpload {
+        days_after_initiation,
+    } = value;
+    Ok(crate::ops::shapes::AbortIncompleteMultipartUpload {
+        days_after_initiation,
+    })
+}
+
+/// Converts one `AbortIncompleteMultipartUpload` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn abort_incomplete_multipart_upload_output_from_s3s(value: s3s::dto::AbortIncompleteMultipartUpload) -> Result<crate::ops::shapes::AbortIncompleteMultipartUpload, ConversionError> {
     let s3s::dto::AbortIncompleteMultipartUpload {
         days_after_initiation,
     } = value;

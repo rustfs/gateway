@@ -32,17 +32,32 @@ pub fn server_side_encryption_configuration_to_s3s(value: crate::ops::shapes::Se
     })
 }
 
-/// Converts one `ServerSideEncryptionConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `ServerSideEncryptionConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn server_side_encryption_configuration_from_s3s(value: s3s::dto::ServerSideEncryptionConfiguration) -> Result<crate::ops::shapes::ServerSideEncryptionConfiguration, ConversionError> {
+pub fn server_side_encryption_configuration_input_from_s3s(value: s3s::dto::ServerSideEncryptionConfiguration) -> Result<crate::ops::shapes::ServerSideEncryptionConfiguration, ConversionError> {
     let s3s::dto::ServerSideEncryptionConfiguration {
         rules,
     } = value;
     Ok(crate::ops::shapes::ServerSideEncryptionConfiguration {
-        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_rule::server_side_encryption_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_rule::server_side_encryption_rule_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+    })
+}
+
+/// Converts one `ServerSideEncryptionConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn server_side_encryption_configuration_output_from_s3s(value: s3s::dto::ServerSideEncryptionConfiguration) -> Result<crate::ops::shapes::ServerSideEncryptionConfiguration, ConversionError> {
+    let s3s::dto::ServerSideEncryptionConfiguration {
+        rules,
+    } = value;
+    Ok(crate::ops::shapes::ServerSideEncryptionConfiguration {
+        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_rule::server_side_encryption_rule_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
     })
 }

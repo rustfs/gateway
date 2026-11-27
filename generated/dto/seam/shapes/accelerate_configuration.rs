@@ -32,13 +32,13 @@ pub fn accelerate_configuration_to_s3s(value: crate::ops::shapes::AccelerateConf
     })
 }
 
-/// Converts one `AccelerateConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `AccelerateConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn accelerate_configuration_from_s3s(value: s3s::dto::AccelerateConfiguration) -> Result<crate::ops::shapes::AccelerateConfiguration, ConversionError> {
+pub fn accelerate_configuration_input_from_s3s(value: s3s::dto::AccelerateConfiguration) -> Result<crate::ops::shapes::AccelerateConfiguration, ConversionError> {
     let s3s::dto::AccelerateConfiguration {
         status,
     } = value;

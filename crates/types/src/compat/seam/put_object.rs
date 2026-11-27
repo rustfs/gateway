@@ -366,19 +366,16 @@ pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObject
         ("checksum_xxhash64", ChecksumAlgorithm::XxHash64, checksum_xxhash64),
     ])?;
     let e_tag = match e_tag {
-        Some(oracle::ETag::Strong(value)) => ETag::new(value),
-        Some(oracle::ETag::Weak(value)) => ETag::new_weak(value),
-        None => {
-            return Err(ConversionError {
-                field: "e_tag",
-                reason: "a PutObject answer carries an entity tag and the gateway output cannot omit one",
-            });
-        }
-    }
-    .map_err(|_| ConversionError {
-        field: "e_tag",
-        reason: "not an entity tag the gateway can write",
-    })?;
+        Some(oracle::ETag::Strong(value)) => Ok(ETag::from_stored(value)),
+        Some(oracle::ETag::Weak(value)) => ETag::new_weak(value).map_err(|_| ConversionError {
+            field: "e_tag",
+            reason: "not an entity tag the gateway can write",
+        }),
+        None => Err(ConversionError {
+            field: "e_tag",
+            reason: "a PutObject answer carries an entity tag and the gateway output cannot omit one",
+        }),
+    }?;
     Ok(dto::PutObjectOutput {
         expiration: expiration.map(OpaqueString::from),
         e_tag,

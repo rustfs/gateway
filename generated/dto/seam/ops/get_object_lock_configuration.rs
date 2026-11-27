@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetObjectLockConfigurationOutput) -> Re
         object_lock_configuration,
     } = output;
     Ok(crate::ops::get_object_lock_configuration::Output {
-        object_lock_configuration: object_lock_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_configuration::object_lock_configuration_from_s3s(x)?) }).transpose()?,
+        object_lock_configuration: object_lock_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_configuration::object_lock_configuration_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

@@ -174,7 +174,7 @@ pub fn output_from_s3s(output: s3s::dto::GetObjectOutput) -> Result<crate::ops::
         restore,
         last_modified: last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
         content_length,
-        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::stored_etag_from_s3s("e_tag", x)?) }).transpose()?,
         checksum_crc32,
         checksum_crc32c,
         checksum_crc64nvme,

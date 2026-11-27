@@ -41,13 +41,13 @@ pub fn replication_rule_to_s3s(value: crate::ops::shapes::ReplicationRule) -> Re
     })
 }
 
-/// Converts one `ReplicationRule` from the s3s shape to the gateway shape.
+/// Converts one `ReplicationRule` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn replication_rule_from_s3s(value: s3s::dto::ReplicationRule) -> Result<crate::ops::shapes::ReplicationRule, ConversionError> {
+pub fn replication_rule_input_from_s3s(value: s3s::dto::ReplicationRule) -> Result<crate::ops::shapes::ReplicationRule, ConversionError> {
     let s3s::dto::ReplicationRule {
         delete_marker_replication,
         delete_replication,
@@ -64,12 +64,45 @@ pub fn replication_rule_from_s3s(value: s3s::dto::ReplicationRule) -> Result<cra
         id,
         priority,
         prefix,
-        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_filter::replication_rule_filter_from_s3s(x)?) }).transpose()?,
+        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_filter::replication_rule_filter_input_from_s3s(x)?) }).transpose()?,
         status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
-        source_selection_criteria: source_selection_criteria.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::source_selection_criteria::source_selection_criteria_from_s3s(x)?) }).transpose()?,
-        existing_object_replication: existing_object_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::existing_object_replication::existing_object_replication_from_s3s(x)?) }).transpose()?,
-        destination: { let x = destination; super::super::shapes::destination::destination_from_s3s(x)? },
-        delete_marker_replication: delete_marker_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_marker_replication::delete_marker_replication_from_s3s(x)?) }).transpose()?,
-        delete_replication: delete_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_replication::delete_replication_from_s3s(x)?) }).transpose()?,
+        source_selection_criteria: source_selection_criteria.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::source_selection_criteria::source_selection_criteria_input_from_s3s(x)?) }).transpose()?,
+        existing_object_replication: existing_object_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::existing_object_replication::existing_object_replication_input_from_s3s(x)?) }).transpose()?,
+        destination: { let x = destination; super::super::shapes::destination::destination_input_from_s3s(x)? },
+        delete_marker_replication: delete_marker_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_marker_replication::delete_marker_replication_input_from_s3s(x)?) }).transpose()?,
+        delete_replication: delete_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_replication::delete_replication_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `ReplicationRule` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn replication_rule_output_from_s3s(value: s3s::dto::ReplicationRule) -> Result<crate::ops::shapes::ReplicationRule, ConversionError> {
+    let s3s::dto::ReplicationRule {
+        delete_marker_replication,
+        delete_replication,
+        destination,
+        existing_object_replication,
+        filter,
+        id,
+        prefix,
+        priority,
+        source_selection_criteria,
+        status,
+    } = value;
+    Ok(crate::ops::shapes::ReplicationRule {
+        id,
+        priority,
+        prefix,
+        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_filter::replication_rule_filter_output_from_s3s(x)?) }).transpose()?,
+        status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
+        source_selection_criteria: source_selection_criteria.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::source_selection_criteria::source_selection_criteria_output_from_s3s(x)?) }).transpose()?,
+        existing_object_replication: existing_object_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::existing_object_replication::existing_object_replication_output_from_s3s(x)?) }).transpose()?,
+        destination: { let x = destination; super::super::shapes::destination::destination_output_from_s3s(x)? },
+        delete_marker_replication: delete_marker_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_marker_replication::delete_marker_replication_output_from_s3s(x)?) }).transpose()?,
+        delete_replication: delete_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_replication::delete_replication_output_from_s3s(x)?) }).transpose()?,
     })
 }

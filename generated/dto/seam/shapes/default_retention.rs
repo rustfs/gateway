@@ -37,13 +37,33 @@ pub fn default_retention_to_s3s(value: crate::ops::shapes::DefaultRetention) -> 
     })
 }
 
-/// Converts one `DefaultRetention` from the s3s shape to the gateway shape.
+/// Converts one `DefaultRetention` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn default_retention_from_s3s(value: s3s::dto::DefaultRetention) -> Result<crate::ops::shapes::DefaultRetention, ConversionError> {
+pub fn default_retention_input_from_s3s(value: s3s::dto::DefaultRetention) -> Result<crate::ops::shapes::DefaultRetention, ConversionError> {
+    let s3s::dto::DefaultRetention {
+        days,
+        mode,
+        years,
+    } = value;
+    Ok(crate::ops::shapes::DefaultRetention {
+        mode: mode.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Mode::custom(x.as_str().to_owned())) }).transpose()?,
+        days,
+        years,
+        default_event_hold: Default::default(),
+    })
+}
+
+/// Converts one `DefaultRetention` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn default_retention_output_from_s3s(value: s3s::dto::DefaultRetention) -> Result<crate::ops::shapes::DefaultRetention, ConversionError> {
     let s3s::dto::DefaultRetention {
         days,
         mode,

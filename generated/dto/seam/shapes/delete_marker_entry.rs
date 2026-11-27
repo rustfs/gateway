@@ -36,13 +36,13 @@ pub fn delete_marker_entry_to_s3s(value: crate::ops::shapes::DeleteMarkerEntry) 
     })
 }
 
-/// Converts one `DeleteMarkerEntry` from the s3s shape to the gateway shape.
+/// Converts one `DeleteMarkerEntry` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn delete_marker_entry_from_s3s(value: s3s::dto::DeleteMarkerEntry) -> Result<crate::ops::shapes::DeleteMarkerEntry, ConversionError> {
+pub fn delete_marker_entry_output_from_s3s(value: s3s::dto::DeleteMarkerEntry) -> Result<crate::ops::shapes::DeleteMarkerEntry, ConversionError> {
     let s3s::dto::DeleteMarkerEntry {
         is_latest,
         key,
@@ -51,7 +51,7 @@ pub fn delete_marker_entry_from_s3s(value: s3s::dto::DeleteMarkerEntry) -> Resul
         version_id,
     } = value;
     Ok(crate::ops::shapes::DeleteMarkerEntry {
-        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_from_s3s(x)?) }).transpose()?,
+        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_output_from_s3s(x)?) }).transpose()?,
         key: match key { Some(x) => leaf::object_key("key", x)?, None => return Err(ConversionError { field: "key", reason: "the gateway shape requires this member" }) },
         version_id: match version_id { Some(x) => crate::OpaqueString::from(x), None => return Err(ConversionError { field: "version_id", reason: "the gateway shape requires this member" }) },
         is_latest: match is_latest { Some(x) => x, None => return Err(ConversionError { field: "is_latest", reason: "the gateway shape requires this member" }) },

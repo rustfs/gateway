@@ -76,7 +76,7 @@ pub fn output_from_s3s(output: s3s::dto::GetObjectLegalHoldOutput) -> Result<cra
         legal_hold,
     } = output;
     Ok(crate::ops::get_object_legal_hold::Output {
-        legal_hold: legal_hold.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_legal_hold::object_lock_legal_hold_from_s3s(x)?) }).transpose()?,
+        legal_hold: legal_hold.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_legal_hold::object_lock_legal_hold_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

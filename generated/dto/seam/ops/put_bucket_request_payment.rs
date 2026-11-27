@@ -60,7 +60,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketRequestPaymentInput) -> Result<c
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        request_payment_configuration: { let x = request_payment_configuration; super::super::shapes::request_payment_configuration::request_payment_configuration_from_s3s(x)? },
+        request_payment_configuration: { let x = request_payment_configuration; super::super::shapes::request_payment_configuration::request_payment_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
     })
 }

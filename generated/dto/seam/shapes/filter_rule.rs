@@ -33,13 +33,30 @@ pub fn filter_rule_to_s3s(value: crate::ops::shapes::FilterRule) -> Result<s3s::
     })
 }
 
-/// Converts one `FilterRule` from the s3s shape to the gateway shape.
+/// Converts one `FilterRule` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn filter_rule_from_s3s(value: s3s::dto::FilterRule) -> Result<crate::ops::shapes::FilterRule, ConversionError> {
+pub fn filter_rule_input_from_s3s(value: s3s::dto::FilterRule) -> Result<crate::ops::shapes::FilterRule, ConversionError> {
+    let s3s::dto::FilterRule {
+        name,
+        value,
+    } = value;
+    Ok(crate::ops::shapes::FilterRule {
+        name: name.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Name::custom(x.as_str().to_owned())) }).transpose()?,
+        value,
+    })
+}
+
+/// Converts one `FilterRule` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn filter_rule_output_from_s3s(value: s3s::dto::FilterRule) -> Result<crate::ops::shapes::FilterRule, ConversionError> {
     let s3s::dto::FilterRule {
         name,
         value,

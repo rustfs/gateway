@@ -32,17 +32,32 @@ pub fn object_lock_rule_to_s3s(value: crate::ops::shapes::ObjectLockRule) -> Res
     })
 }
 
-/// Converts one `ObjectLockRule` from the s3s shape to the gateway shape.
+/// Converts one `ObjectLockRule` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn object_lock_rule_from_s3s(value: s3s::dto::ObjectLockRule) -> Result<crate::ops::shapes::ObjectLockRule, ConversionError> {
+pub fn object_lock_rule_input_from_s3s(value: s3s::dto::ObjectLockRule) -> Result<crate::ops::shapes::ObjectLockRule, ConversionError> {
     let s3s::dto::ObjectLockRule {
         default_retention,
     } = value;
     Ok(crate::ops::shapes::ObjectLockRule {
-        default_retention: default_retention.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::default_retention::default_retention_from_s3s(x)?) }).transpose()?,
+        default_retention: default_retention.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::default_retention::default_retention_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `ObjectLockRule` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn object_lock_rule_output_from_s3s(value: s3s::dto::ObjectLockRule) -> Result<crate::ops::shapes::ObjectLockRule, ConversionError> {
+    let s3s::dto::ObjectLockRule {
+        default_retention,
+    } = value;
+    Ok(crate::ops::shapes::ObjectLockRule {
+        default_retention: default_retention.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::default_retention::default_retention_output_from_s3s(x)?) }).transpose()?,
     })
 }

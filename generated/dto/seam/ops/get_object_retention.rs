@@ -76,7 +76,7 @@ pub fn output_from_s3s(output: s3s::dto::GetObjectRetentionOutput) -> Result<cra
         retention,
     } = output;
     Ok(crate::ops::get_object_retention::Output {
-        retention: retention.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_retention::object_lock_retention_from_s3s(x)?) }).transpose()?,
+        retention: retention.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::object_lock_retention::object_lock_retention_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

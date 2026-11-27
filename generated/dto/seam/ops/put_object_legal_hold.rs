@@ -65,7 +65,7 @@ pub fn input_from_s3s(input: s3s::dto::PutObjectLegalHoldInput) -> Result<crate:
     Ok(crate::ops::put_object_legal_hold::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         key: { let x = key; leaf::object_key("key", x)? },
-        legal_hold: match legal_hold { Some(x) => super::super::shapes::object_lock_legal_hold::object_lock_legal_hold_from_s3s(x)?, None => return Err(ConversionError { field: "legal_hold", reason: "the gateway shape requires this member" }) },
+        legal_hold: match legal_hold { Some(x) => super::super::shapes::object_lock_legal_hold::object_lock_legal_hold_input_from_s3s(x)?, None => return Err(ConversionError { field: "legal_hold", reason: "the gateway shape requires this member" }) },
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
         version_id,
         content_md5,

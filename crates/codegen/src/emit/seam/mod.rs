@@ -55,7 +55,7 @@ use std::path::{Path, PathBuf};
 
 use rustfs_gateway_model::ir::{OperationIr, Shape};
 
-use expr::Ctx;
+use expr::{Ctx, ShapeDirection, Side};
 use facts::S3sFacts;
 
 /// The s3s release the seam is generated against, as facts. The revision RustFS main links,
@@ -126,30 +126,43 @@ pub(crate) fn emit(
         }
     }
     // Shapes reach further shapes; iterate to the fixed point.
-    let mut rendered: BTreeMap<(String, bool), ()> = BTreeMap::new();
-    let mut shape_modules: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut rendered: BTreeMap<(String, ShapeDirection), ()> = BTreeMap::new();
+    let mut shape_modules: BTreeMap<String, BTreeMap<ShapeDirection, String>> = BTreeMap::new();
     loop {
-        let pending: Vec<(String, bool)> = {
+        let pending: Vec<(String, ShapeDirection)> = {
             let reached = ctx.reached.borrow();
             reached
                 .forward
                 .iter()
-                .map(|name| (name.clone(), true))
-                .chain(reached.backward.iter().map(|name| (name.clone(), false)))
+                .map(|name| (name.clone(), ShapeDirection::Forward))
+                .chain(
+                    reached
+                        .backward_input
+                        .iter()
+                        .map(|name| (name.clone(), ShapeDirection::Backward(Side::Input))),
+                )
+                .chain(
+                    reached
+                        .backward_output
+                        .iter()
+                        .map(|name| (name.clone(), ShapeDirection::Backward(Side::Output))),
+                )
                 .filter(|key| !rendered.contains_key(key))
                 .collect()
         };
         if pending.is_empty() {
             break;
         }
-        for (name, forward) in pending {
-            rendered.insert((name.clone(), forward), ());
+        for (name, dir) in pending {
+            rendered.insert((name.clone(), dir), ());
             let Some(shape) = shapes.get(name.as_str()) else {
                 errors.push(format!("shape {name}: not in the IR"));
                 continue;
             };
-            match files::shape_fn(&ctx, &name, shape, forward) {
-                Ok(body) => shape_modules.entry(name).or_default().push(body),
+            match files::shape_fn(&ctx, &name, shape, dir) {
+                Ok(body) => {
+                    shape_modules.entry(name).or_default().insert(dir, body);
+                }
                 Err(mut found) => errors.append(&mut found),
             }
         }
@@ -157,7 +170,8 @@ pub(crate) fn emit(
     let mut shape_names = Vec::new();
     for (name, bodies) in shape_modules {
         let module = crate::emit::dto::naming::module_name(&name);
-        files.push((dir.join("shapes").join(format!("{module}.rs")), files::shape_file(&name, &bodies)));
+        let ordered: Vec<String> = bodies.into_values().collect();
+        files.push((dir.join("shapes").join(format!("{module}.rs")), files::shape_file(&name, &ordered)));
         match shapes.get(name.as_str()) {
             Some(shape) => match fixture::shape_file(&ctx, &shapes, &name, shape) {
                 Ok(body) => files.push((dir.join("fixtures").join("shapes").join(format!("{module}.rs")), body)),

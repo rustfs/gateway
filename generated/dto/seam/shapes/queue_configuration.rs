@@ -35,13 +35,13 @@ pub fn queue_configuration_to_s3s(value: crate::ops::shapes::QueueConfiguration)
     })
 }
 
-/// Converts one `QueueConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `QueueConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn queue_configuration_from_s3s(value: s3s::dto::QueueConfiguration) -> Result<crate::ops::shapes::QueueConfiguration, ConversionError> {
+pub fn queue_configuration_input_from_s3s(value: s3s::dto::QueueConfiguration) -> Result<crate::ops::shapes::QueueConfiguration, ConversionError> {
     let s3s::dto::QueueConfiguration {
         events,
         filter,
@@ -52,6 +52,27 @@ pub fn queue_configuration_from_s3s(value: s3s::dto::QueueConfiguration) -> Resu
         id,
         queue_arn,
         events: { let x = events; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::Events::custom(String::from(e))) }).collect::<Result<Vec<_>, ConversionError>>()? },
-        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::notification_configuration_filter::notification_configuration_filter_from_s3s(x)?) }).transpose()?,
+        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::notification_configuration_filter::notification_configuration_filter_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `QueueConfiguration` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn queue_configuration_output_from_s3s(value: s3s::dto::QueueConfiguration) -> Result<crate::ops::shapes::QueueConfiguration, ConversionError> {
+    let s3s::dto::QueueConfiguration {
+        events,
+        filter,
+        id,
+        queue_arn,
+    } = value;
+    Ok(crate::ops::shapes::QueueConfiguration {
+        id,
+        queue_arn,
+        events: { let x = events; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::Events::custom(String::from(e))) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::notification_configuration_filter::notification_configuration_filter_output_from_s3s(x)?) }).transpose()?,
     })
 }

@@ -74,7 +74,7 @@ pub fn etag_to_s3s(etag: &ETag) -> oracle::ETag {
     }
 }
 
-/// The s3s entity tag as the gateway value.
+/// The s3s entity tag as the gateway value, for a **request** member.
 ///
 /// # Errors
 ///
@@ -85,6 +85,23 @@ pub fn etag_from_s3s(field: &'static str, etag: oracle::ETag) -> Result<ETag, Co
         oracle::ETag::Weak(value) => ETag::new_weak(value),
     }
     .map_err(|_| refusal(field, "not an entity tag the gateway can write"))
+}
+
+/// The s3s entity tag a host stored, as the gateway value, for a **response** member
+/// (rustfs/gateway#1618).
+///
+/// Strong tags cross verbatim through [`ETag::from_stored`], so an empty tag, stored quotes, or
+/// control characters a host kept in metadata cross without failing the output conversion; weak
+/// tags preserve their weakness through [`ETag::new_weak`].
+///
+/// # Errors
+///
+/// A weak tag the gateway entity-tag grammar rejects.
+pub fn stored_etag_from_s3s(field: &'static str, etag: oracle::ETag) -> Result<ETag, ConversionError> {
+    match etag {
+        oracle::ETag::Strong(value) => Ok(ETag::from_stored(value)),
+        oracle::ETag::Weak(value) => ETag::new_weak(value).map_err(|_| refusal(field, "not an entity tag the gateway can write")),
+    }
 }
 
 /// A conditional header value as the s3s condition.

@@ -39,13 +39,13 @@ pub fn multipart_upload_to_s3s(value: crate::ops::shapes::MultipartUpload) -> Re
     })
 }
 
-/// Converts one `MultipartUpload` from the s3s shape to the gateway shape.
+/// Converts one `MultipartUpload` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn multipart_upload_from_s3s(value: s3s::dto::MultipartUpload) -> Result<crate::ops::shapes::MultipartUpload, ConversionError> {
+pub fn multipart_upload_output_from_s3s(value: s3s::dto::MultipartUpload) -> Result<crate::ops::shapes::MultipartUpload, ConversionError> {
     let s3s::dto::MultipartUpload {
         checksum_algorithm,
         checksum_type,
@@ -61,8 +61,8 @@ pub fn multipart_upload_from_s3s(value: s3s::dto::MultipartUpload) -> Result<cra
         key: key.map(|x| -> Result<_, ConversionError> { Ok(leaf::object_key("key", x)?) }).transpose()?,
         initiated: initiated.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("initiated", &x)?) }).transpose()?,
         storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
-        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_from_s3s(x)?) }).transpose()?,
-        initiator: initiator.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::initiator::initiator_from_s3s(x)?) }).transpose()?,
+        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_output_from_s3s(x)?) }).transpose()?,
+        initiator: initiator.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::initiator::initiator_output_from_s3s(x)?) }).transpose()?,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
     })

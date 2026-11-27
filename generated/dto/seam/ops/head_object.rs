@@ -184,7 +184,7 @@ pub fn output_from_s3s(output: s3s::dto::HeadObjectOutput) -> Result<crate::ops:
         checksum_xxhash3,
         checksum_xxhash128,
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
-        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::stored_etag_from_s3s("e_tag", x)?) }).transpose()?,
         missing_meta,
         version_id,
         cache_control,

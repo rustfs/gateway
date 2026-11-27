@@ -32,13 +32,28 @@ pub fn existing_object_replication_to_s3s(value: crate::ops::shapes::ExistingObj
     })
 }
 
-/// Converts one `ExistingObjectReplication` from the s3s shape to the gateway shape.
+/// Converts one `ExistingObjectReplication` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn existing_object_replication_from_s3s(value: s3s::dto::ExistingObjectReplication) -> Result<crate::ops::shapes::ExistingObjectReplication, ConversionError> {
+pub fn existing_object_replication_input_from_s3s(value: s3s::dto::ExistingObjectReplication) -> Result<crate::ops::shapes::ExistingObjectReplication, ConversionError> {
+    let s3s::dto::ExistingObjectReplication {
+        status,
+    } = value;
+    Ok(crate::ops::shapes::ExistingObjectReplication {
+        status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
+    })
+}
+
+/// Converts one `ExistingObjectReplication` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn existing_object_replication_output_from_s3s(value: s3s::dto::ExistingObjectReplication) -> Result<crate::ops::shapes::ExistingObjectReplication, ConversionError> {
     let s3s::dto::ExistingObjectReplication {
         status,
     } = value;

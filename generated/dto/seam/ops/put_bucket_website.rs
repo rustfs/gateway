@@ -60,7 +60,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketWebsiteInput) -> Result<crate::o
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        website_configuration: { let x = website_configuration; super::super::shapes::website_configuration::website_configuration_from_s3s(x)? },
+        website_configuration: { let x = website_configuration; super::super::shapes::website_configuration::website_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
     })
 }

@@ -22,7 +22,7 @@
 
 use rustfs_gateway_model::ir::{Binding, Field, Type};
 
-use super::expr::Ctx;
+use super::expr::{Ctx, Side};
 use super::facts::S3sFacts;
 use super::{backward, render};
 
@@ -82,8 +82,9 @@ fn n_an_s3s_member_nobody_fills_fails_generation() {
 #[test]
 fn n_an_s3s_member_nobody_takes_fails_generation() {
     let facts = facts("struct T\n  bucket: Option<String>\n  arn: Option<String>\n");
-    let errors = backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::BucketName, true)], "G", "output")
-        .expect_err("undecided s3s member");
+    let errors =
+        backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::BucketName, true)], "G", "output", Side::Output)
+            .expect_err("undecided s3s member");
     assert_eq!(errors, ["T.arn: an s3s member no gateway member takes"]);
 }
 
@@ -110,7 +111,8 @@ fn n_a_pair_the_table_does_not_know_fails_generation() {
 #[test]
 fn n_a_required_gateway_member_absent_from_s3s_output_is_refused_at_run_time() {
     let facts = facts("struct T\n  size: Option<i64>\n");
-    let text = backward::backward_struct(&ctx(&facts), "T", &[field("Size", Type::Long, true)], "G", "output").expect("renders");
+    let text = backward::backward_struct(&ctx(&facts), "T", &[field("Size", Type::Long, true)], "G", "output", Side::Output)
+        .expect("renders");
     assert!(
         text.contains("size: match size { Some(x) => x, None => return Err(ConversionError { field: \"size\""),
         "{text}"
@@ -201,9 +203,15 @@ fn n_a_supplied_member_is_still_held_to_the_pairing_table_backward() {
     // Backward, a supplied member converts like any other (rustfs/backlog#2759); an s3s type the
     // table cannot pair with the gateway member still fails generation rather than being guessed.
     let facts = facts("struct CopyObjectInput\n  copy_source: Option<bool>\n");
-    let errors =
-        backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, false)], "G", "v")
-            .expect_err("no pair");
+    let errors = backward::backward_struct(
+        &ctx(&facts),
+        "CopyObjectInput",
+        &[field("CopySource", Type::String, false)],
+        "G",
+        "v",
+        Side::Input,
+    )
+    .expect_err("no pair");
     assert!(
         errors[0].starts_with("CopyObjectInput.copy_source: no s3s → gateway conversion"),
         "{errors:?}"
@@ -304,7 +312,8 @@ mod legacy_semantics {
         // Backward, a legacy-only member is refused when set rather than dropped (rustfs/backlog#2759);
         // a required one could never be unset, so it cannot be converted at all.
         let facts = facts("struct CopyObjectInput\n  version_id: String\n");
-        let errors = backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v").expect_err("never unset");
+        let errors = backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v", super::Side::Input)
+            .expect_err("never unset");
         assert_eq!(
             errors,
             ["CopyObjectInput.version_id: a required legacy-only member Leaf(\"String\") cannot be refused when set"]
@@ -411,7 +420,7 @@ mod answer_headers {
 mod legacy_only_outputs {
     use rustfs_gateway_model::ir::Type;
 
-    use super::{ctx, facts, field};
+    use super::{Side, ctx, facts, field};
     use crate::emit::seam::backward;
 
     #[test]
@@ -424,6 +433,7 @@ mod legacy_only_outputs {
             &[field("BucketRegion", Type::String, false)],
             "G",
             "output",
+            Side::Output,
         )
         .expect("renders");
         assert!(text.contains("        bucket_arn,\n"), "{text}");
@@ -444,6 +454,7 @@ mod legacy_only_outputs {
             &[field("BucketRegion", Type::String, true)],
             "G",
             "output",
+            Side::Output,
         )
         .expect("renders");
         assert!(text.contains("None => String::new()"), "{text}");
@@ -465,6 +476,7 @@ mod legacy_only_outputs {
             &[field("BucketRegion", Type::String, true)],
             "G",
             "output",
+            Side::Output,
         )
         .expect_err("a required legacy region");
         assert!(
@@ -482,8 +494,9 @@ mod legacy_only_outputs {
     #[test]
     fn a_set_runtime_value_is_refused_rather_than_dropped() {
         let facts = facts("struct T\n  bucket: Option<String>\n  future: Option<opaque>\n");
-        let text = backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output")
-            .expect("renders");
+        let text =
+            backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output", Side::Output)
+                .expect("renders");
         assert!(text.contains("        future,\n"), "{text}");
         assert!(
             text.contains("    if future.is_some() {\n        return Err(ConversionError { field: \"future\""),
@@ -495,8 +508,9 @@ mod legacy_only_outputs {
     #[test]
     fn n_a_derived_cache_is_ignored_whatever_it_holds() {
         let facts = facts("struct T\n  bucket: Option<String>\n  cached_tags: opaque\n");
-        let text = backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output")
-            .expect("renders");
+        let text =
+            backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output", Side::Output)
+                .expect("renders");
         assert!(text.contains("        cached_tags: _,\n"), "{text}");
         assert!(!text.contains("cached_tags.is_some()"), "{text}");
     }
@@ -657,7 +671,7 @@ mod census {
 mod unheld_entry_facts {
     use rustfs_gateway_model::ir::{TimestampFormat, Type};
 
-    use super::{ctx, facts, field};
+    use super::{Side, ctx, facts, field};
     use crate::emit::seam::{backward, render};
 
     const OBJECT: &str = "struct Object\n  last_modified: Option<Timestamp>\n  storage_class: Option<enum ObjectStorageClass>\n";
@@ -672,7 +686,8 @@ mod unheld_entry_facts {
     #[test]
     fn an_unset_legacy_entry_fact_crosses_as_the_placeholder() {
         let facts = facts(OBJECT);
-        let text = backward::backward_struct(&ctx(&facts), "Object", &object_fields(), "G", "value").expect("renders");
+        let text =
+            backward::backward_struct(&ctx(&facts), "Object", &object_fields(), "G", "value", Side::Output).expect("renders");
         assert_eq!(text.matches("None => Default::default()").count(), 2, "{text}");
         assert!(!text.contains("the gateway shape requires this member"), "{text}");
     }
@@ -680,7 +695,8 @@ mod unheld_entry_facts {
     #[test]
     fn n_a_set_legacy_value_that_converts_to_the_placeholder_is_refused() {
         let facts = facts(OBJECT);
-        let text = backward::backward_struct(&ctx(&facts), "Object", &object_fields(), "G", "value").expect("renders");
+        let text =
+            backward::backward_struct(&ctx(&facts), "Object", &object_fields(), "G", "value", Side::Output).expect("renders");
         assert_eq!(
             text.matches("if crate::WirePlaceholder::is_wire_placeholder(&v) { return Err(ConversionError { field: \"")
                 .count(),
@@ -706,7 +722,8 @@ mod unheld_entry_facts {
         let facts = facts(OBJECT);
         let fields = [field("LastModified", Type::Timestamp(TimestampFormat::Iso8601), false)];
         for errors in [
-            backward::backward_struct(&ctx(&facts), "Object", &fields, "G", "value").expect_err("an optional gateway member"),
+            backward::backward_struct(&ctx(&facts), "Object", &fields, "G", "value", Side::Output)
+                .expect_err("an optional gateway member"),
             render::forward_struct(&ctx(&facts), "Object", &fields, "value").expect_err("an optional gateway member"),
         ] {
             assert!(
@@ -722,8 +739,8 @@ mod unheld_entry_facts {
     fn n_the_rule_on_a_required_legacy_member_fails_generation() {
         let facts = facts("struct Object\n  last_modified: Timestamp\n");
         let fields = [field("LastModified", Type::Timestamp(TimestampFormat::Iso8601), true)];
-        let errors =
-            backward::backward_struct(&ctx(&facts), "Object", &fields, "G", "value").expect_err("a required legacy member");
+        let errors = backward::backward_struct(&ctx(&facts), "Object", &fields, "G", "value", Side::Output)
+            .expect_err("a required legacy member");
         assert!(
             errors
                 .iter()

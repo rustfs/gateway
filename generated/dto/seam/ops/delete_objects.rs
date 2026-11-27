@@ -62,7 +62,7 @@ pub fn input_from_s3s(input: s3s::dto::DeleteObjectsInput) -> Result<crate::ops:
     } = input;
     Ok(crate::ops::delete_objects::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        delete: { let x = delete; super::super::shapes::delete::delete_from_s3s(x)? },
+        delete: { let x = delete; super::super::shapes::delete::delete_input_from_s3s(x)? },
         mfa,
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
         bypass_governance_retention,
@@ -84,9 +84,9 @@ pub fn output_from_s3s(output: s3s::dto::DeleteObjectsOutput) -> Result<crate::o
         request_charged,
     } = output;
     Ok(crate::ops::delete_objects::Output {
-        deleted: match deleted { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::deleted_object::deleted_object_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        deleted: match deleted { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::deleted_object::deleted_object_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
-        errors: match errors { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::error::error_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        errors: match errors { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::error::error_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
     })
 }
 

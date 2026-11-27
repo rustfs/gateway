@@ -32,7 +32,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Field, OperationIr, Shape, ShapeKind, Type};
 
-use super::expr::Ctx;
+use super::expr::{Ctx, Side};
 use super::facts::S3sType;
 use super::overrides::Rule;
 use super::render::{self, CHECKSUM_FAN_OUT, HEADER, NestedParents, Target, bare_name, find, member_rule, push_field, target};
@@ -394,11 +394,11 @@ fn value(
 
 /// One generated negative: setting `member` to `bad` makes the backward conversion refuse,
 /// naming `field`.
-struct Refusal {
-    member: String,
-    field: String,
-    suffix: &'static str,
-    bad: String,
+pub(super) struct Refusal {
+    pub(super) member: String,
+    pub(super) field: String,
+    pub(super) suffix: &'static str,
+    pub(super) bad: String,
     why: &'static str,
 }
 
@@ -423,15 +423,18 @@ fn set_expr(ty: &S3sType) -> Option<String> {
 }
 
 /// A value the backward leaf for the pair refuses, when the pair has a validating leaf.
-fn invalid(gw: &Type, core: &S3sType) -> Option<(String, &'static str)> {
+fn invalid(gw: &Type, core: &S3sType, side: Side) -> Option<(String, &'static str)> {
     let S3sType::Leaf(l) = core else { return None };
     Some(match (gw, l.as_str()) {
         (Type::BucketName, "String") => ("\"Bad Bucket!\".to_owned()".to_owned(), "not a bucket name the gateway can write"),
         (Type::ObjectKey, "String") => ("String::new()".to_owned(), "not an object key the gateway can write"),
-        (Type::ETag(_), "ETag") => (
-            "s3s::dto::ETag::Strong(String::new())".to_owned(),
-            "not an entity tag the gateway can write",
-        ),
+        (Type::ETag(_), "ETag") => match side {
+            Side::Input => (
+                "s3s::dto::ETag::Strong(String::new())".to_owned(),
+                "not an entity tag the gateway can write",
+            ),
+            Side::Output => return None,
+        },
         (Type::Timestamp(_), "Timestamp") => (BEFORE_YEAR_ZERO.to_owned(), "an instant neither side spells with four digits"),
         (Type::Integer, "i64") => ("i64::MAX".to_owned(), "not a 32-bit integer"),
         _ => return None,
@@ -439,7 +442,7 @@ fn invalid(gw: &Type, core: &S3sType) -> Option<(String, &'static str)> {
 }
 
 /// Every top-level member of `owner` whose backward conversion refuses a value, with that value.
-fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<Vec<Refusal>, Vec<String>> {
+pub(super) fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field], side: Side) -> Result<Vec<Refusal>, Vec<String>> {
     let Some(s3s) = ctx.facts.structs.get(owner) else {
         return Err(vec![format!("{owner}: not an s3s struct")]);
     };
@@ -483,7 +486,7 @@ fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<Vec<Refusal>
                     }
                 }
                 let ty = super::expr::fixture_type(ctx.carriers.get(owner, &field.name), &field.ty);
-                if let Some((bad, why)) = invalid(ty, core) {
+                if let Some((bad, why)) = invalid(ty, core, side) {
                     out.push(Refusal {
                         member: member.to_owned(),
                         field: name.clone(),
@@ -634,8 +637,8 @@ pub fn op_file(
             return Err(errors.into_iter().map(|e| format!("{op} fixture: {e}")).collect());
         }
     };
-    let input_refusals = refusals(ctx, &input_name, &ir.input)?;
-    let output_refusals = refusals(ctx, &output_name, &ir.output)?;
+    let input_refusals = refusals(ctx, &input_name, &ir.input, Side::Input)?;
+    let output_refusals = refusals(ctx, &output_name, &ir.output, Side::Output)?;
     let handed = hand_backs(ctx, &input_name)?;
     let gateway_binding = if handed.is_empty() { "gateway" } else { "(gateway, _)" };
     let mut setup = String::new();

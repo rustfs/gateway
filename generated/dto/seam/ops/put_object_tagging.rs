@@ -68,7 +68,7 @@ pub fn input_from_s3s(input: s3s::dto::PutObjectTaggingInput) -> Result<crate::o
         version_id,
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        tagging: { let x = tagging; super::super::shapes::tagging::tagging_from_s3s(x)? },
+        tagging: { let x = tagging; super::super::shapes::tagging::tagging_input_from_s3s(x)? },
         expected_bucket_owner,
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
     })

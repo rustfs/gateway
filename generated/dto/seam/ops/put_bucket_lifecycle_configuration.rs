@@ -59,7 +59,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketLifecycleConfigurationInput) -> 
     Ok(crate::ops::put_bucket_lifecycle_configuration::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        lifecycle_configuration: lifecycle_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::bucket_lifecycle_configuration::bucket_lifecycle_configuration_from_s3s(x)?) }).transpose()?,
+        lifecycle_configuration: lifecycle_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::bucket_lifecycle_configuration::bucket_lifecycle_configuration_input_from_s3s(x)?) }).transpose()?,
         expected_bucket_owner,
         transition_default_minimum_object_size: transition_default_minimum_object_size.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::TransitionDefaultMinimumObjectSize::custom(x.as_str().to_owned())) }).transpose()?,
     })

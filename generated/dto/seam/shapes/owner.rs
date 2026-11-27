@@ -33,13 +33,30 @@ pub fn owner_to_s3s(value: crate::ops::shapes::Owner) -> Result<s3s::dto::Owner,
     })
 }
 
-/// Converts one `Owner` from the s3s shape to the gateway shape.
+/// Converts one `Owner` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn owner_from_s3s(value: s3s::dto::Owner) -> Result<crate::ops::shapes::Owner, ConversionError> {
+pub fn owner_input_from_s3s(value: s3s::dto::Owner) -> Result<crate::ops::shapes::Owner, ConversionError> {
+    let s3s::dto::Owner {
+        display_name,
+        id,
+    } = value;
+    Ok(crate::ops::shapes::Owner {
+        display_name,
+        id,
+    })
+}
+
+/// Converts one `Owner` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn owner_output_from_s3s(value: s3s::dto::Owner) -> Result<crate::ops::shapes::Owner, ConversionError> {
     let s3s::dto::Owner {
         display_name,
         id,

@@ -74,7 +74,7 @@ pub fn input_from_s3s(input: s3s::dto::CreateBucketInput) -> Result<crate::ops::
     Ok(crate::ops::create_bucket::Input {
         acl: acl.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Acl::custom(x.as_str().to_owned())) }).transpose()?,
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        create_bucket_configuration: create_bucket_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::create_bucket_configuration::create_bucket_configuration_from_s3s(x)?) }).transpose()?,
+        create_bucket_configuration: create_bucket_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::create_bucket_configuration::create_bucket_configuration_input_from_s3s(x)?) }).transpose()?,
         grant_full_control,
         grant_read,
         grant_read_acp,

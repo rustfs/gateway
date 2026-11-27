@@ -33,19 +33,36 @@ pub fn target_grant_to_s3s(value: crate::ops::shapes::TargetGrant) -> Result<s3s
     })
 }
 
-/// Converts one `TargetGrant` from the s3s shape to the gateway shape.
+/// Converts one `TargetGrant` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn target_grant_from_s3s(value: s3s::dto::TargetGrant) -> Result<crate::ops::shapes::TargetGrant, ConversionError> {
+pub fn target_grant_input_from_s3s(value: s3s::dto::TargetGrant) -> Result<crate::ops::shapes::TargetGrant, ConversionError> {
     let s3s::dto::TargetGrant {
         grantee,
         permission,
     } = value;
     Ok(crate::ops::shapes::TargetGrant {
-        grantee: grantee.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::grantee::grantee_from_s3s(x)?) }).transpose()?,
+        grantee: grantee.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::grantee::grantee_input_from_s3s(x)?) }).transpose()?,
+        permission: permission.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Permission::custom(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `TargetGrant` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn target_grant_output_from_s3s(value: s3s::dto::TargetGrant) -> Result<crate::ops::shapes::TargetGrant, ConversionError> {
+    let s3s::dto::TargetGrant {
+        grantee,
+        permission,
+    } = value;
+    Ok(crate::ops::shapes::TargetGrant {
+        grantee: grantee.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::grantee::grantee_output_from_s3s(x)?) }).transpose()?,
         permission: permission.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Permission::custom(x.as_str().to_owned())) }).transpose()?,
     })
 }

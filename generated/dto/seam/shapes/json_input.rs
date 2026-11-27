@@ -32,13 +32,13 @@ pub fn json_input_to_s3s(value: crate::ops::shapes::JsonInput) -> Result<s3s::dt
     })
 }
 
-/// Converts one `JSONInput` from the s3s shape to the gateway shape.
+/// Converts one `JSONInput` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn json_input_from_s3s(value: s3s::dto::JSONInput) -> Result<crate::ops::shapes::JsonInput, ConversionError> {
+pub fn json_input_input_from_s3s(value: s3s::dto::JSONInput) -> Result<crate::ops::shapes::JsonInput, ConversionError> {
     let s3s::dto::JSONInput {
         type_,
     } = value;

@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketTaggingOutput) -> Result<crate
         tag_set,
     } = output;
     Ok(crate::ops::get_bucket_tagging::Output {
-        tag_set: { let x = tag_set; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        tag_set: { let x = tag_set; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::tag::tag_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
     })
 }
 

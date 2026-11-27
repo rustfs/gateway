@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketCorsOutput) -> Result<crate::o
         cors_rules,
     } = output;
     Ok(crate::ops::get_bucket_cors::Output {
-        cors_rules: match cors_rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::cors_rule::cors_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        cors_rules: match cors_rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::cors_rule::cors_rule_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
     })
 }
 

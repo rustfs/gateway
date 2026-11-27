@@ -34,21 +34,40 @@ pub fn server_side_encryption_rule_to_s3s(value: crate::ops::shapes::ServerSideE
     })
 }
 
-/// Converts one `ServerSideEncryptionRule` from the s3s shape to the gateway shape.
+/// Converts one `ServerSideEncryptionRule` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn server_side_encryption_rule_from_s3s(value: s3s::dto::ServerSideEncryptionRule) -> Result<crate::ops::shapes::ServerSideEncryptionRule, ConversionError> {
+pub fn server_side_encryption_rule_input_from_s3s(value: s3s::dto::ServerSideEncryptionRule) -> Result<crate::ops::shapes::ServerSideEncryptionRule, ConversionError> {
     let s3s::dto::ServerSideEncryptionRule {
         apply_server_side_encryption_by_default,
         blocked_encryption_types,
         bucket_key_enabled,
     } = value;
     Ok(crate::ops::shapes::ServerSideEncryptionRule {
-        apply_server_side_encryption_by_default: apply_server_side_encryption_by_default.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_by_default::server_side_encryption_by_default_from_s3s(x)?) }).transpose()?,
+        apply_server_side_encryption_by_default: apply_server_side_encryption_by_default.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_by_default::server_side_encryption_by_default_input_from_s3s(x)?) }).transpose()?,
         bucket_key_enabled,
-        blocked_encryption_types: blocked_encryption_types.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::blocked_encryption_types::blocked_encryption_types_from_s3s(x)?) }).transpose()?,
+        blocked_encryption_types: blocked_encryption_types.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::blocked_encryption_types::blocked_encryption_types_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `ServerSideEncryptionRule` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn server_side_encryption_rule_output_from_s3s(value: s3s::dto::ServerSideEncryptionRule) -> Result<crate::ops::shapes::ServerSideEncryptionRule, ConversionError> {
+    let s3s::dto::ServerSideEncryptionRule {
+        apply_server_side_encryption_by_default,
+        blocked_encryption_types,
+        bucket_key_enabled,
+    } = value;
+    Ok(crate::ops::shapes::ServerSideEncryptionRule {
+        apply_server_side_encryption_by_default: apply_server_side_encryption_by_default.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::server_side_encryption_by_default::server_side_encryption_by_default_output_from_s3s(x)?) }).transpose()?,
+        bucket_key_enabled,
+        blocked_encryption_types: blocked_encryption_types.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::blocked_encryption_types::blocked_encryption_types_output_from_s3s(x)?) }).transpose()?,
     })
 }

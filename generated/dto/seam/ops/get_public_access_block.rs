@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetPublicAccessBlockOutput) -> Result<c
         public_access_block_configuration,
     } = output;
     Ok(crate::ops::get_public_access_block::Output {
-        public_access_block_configuration: public_access_block_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::public_access_block_configuration::public_access_block_configuration_from_s3s(x)?) }).transpose()?,
+        public_access_block_configuration: public_access_block_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::public_access_block_configuration::public_access_block_configuration_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

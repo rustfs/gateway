@@ -33,19 +33,19 @@ pub fn bucket_lifecycle_configuration_to_s3s(value: crate::ops::shapes::BucketLi
     })
 }
 
-/// Converts one `BucketLifecycleConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `BucketLifecycleConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn bucket_lifecycle_configuration_from_s3s(value: s3s::dto::BucketLifecycleConfiguration) -> Result<crate::ops::shapes::BucketLifecycleConfiguration, ConversionError> {
+pub fn bucket_lifecycle_configuration_input_from_s3s(value: s3s::dto::BucketLifecycleConfiguration) -> Result<crate::ops::shapes::BucketLifecycleConfiguration, ConversionError> {
     let s3s::dto::BucketLifecycleConfiguration {
         expiry_updated_at,
         rules,
     } = value;
     Ok(crate::ops::shapes::BucketLifecycleConfiguration {
-        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule::lifecycle_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        rules: { let x = rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule::lifecycle_rule_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
         expiry_updated_at: expiry_updated_at.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("expiry_updated_at", &x)?) }).transpose()?,
     })
 }

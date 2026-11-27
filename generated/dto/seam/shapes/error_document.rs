@@ -32,13 +32,28 @@ pub fn error_document_to_s3s(value: crate::ops::shapes::ErrorDocument) -> Result
     })
 }
 
-/// Converts one `ErrorDocument` from the s3s shape to the gateway shape.
+/// Converts one `ErrorDocument` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn error_document_from_s3s(value: s3s::dto::ErrorDocument) -> Result<crate::ops::shapes::ErrorDocument, ConversionError> {
+pub fn error_document_input_from_s3s(value: s3s::dto::ErrorDocument) -> Result<crate::ops::shapes::ErrorDocument, ConversionError> {
+    let s3s::dto::ErrorDocument {
+        key,
+    } = value;
+    Ok(crate::ops::shapes::ErrorDocument {
+        key: { let x = key; leaf::object_key("key", x)? },
+    })
+}
+
+/// Converts one `ErrorDocument` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn error_document_output_from_s3s(value: s3s::dto::ErrorDocument) -> Result<crate::ops::shapes::ErrorDocument, ConversionError> {
     let s3s::dto::ErrorDocument {
         key,
     } = value;

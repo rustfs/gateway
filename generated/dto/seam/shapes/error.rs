@@ -35,13 +35,13 @@ pub fn error_to_s3s(value: crate::ops::shapes::Error) -> Result<s3s::dto::Error,
     })
 }
 
-/// Converts one `Error` from the s3s shape to the gateway shape.
+/// Converts one `Error` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn error_from_s3s(value: s3s::dto::Error) -> Result<crate::ops::shapes::Error, ConversionError> {
+pub fn error_output_from_s3s(value: s3s::dto::Error) -> Result<crate::ops::shapes::Error, ConversionError> {
     let s3s::dto::Error {
         code,
         key,

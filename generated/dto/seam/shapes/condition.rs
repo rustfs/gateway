@@ -33,13 +33,30 @@ pub fn condition_to_s3s(value: crate::ops::shapes::Condition) -> Result<s3s::dto
     })
 }
 
-/// Converts one `Condition` from the s3s shape to the gateway shape.
+/// Converts one `Condition` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn condition_from_s3s(value: s3s::dto::Condition) -> Result<crate::ops::shapes::Condition, ConversionError> {
+pub fn condition_input_from_s3s(value: s3s::dto::Condition) -> Result<crate::ops::shapes::Condition, ConversionError> {
+    let s3s::dto::Condition {
+        http_error_code_returned_equals,
+        key_prefix_equals,
+    } = value;
+    Ok(crate::ops::shapes::Condition {
+        http_error_code_returned_equals,
+        key_prefix_equals,
+    })
+}
+
+/// Converts one `Condition` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn condition_output_from_s3s(value: s3s::dto::Condition) -> Result<crate::ops::shapes::Condition, ConversionError> {
     let s3s::dto::Condition {
         http_error_code_returned_equals,
         key_prefix_equals,

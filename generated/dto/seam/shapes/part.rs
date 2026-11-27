@@ -45,13 +45,13 @@ pub fn part_to_s3s(value: crate::ops::shapes::Part) -> Result<s3s::dto::Part, Co
     })
 }
 
-/// Converts one `Part` from the s3s shape to the gateway shape.
+/// Converts one `Part` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn part_from_s3s(value: s3s::dto::Part) -> Result<crate::ops::shapes::Part, ConversionError> {
+pub fn part_output_from_s3s(value: s3s::dto::Part) -> Result<crate::ops::shapes::Part, ConversionError> {
     let s3s::dto::Part {
         checksum_crc32,
         checksum_crc32c,
@@ -71,7 +71,7 @@ pub fn part_from_s3s(value: s3s::dto::Part) -> Result<crate::ops::shapes::Part, 
     Ok(crate::ops::shapes::Part {
         part_number: match part_number { Some(x) => x, None => return Err(ConversionError { field: "part_number", reason: "the gateway shape requires this member" }) },
         last_modified: last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
-        e_tag: match e_tag { Some(x) => leaf::etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
+        e_tag: match e_tag { Some(x) => leaf::stored_etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
         size: match size { Some(x) => x, None => return Err(ConversionError { field: "size", reason: "the gateway shape requires this member" }) },
         checksum_crc32,
         checksum_crc32c,

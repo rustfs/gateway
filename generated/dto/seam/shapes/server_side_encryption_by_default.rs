@@ -33,13 +33,30 @@ pub fn server_side_encryption_by_default_to_s3s(value: crate::ops::shapes::Serve
     })
 }
 
-/// Converts one `ServerSideEncryptionByDefault` from the s3s shape to the gateway shape.
+/// Converts one `ServerSideEncryptionByDefault` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn server_side_encryption_by_default_from_s3s(value: s3s::dto::ServerSideEncryptionByDefault) -> Result<crate::ops::shapes::ServerSideEncryptionByDefault, ConversionError> {
+pub fn server_side_encryption_by_default_input_from_s3s(value: s3s::dto::ServerSideEncryptionByDefault) -> Result<crate::ops::shapes::ServerSideEncryptionByDefault, ConversionError> {
+    let s3s::dto::ServerSideEncryptionByDefault {
+        kms_master_key_id,
+        sse_algorithm,
+    } = value;
+    Ok(crate::ops::shapes::ServerSideEncryptionByDefault {
+        sse_algorithm: { let x = sse_algorithm; crate::ops::enums::SseAlgorithm::custom(x.as_str().to_owned()) },
+        kms_master_key_id,
+    })
+}
+
+/// Converts one `ServerSideEncryptionByDefault` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn server_side_encryption_by_default_output_from_s3s(value: s3s::dto::ServerSideEncryptionByDefault) -> Result<crate::ops::shapes::ServerSideEncryptionByDefault, ConversionError> {
     let s3s::dto::ServerSideEncryptionByDefault {
         kms_master_key_id,
         sse_algorithm,

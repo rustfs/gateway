@@ -70,10 +70,10 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketWebsiteOutput) -> Result<crate
         routing_rules,
     } = output;
     Ok(crate::ops::get_bucket_website::Output {
-        redirect_all_requests_to: redirect_all_requests_to.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::redirect_all_requests_to::redirect_all_requests_to_from_s3s(x)?) }).transpose()?,
-        index_document: index_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::index_document::index_document_from_s3s(x)?) }).transpose()?,
-        error_document: error_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::error_document::error_document_from_s3s(x)?) }).transpose()?,
-        routing_rules: routing_rules.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::routing_rule::routing_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        redirect_all_requests_to: redirect_all_requests_to.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::redirect_all_requests_to::redirect_all_requests_to_output_from_s3s(x)?) }).transpose()?,
+        index_document: index_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::index_document::index_document_output_from_s3s(x)?) }).transpose()?,
+        error_document: error_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::error_document::error_document_output_from_s3s(x)?) }).transpose()?,
+        routing_rules: routing_rules.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::routing_rule::routing_rule_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
     })
 }
 

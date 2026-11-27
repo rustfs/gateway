@@ -60,7 +60,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketEncryptionInput) -> Result<crate
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        server_side_encryption_configuration: { let x = server_side_encryption_configuration; super::super::shapes::server_side_encryption_configuration::server_side_encryption_configuration_from_s3s(x)? },
+        server_side_encryption_configuration: { let x = server_side_encryption_configuration; super::super::shapes::server_side_encryption_configuration::server_side_encryption_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
     })
 }

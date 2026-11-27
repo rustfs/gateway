@@ -32,13 +32,28 @@ pub fn replication_time_value_to_s3s(value: crate::ops::shapes::ReplicationTimeV
     })
 }
 
-/// Converts one `ReplicationTimeValue` from the s3s shape to the gateway shape.
+/// Converts one `ReplicationTimeValue` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn replication_time_value_from_s3s(value: s3s::dto::ReplicationTimeValue) -> Result<crate::ops::shapes::ReplicationTimeValue, ConversionError> {
+pub fn replication_time_value_input_from_s3s(value: s3s::dto::ReplicationTimeValue) -> Result<crate::ops::shapes::ReplicationTimeValue, ConversionError> {
+    let s3s::dto::ReplicationTimeValue {
+        minutes,
+    } = value;
+    Ok(crate::ops::shapes::ReplicationTimeValue {
+        minutes,
+    })
+}
+
+/// Converts one `ReplicationTimeValue` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn replication_time_value_output_from_s3s(value: s3s::dto::ReplicationTimeValue) -> Result<crate::ops::shapes::ReplicationTimeValue, ConversionError> {
     let s3s::dto::ReplicationTimeValue {
         minutes,
     } = value;

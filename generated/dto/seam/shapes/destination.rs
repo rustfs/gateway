@@ -38,13 +38,13 @@ pub fn destination_to_s3s(value: crate::ops::shapes::Destination) -> Result<s3s:
     })
 }
 
-/// Converts one `Destination` from the s3s shape to the gateway shape.
+/// Converts one `Destination` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn destination_from_s3s(value: s3s::dto::Destination) -> Result<crate::ops::shapes::Destination, ConversionError> {
+pub fn destination_input_from_s3s(value: s3s::dto::Destination) -> Result<crate::ops::shapes::Destination, ConversionError> {
     let s3s::dto::Destination {
         access_control_translation,
         account,
@@ -58,9 +58,36 @@ pub fn destination_from_s3s(value: s3s::dto::Destination) -> Result<crate::ops::
         bucket,
         account,
         storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
-        access_control_translation: access_control_translation.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::access_control_translation::access_control_translation_from_s3s(x)?) }).transpose()?,
-        encryption_configuration: encryption_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::encryption_configuration::encryption_configuration_from_s3s(x)?) }).transpose()?,
-        replication_time: replication_time.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_time::replication_time_from_s3s(x)?) }).transpose()?,
-        metrics: metrics.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::metrics::metrics_from_s3s(x)?) }).transpose()?,
+        access_control_translation: access_control_translation.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::access_control_translation::access_control_translation_input_from_s3s(x)?) }).transpose()?,
+        encryption_configuration: encryption_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::encryption_configuration::encryption_configuration_input_from_s3s(x)?) }).transpose()?,
+        replication_time: replication_time.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_time::replication_time_input_from_s3s(x)?) }).transpose()?,
+        metrics: metrics.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::metrics::metrics_input_from_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `Destination` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn destination_output_from_s3s(value: s3s::dto::Destination) -> Result<crate::ops::shapes::Destination, ConversionError> {
+    let s3s::dto::Destination {
+        access_control_translation,
+        account,
+        bucket,
+        encryption_configuration,
+        metrics,
+        replication_time,
+        storage_class,
+    } = value;
+    Ok(crate::ops::shapes::Destination {
+        bucket,
+        account,
+        storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
+        access_control_translation: access_control_translation.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::access_control_translation::access_control_translation_output_from_s3s(x)?) }).transpose()?,
+        encryption_configuration: encryption_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::encryption_configuration::encryption_configuration_output_from_s3s(x)?) }).transpose()?,
+        replication_time: replication_time.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_time::replication_time_output_from_s3s(x)?) }).transpose()?,
+        metrics: metrics.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::metrics::metrics_output_from_s3s(x)?) }).transpose()?,
     })
 }

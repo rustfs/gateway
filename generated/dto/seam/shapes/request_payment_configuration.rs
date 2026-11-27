@@ -32,13 +32,13 @@ pub fn request_payment_configuration_to_s3s(value: crate::ops::shapes::RequestPa
     })
 }
 
-/// Converts one `RequestPaymentConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `RequestPaymentConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn request_payment_configuration_from_s3s(value: s3s::dto::RequestPaymentConfiguration) -> Result<crate::ops::shapes::RequestPaymentConfiguration, ConversionError> {
+pub fn request_payment_configuration_input_from_s3s(value: s3s::dto::RequestPaymentConfiguration) -> Result<crate::ops::shapes::RequestPaymentConfiguration, ConversionError> {
     let s3s::dto::RequestPaymentConfiguration {
         payer,
     } = value;

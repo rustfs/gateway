@@ -33,13 +33,13 @@ pub fn restore_status_to_s3s(value: crate::ops::shapes::RestoreStatus) -> Result
     })
 }
 
-/// Converts one `RestoreStatus` from the s3s shape to the gateway shape.
+/// Converts one `RestoreStatus` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn restore_status_from_s3s(value: s3s::dto::RestoreStatus) -> Result<crate::ops::shapes::RestoreStatus, ConversionError> {
+pub fn restore_status_output_from_s3s(value: s3s::dto::RestoreStatus) -> Result<crate::ops::shapes::RestoreStatus, ConversionError> {
     let s3s::dto::RestoreStatus {
         is_restore_in_progress,
         restore_expiry_date,

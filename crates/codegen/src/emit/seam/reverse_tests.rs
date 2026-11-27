@@ -23,9 +23,10 @@
 //! NOT responsible for: whether the text compiles, which the types crate proves against the real
 //! s3s. Upstream: [`super::render`], [`super::census`]. Downstream: none; test-only.
 
-use rustfs_gateway_model::ir::{ETagRender, TimestampFormat, Type};
+use rustfs_gateway_model::ir::{ETagRender, Shape, ShapeKind, ShapeXml, TimestampFormat, Type};
 
 use super::backward::{self, LegacyMembers};
+use super::expr::{ShapeDirection, Side};
 use super::facts::S3sFacts;
 use super::render::Forward;
 use super::tests::{ctx, facts, field};
@@ -40,7 +41,7 @@ fn a_supplied_member_converts_back_into_the_gateway_member() {
         field("Bucket", Type::BucketName, true),
         field("CopySource", Type::String, true),
     ];
-    let text = backward::backward_struct(&ctx(&facts), "CopyObjectInput", &fields, "G", "input").expect("renders");
+    let text = backward::backward_struct(&ctx(&facts), "CopyObjectInput", &fields, "G", "input", Side::Input).expect("renders");
     assert!(
         text.contains("copy_source: { let x = copy_source; leaf::copy_source_from_s3s(&x) },"),
         "{text}"
@@ -66,7 +67,8 @@ fn required_copy_header_converts_decoded_fields_without_a_wire_round_trip() {
             source.binding = binding.clone();
             source.required = required;
             source.wire_name = Some(wire.to_owned());
-            let text = backward::backward_struct(&ctx(&facts), &owner, &[source.clone()], "G", "input").expect("renders");
+            let text =
+                backward::backward_struct(&ctx(&facts), &owner, &[source.clone()], "G", "input", Side::Input).expect("renders");
             assert_eq!(
                 text.contains("super::super::copy_source::from_s3s(x)"),
                 typed,
@@ -79,9 +81,15 @@ fn required_copy_header_converts_decoded_fields_without_a_wire_round_trip() {
 #[test]
 fn n_a_supplied_member_without_a_backward_pair_fails_generation() {
     let facts = facts("struct CopyObjectInput\n  copy_source: Timestamp\n");
-    let errors =
-        backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, true)], "G", "input")
-            .expect_err("no pair");
+    let errors = backward::backward_struct(
+        &ctx(&facts),
+        "CopyObjectInput",
+        &[field("CopySource", Type::String, true)],
+        "G",
+        "input",
+        Side::Input,
+    )
+    .expect_err("no pair");
     assert_eq!(errors.len(), 1);
     assert!(
         errors[0].starts_with("CopyObjectInput.copy_source: no s3s → gateway conversion"),
@@ -92,9 +100,15 @@ fn n_a_supplied_member_without_a_backward_pair_fails_generation() {
 #[test]
 fn n_a_legacy_query_member_set_is_refused_by_name_where_nothing_can_hand_it_back() {
     let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<String>\n");
-    let text =
-        backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("Bucket", Type::BucketName, true)], "G", "input")
-            .expect("renders");
+    let text = backward::backward_struct(
+        &ctx(&facts),
+        "CopyObjectInput",
+        &[field("Bucket", Type::BucketName, true)],
+        "G",
+        "input",
+        Side::Input,
+    )
+    .expect("renders");
     assert!(text.contains("        version_id,\n"), "the member is bound, never `_`: {text}");
     assert!(
         text.contains("    if version_id.is_some() {\n        return Err(ConversionError { field: \"version_id\", reason: \"a member only the legacy decoder reads and no gateway member holds, refused rather than dropped\" });\n    }"),
@@ -106,8 +120,16 @@ fn n_a_legacy_query_member_set_is_refused_by_name_where_nothing_can_hand_it_back
 fn a_legacy_query_member_is_handed_back_beside_the_gateway_input() {
     let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<String>\n");
     let fields = [field("Bucket", Type::BucketName, true)];
-    let text = backward::backward_struct_with(&ctx(&facts), "CopyObjectInput", &fields, "G", "input", LegacyMembers::HandBack)
-        .expect("renders");
+    let text = backward::backward_struct_with(
+        &ctx(&facts),
+        "CopyObjectInput",
+        &fields,
+        "G",
+        "input",
+        LegacyMembers::HandBack,
+        Side::Input,
+    )
+    .expect("renders");
     assert!(text.contains("        version_id,\n"), "{text}");
     assert!(
         text.ends_with("    Ok((G {\n        bucket: { let x = bucket; leaf::bucket_name(\"bucket\", x)? },\n    }, LegacyInput { version_id }))\n"),
@@ -120,11 +142,19 @@ fn a_legacy_query_member_is_handed_back_beside_the_gateway_input() {
 fn a_legacy_bool_header_is_handed_back_and_refused_where_it_cannot_be() {
     let facts = facts("struct DeleteBucketInput\n  bucket: String\n  force_delete: Option<bool>\n");
     let fields = [field("Bucket", Type::BucketName, true)];
-    let handed =
-        backward::backward_struct_with(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input", LegacyMembers::HandBack)
-            .expect("renders");
+    let handed = backward::backward_struct_with(
+        &ctx(&facts),
+        "DeleteBucketInput",
+        &fields,
+        "G",
+        "input",
+        LegacyMembers::HandBack,
+        Side::Input,
+    )
+    .expect("renders");
     assert!(handed.contains("LegacyInput { force_delete }"), "{handed}");
-    let refused = backward::backward_struct(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input").expect("renders");
+    let refused =
+        backward::backward_struct(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input", Side::Input).expect("renders");
     assert!(refused.contains("if force_delete.is_some() {"), "{refused}");
     assert!(refused.contains("field: \"force_delete\""), "{refused}");
     assert_eq!(
@@ -191,8 +221,15 @@ fn an_absent_as_empty_member_crosses_forward_as_none_when_empty() {
 #[test]
 fn a_secret_member_is_rewrapped_backward() {
     let facts = facts("struct T\n  sse_customer_key: Option<String>\n");
-    let text = backward::backward_struct(&ctx(&facts), "T", &[field("SSECustomerKey", Type::String, false)], "G", "input")
-        .expect("renders");
+    let text = backward::backward_struct(
+        &ctx(&facts),
+        "T",
+        &[field("SSECustomerKey", Type::String, false)],
+        "G",
+        "input",
+        Side::Input,
+    )
+    .expect("renders");
     assert!(
         text.contains("sse_customer_key: sse_customer_key.map(|x| -> Result<_, ConversionError> { Ok(crate::SseCustomerKey::new(x)) }).transpose()?,"),
         "{text}"
@@ -203,7 +240,7 @@ fn a_secret_member_is_rewrapped_backward() {
 fn ranges_and_conditions_have_a_backward_spelling() {
     let facts = facts("struct T\n  range: Option<Range>\n  if_match: Option<ETagCondition>\n");
     let fields = [field("Range", Type::Range, false), field("IfMatch", Type::String, false)];
-    let text = backward::backward_struct(&ctx(&facts), "T", &fields, "G", "input").expect("renders");
+    let text = backward::backward_struct(&ctx(&facts), "T", &fields, "G", "input", Side::Input).expect("renders");
     assert!(text.contains("leaf::range_from_s3s(&x)"), "{text}");
     assert!(text.contains("leaf::etag_condition_to_text(\"if_match\", &x)?"), "{text}");
 }
@@ -262,8 +299,16 @@ fn an_empty_optional_header_crosses_an_output_unchanged() {
 fn an_undeclared_length_is_handed_back_and_a_negative_one_is_refused() {
     let facts = facts("struct UploadPartInput\n  content_length: Option<i64>\n");
     let fields = [field("ContentLength", Type::Long, true)];
-    let text = backward::backward_struct_with(&ctx(&facts), "UploadPartInput", &fields, "G", "input", LegacyMembers::HandBack)
-        .expect("renders");
+    let text = backward::backward_struct_with(
+        &ctx(&facts),
+        "UploadPartInput",
+        &fields,
+        "G",
+        "input",
+        LegacyMembers::HandBack,
+        Side::Input,
+    )
+    .expect("renders");
     assert!(
         text.contains("content_length: match content_length { Some(x) if x < 0 => return Err(ConversionError { field: \"content_length\", reason: \"a negative length\" }), Some(x) => x, None => 0 },"),
         "{text}"
@@ -280,7 +325,8 @@ fn an_undeclared_length_is_handed_back_and_a_negative_one_is_refused() {
 fn n_an_undeclared_length_with_nowhere_to_hand_it_back_fails_generation() {
     let facts = facts("struct UploadPartInput\n  content_length: Option<i64>\n");
     let fields = [field("ContentLength", Type::Long, true)];
-    let error = backward::backward_struct(&ctx(&facts), "UploadPartInput", &fields, "G", "input").expect_err("no hand-back");
+    let error =
+        backward::backward_struct(&ctx(&facts), "UploadPartInput", &fields, "G", "input", Side::Input).expect_err("no hand-back");
     assert!(
         error
             .iter()
@@ -299,9 +345,16 @@ fn n_an_undeclared_length_on_another_pairing_fails_generation() {
     ] {
         let facts = facts(&format!("struct UploadPartInput\n  {s3s}\n"));
         let fields = [field("ContentLength", ty, required)];
-        let error =
-            backward::backward_struct_with(&ctx(&facts), "UploadPartInput", &fields, "G", "input", LegacyMembers::HandBack)
-                .expect_err(s3s);
+        let error = backward::backward_struct_with(
+            &ctx(&facts),
+            "UploadPartInput",
+            &fields,
+            "G",
+            "input",
+            LegacyMembers::HandBack,
+            Side::Input,
+        )
+        .expect_err(s3s);
         assert!(
             error
                 .iter()
@@ -309,4 +362,124 @@ fn n_an_undeclared_length_on_another_pairing_fails_generation() {
             "{s3s}: {error:?}"
         );
     }
+}
+
+/// Response-side entity tags (direct and nested via `Rule::Nested`) use the stored leaf, while
+/// request-side entity tags keep the strict leaf (rustfs/gateway#1618).
+#[test]
+fn an_output_etag_uses_the_stored_leaf_and_an_input_etag_keeps_the_strict_leaf() {
+    let facts = facts(
+        "struct TInput\n  e_tag: Option<ETag>\n\
+         struct TOutput\n  e_tag: Option<ETag>\n\
+         struct CopyObjectOutput\n  copy_object_result: Option<struct CopyObjectResult>\n\
+         struct CopyObjectResult\n  e_tag: Option<ETag>\n",
+    );
+    let etag_field = [field("ETag", Type::ETag(ETagRender::HeaderQuoted), false)];
+    let input = backward::backward_struct(&ctx(&facts), "TInput", &etag_field, "G", "input", Side::Input).expect("renders");
+    assert!(input.contains("leaf::etag_from_s3s(\"e_tag\", x)?"), "{input}");
+    assert!(!input.contains("stored_etag_from_s3s"), "{input}");
+
+    let output = backward::backward_struct(&ctx(&facts), "TOutput", &etag_field, "G", "output", Side::Output).expect("renders");
+    assert!(output.contains("leaf::stored_etag_from_s3s(\"e_tag\", x)?"), "{output}");
+    assert!(!output.contains("leaf::etag_from_s3s("), "{output}");
+
+    let nested_output = backward::backward_struct(
+        &ctx(&facts),
+        "CopyObjectOutput",
+        &[field("ETag", Type::ETag(ETagRender::XmlQuoted), false)],
+        "G",
+        "output",
+        Side::Output,
+    )
+    .expect("renders");
+    assert!(nested_output.contains("leaf::stored_etag_from_s3s(\"e_tag\", x)?"), "{nested_output}");
+    assert!(!nested_output.contains("leaf::etag_from_s3s("), "{nested_output}");
+}
+
+/// Negative — a nested shape reached from both an input and an output emits two separate backward
+/// conversions so the output's stored leaf never leaks onto the input path (rustfs/gateway#1618).
+#[test]
+fn n_a_shared_shape_reached_from_both_sides_never_uses_the_stored_leaf_on_input() {
+    let facts = facts(
+        "struct DualInput\n  entry: Option<struct SharedEntry>\n  choice: Option<union SharedChoice>\n\
+         struct DualOutput\n  entry: Option<struct SharedEntry>\n  choice: Option<union SharedChoice>\n\
+         struct SharedEntry\n  e_tag: Option<ETag>\n\
+         union SharedChoice { Entry: struct SharedEntry }\n",
+    );
+    let ctx = ctx(&facts);
+    let dual_fields = [
+        field("Entry", Type::Structure("SharedEntry".to_owned()), false),
+        field("Choice", Type::Union("SharedChoice".to_owned()), false),
+    ];
+    let input = backward::backward_struct(&ctx, "DualInput", &dual_fields, "G", "input", Side::Input).expect("renders");
+    let output = backward::backward_struct(&ctx, "DualOutput", &dual_fields, "G", "output", Side::Output).expect("renders");
+    assert!(
+        input.contains("super::super::shapes::shared_entry::shared_entry_input_from_s3s(x)?"),
+        "{input}"
+    );
+    assert!(
+        input.contains("super::super::shapes::shared_choice::shared_choice_input_from_s3s(x)?"),
+        "{input}"
+    );
+    assert!(
+        output.contains("super::super::shapes::shared_entry::shared_entry_output_from_s3s(x)?"),
+        "{output}"
+    );
+    assert!(
+        output.contains("super::super::shapes::shared_choice::shared_choice_output_from_s3s(x)?"),
+        "{output}"
+    );
+    assert!(ctx.reached.borrow().backward_input.contains("SharedEntry"));
+    assert!(ctx.reached.borrow().backward_output.contains("SharedEntry"));
+
+    let entry_shape = Shape {
+        kind: ShapeKind::Structure,
+        fields: vec![field("ETag", Type::ETag(ETagRender::XmlQuoted), false)],
+        xml: ShapeXml {
+            element_order: Vec::new(),
+            empty_value_policy: Vec::new(),
+            attributes: Vec::new(),
+        },
+    };
+    let input_fn = files::shape_fn(&ctx, "SharedEntry", &entry_shape, ShapeDirection::Backward(Side::Input)).expect("input");
+    assert!(input_fn.contains("pub fn shared_entry_input_from_s3s("), "{input_fn}");
+    assert!(input_fn.contains("leaf::etag_from_s3s(\"e_tag\", x)?"), "{input_fn}");
+    assert!(!input_fn.contains("stored_etag_from_s3s"), "{input_fn}");
+
+    let output_fn = files::shape_fn(&ctx, "SharedEntry", &entry_shape, ShapeDirection::Backward(Side::Output)).expect("output");
+    assert!(output_fn.contains("pub fn shared_entry_output_from_s3s("), "{output_fn}");
+    assert!(output_fn.contains("leaf::stored_etag_from_s3s(\"e_tag\", x)?"), "{output_fn}");
+    assert!(!output_fn.contains("leaf::etag_from_s3s("), "{output_fn}");
+
+    let choice_shape = Shape {
+        kind: ShapeKind::Union,
+        fields: vec![field("Entry", Type::Structure("SharedEntry".to_owned()), false)],
+        xml: ShapeXml {
+            element_order: Vec::new(),
+            empty_value_policy: Vec::new(),
+            attributes: Vec::new(),
+        },
+    };
+    let union_in = files::shape_fn(&ctx, "SharedChoice", &choice_shape, ShapeDirection::Backward(Side::Input)).expect("union in");
+    assert!(union_in.contains("shared_entry_input_from_s3s(x)?"), "{union_in}");
+    assert!(!union_in.contains("shared_entry_output_from_s3s"), "{union_in}");
+
+    let union_out =
+        files::shape_fn(&ctx, "SharedChoice", &choice_shape, ShapeDirection::Backward(Side::Output)).expect("union out");
+    assert!(union_out.contains("shared_entry_output_from_s3s(x)?"), "{union_out}");
+    assert!(!union_out.contains("shared_entry_input_from_s3s"), "{union_out}");
+}
+
+/// Negative — string-typed entity tag members stay strict on inputs and use `ETag::from_stored`
+/// only on outputs (rustfs/gateway#1618).
+#[test]
+fn n_a_string_etag_pair_keeps_strict_text_parsing_on_input() {
+    let facts = facts("struct T\n  e_tag: Option<String>\n");
+    let ctx = ctx(&facts);
+    let ty = Type::ETag(ETagRender::XmlQuoted);
+    let s3s = super::facts::S3sType::Leaf("String".to_owned());
+    let input = ctx.backward(&s3s, &ty, "ETag", "x", "e_tag", Side::Input).expect("input");
+    assert_eq!(input, "leaf::etag_from_text(\"e_tag\", &x)?");
+    let output = ctx.backward(&s3s, &ty, "ETag", "x", "e_tag", Side::Output).expect("output");
+    assert_eq!(output, "crate::ETag::from_stored(x)");
 }

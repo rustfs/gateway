@@ -70,10 +70,10 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketNotificationConfigurationOutpu
         topic_configurations,
     } = output;
     Ok(crate::ops::get_bucket_notification_configuration::Output {
-        topic_configurations: match topic_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::topic_configuration::topic_configuration_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        queue_configurations: match queue_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::queue_configuration::queue_configuration_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        lambda_function_configurations: match lambda_function_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lambda_function_configuration::lambda_function_configuration_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-        event_bridge_configuration: event_bridge_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::event_bridge_configuration::event_bridge_configuration_from_s3s(x)?) }).transpose()?,
+        topic_configurations: match topic_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::topic_configuration::topic_configuration_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        queue_configurations: match queue_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::queue_configuration::queue_configuration_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        lambda_function_configurations: match lambda_function_configurations { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lambda_function_configuration::lambda_function_configuration_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        event_bridge_configuration: event_bridge_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::event_bridge_configuration::event_bridge_configuration_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

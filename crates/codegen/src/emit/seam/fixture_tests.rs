@@ -24,8 +24,9 @@
 
 use std::collections::BTreeMap;
 
-use rustfs_gateway_model::ir::{Shape, ShapeKind, ShapeXml, TimestampFormat, Type};
+use rustfs_gateway_model::ir::{ETagRender, Shape, ShapeKind, ShapeXml, TimestampFormat, Type};
 
+use super::expr::Side;
 use super::fixture;
 use super::tests::{ctx, facts, field};
 
@@ -179,4 +180,28 @@ fn n_a_nested_shape_the_ir_lacks_fails_generation() {
     let fields = [field("Owner", Type::Structure("Owner".to_owned()), false)];
     let errors = fixture::struct_literal(&ctx(&facts), &NO_SHAPES, "T", &fields, "super").expect_err("no IR shape");
     assert_eq!(errors, ["T.owner: shape Owner is not in the IR"]);
+}
+
+/// Negative — response-side entity tags cross through `ETag::from_stored` so fixtures emit no
+/// strict `e_tag` invalid refusal on outputs, while input fixtures keep it (rustfs/gateway#1618).
+#[test]
+fn n_output_etag_emits_no_invalid_refusal_while_input_etag_keeps_it() {
+    let facts = facts("struct TInput\n  e_tag: Option<ETag>\nstruct TOutput\n  e_tag: Option<ETag>\n");
+    let fields = [field("ETag", Type::ETag(ETagRender::HeaderQuoted), false)];
+    let input_refusals = fixture::refusals(&ctx(&facts), "TInput", &fields, Side::Input).expect("input refusals");
+    assert_eq!(input_refusals.len(), 1);
+    assert_eq!(
+        (
+            input_refusals[0].member.as_str(),
+            input_refusals[0].field.as_str(),
+            input_refusals[0].suffix,
+            input_refusals[0].bad.as_str(),
+        ),
+        ("e_tag", "e_tag", "invalid", "Some(s3s::dto::ETag::Strong(String::new()))")
+    );
+    let output_refusals = fixture::refusals(&ctx(&facts), "TOutput", &fields, Side::Output).expect("output refusals");
+    assert!(
+        output_refusals.is_empty(),
+        "output ETag is stored verbatim and must not emit an invalid refusal"
+    );
 }

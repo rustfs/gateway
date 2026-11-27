@@ -35,13 +35,13 @@ pub fn bucket_to_s3s(value: crate::ops::shapes::Bucket) -> Result<s3s::dto::Buck
     })
 }
 
-/// Converts one `Bucket` from the s3s shape to the gateway shape.
+/// Converts one `Bucket` from the s3s output shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn bucket_from_s3s(value: s3s::dto::Bucket) -> Result<crate::ops::shapes::Bucket, ConversionError> {
+pub fn bucket_output_from_s3s(value: s3s::dto::Bucket) -> Result<crate::ops::shapes::Bucket, ConversionError> {
     let s3s::dto::Bucket {
         bucket_arn,
         bucket_region,

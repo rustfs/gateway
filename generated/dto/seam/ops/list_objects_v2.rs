@@ -107,12 +107,12 @@ pub fn output_from_s3s(output: s3s::dto::ListObjectsV2Output) -> Result<crate::o
     } = output;
     Ok(crate::ops::list_objects_v2::Output {
         is_truncated: match is_truncated { Some(x) => x, None => return Err(ConversionError { field: "is_truncated", reason: "the gateway shape requires this member" }) },
-        contents: match contents { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object::object_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        contents: match contents { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object::object_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         name: match name { Some(x) => leaf::bucket_name("name", x)?, None => return Err(ConversionError { field: "name", reason: "the gateway shape requires this member" }) },
         prefix: match prefix { Some(x) => x, None => return Err(ConversionError { field: "prefix", reason: "the gateway shape requires this member" }) },
         delimiter,
         max_keys: match max_keys { Some(x) => x, None => return Err(ConversionError { field: "max_keys", reason: "the gateway shape requires this member" }) },
-        common_prefixes: match common_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::common_prefix::common_prefix_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        common_prefixes: match common_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::common_prefix::common_prefix_output_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         encoding_type: encoding_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::EncodingType::custom(x.as_str().to_owned())) }).transpose()?,
         key_count: match key_count { Some(x) => x, None => return Err(ConversionError { field: "key_count", reason: "the gateway shape requires this member" }) },
         continuation_token: continuation_token.map(|x| -> Result<_, ConversionError> { Ok(crate::OpaqueString::from(x)) }).transpose()?,

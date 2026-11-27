@@ -67,7 +67,7 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketPolicyStatusOutput) -> Result<
         policy_status,
     } = output;
     Ok(crate::ops::get_bucket_policy_status::Output {
-        policy_status: policy_status.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::policy_status::policy_status_from_s3s(x)?) }).transpose()?,
+        policy_status: policy_status.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::policy_status::policy_status_output_from_s3s(x)?) }).transpose()?,
     })
 }
 

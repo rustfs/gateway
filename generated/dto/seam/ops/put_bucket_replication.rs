@@ -62,7 +62,7 @@ pub fn input_from_s3s(input: s3s::dto::PutBucketReplicationInput) -> Result<crat
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        replication_configuration: { let x = replication_configuration; super::super::shapes::replication_configuration::replication_configuration_from_s3s(x)? },
+        replication_configuration: { let x = replication_configuration; super::super::shapes::replication_configuration::replication_configuration_input_from_s3s(x)? },
         token,
         expected_bucket_owner,
     })

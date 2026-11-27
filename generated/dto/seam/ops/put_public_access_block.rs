@@ -60,7 +60,7 @@ pub fn input_from_s3s(input: s3s::dto::PutPublicAccessBlockInput) -> Result<crat
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
         content_md5,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
-        public_access_block_configuration: { let x = public_access_block_configuration; super::super::shapes::public_access_block_configuration::public_access_block_configuration_from_s3s(x)? },
+        public_access_block_configuration: { let x = public_access_block_configuration; super::super::shapes::public_access_block_configuration::public_access_block_configuration_input_from_s3s(x)? },
         expected_bucket_owner,
     })
 }

@@ -32,17 +32,17 @@ pub fn cors_configuration_to_s3s(value: crate::ops::shapes::CorsConfiguration) -
     })
 }
 
-/// Converts one `CORSConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `CORSConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn cors_configuration_from_s3s(value: s3s::dto::CORSConfiguration) -> Result<crate::ops::shapes::CorsConfiguration, ConversionError> {
+pub fn cors_configuration_input_from_s3s(value: s3s::dto::CORSConfiguration) -> Result<crate::ops::shapes::CorsConfiguration, ConversionError> {
     let s3s::dto::CORSConfiguration {
         cors_rules,
     } = value;
     Ok(crate::ops::shapes::CorsConfiguration {
-        cors_rules: { let x = cors_rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::cors_rule::cors_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
+        cors_rules: { let x = cors_rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::cors_rule::cors_rule_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
     })
 }

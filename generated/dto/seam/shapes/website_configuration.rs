@@ -35,13 +35,13 @@ pub fn website_configuration_to_s3s(value: crate::ops::shapes::WebsiteConfigurat
     })
 }
 
-/// Converts one `WebsiteConfiguration` from the s3s shape to the gateway shape.
+/// Converts one `WebsiteConfiguration` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn website_configuration_from_s3s(value: s3s::dto::WebsiteConfiguration) -> Result<crate::ops::shapes::WebsiteConfiguration, ConversionError> {
+pub fn website_configuration_input_from_s3s(value: s3s::dto::WebsiteConfiguration) -> Result<crate::ops::shapes::WebsiteConfiguration, ConversionError> {
     let s3s::dto::WebsiteConfiguration {
         error_document,
         index_document,
@@ -49,9 +49,9 @@ pub fn website_configuration_from_s3s(value: s3s::dto::WebsiteConfiguration) -> 
         routing_rules,
     } = value;
     Ok(crate::ops::shapes::WebsiteConfiguration {
-        error_document: error_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::error_document::error_document_from_s3s(x)?) }).transpose()?,
-        index_document: index_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::index_document::index_document_from_s3s(x)?) }).transpose()?,
-        redirect_all_requests_to: redirect_all_requests_to.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::redirect_all_requests_to::redirect_all_requests_to_from_s3s(x)?) }).transpose()?,
-        routing_rules: routing_rules.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::routing_rule::routing_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        error_document: error_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::error_document::error_document_input_from_s3s(x)?) }).transpose()?,
+        index_document: index_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::index_document::index_document_input_from_s3s(x)?) }).transpose()?,
+        redirect_all_requests_to: redirect_all_requests_to.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::redirect_all_requests_to::redirect_all_requests_to_input_from_s3s(x)?) }).transpose()?,
+        routing_rules: routing_rules.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::routing_rule::routing_rule_input_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
     })
 }

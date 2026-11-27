@@ -32,13 +32,28 @@ pub fn blocked_encryption_types_to_s3s(value: crate::ops::shapes::BlockedEncrypt
     })
 }
 
-/// Converts one `BlockedEncryptionTypes` from the s3s shape to the gateway shape.
+/// Converts one `BlockedEncryptionTypes` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn blocked_encryption_types_from_s3s(value: s3s::dto::BlockedEncryptionTypes) -> Result<crate::ops::shapes::BlockedEncryptionTypes, ConversionError> {
+pub fn blocked_encryption_types_input_from_s3s(value: s3s::dto::BlockedEncryptionTypes) -> Result<crate::ops::shapes::BlockedEncryptionTypes, ConversionError> {
+    let s3s::dto::BlockedEncryptionTypes {
+        encryption_type,
+    } = value;
+    Ok(crate::ops::shapes::BlockedEncryptionTypes {
+        encryption_type: match encryption_type { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::EncryptionType::custom(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+    })
+}
+
+/// Converts one `BlockedEncryptionTypes` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn blocked_encryption_types_output_from_s3s(value: s3s::dto::BlockedEncryptionTypes) -> Result<crate::ops::shapes::BlockedEncryptionTypes, ConversionError> {
     let s3s::dto::BlockedEncryptionTypes {
         encryption_type,
     } = value;

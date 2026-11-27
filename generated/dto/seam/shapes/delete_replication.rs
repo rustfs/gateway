@@ -32,13 +32,28 @@ pub fn delete_replication_to_s3s(value: crate::ops::shapes::DeleteReplication) -
     })
 }
 
-/// Converts one `DeleteReplication` from the s3s shape to the gateway shape.
+/// Converts one `DeleteReplication` from the s3s input shape to the gateway shape.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn delete_replication_from_s3s(value: s3s::dto::DeleteReplication) -> Result<crate::ops::shapes::DeleteReplication, ConversionError> {
+pub fn delete_replication_input_from_s3s(value: s3s::dto::DeleteReplication) -> Result<crate::ops::shapes::DeleteReplication, ConversionError> {
+    let s3s::dto::DeleteReplication {
+        status,
+    } = value;
+    Ok(crate::ops::shapes::DeleteReplication {
+        status: { let x = status; crate::ops::enums::Status::custom(x.as_str().to_owned()) },
+    })
+}
+
+/// Converts one `DeleteReplication` from the s3s output shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn delete_replication_output_from_s3s(value: s3s::dto::DeleteReplication) -> Result<crate::ops::shapes::DeleteReplication, ConversionError> {
     let s3s::dto::DeleteReplication {
         status,
     } = value;
