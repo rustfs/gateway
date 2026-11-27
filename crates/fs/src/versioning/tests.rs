@@ -361,9 +361,9 @@ fn n_delete_marker_cannot_carry_protection() {
     assert!(decode_version_record(PathBuf::new(), encoded).is_err());
 }
 
-/// Negative — unsupported upload protection must not be silently discarded.
+/// Valid `lock/1` upload protection round-trips while malformed lock sections remain rejected.
 #[test]
-fn n_upload_record_with_lock_is_rejected() {
+fn n_upload_record_with_malformed_lock_is_rejected() {
     let (root, backend) = backend_with_bucket("lock-upload");
     let upload = backend.upload_path("racing", "upload");
     std::fs::create_dir_all(upload.join(super::super::PARTS_DIR)).expect("parts directory");
@@ -372,6 +372,9 @@ fn n_upload_record_with_lock_is_rejected() {
     std::fs::write(&path, plain).expect("ordinary upload");
     assert!(backend.read_upload_record("racing", "upload").is_some());
     std::fs::write(&path, format!("{plain}lock/1 1\nNONE - ON\n")).expect("protected upload");
+    let decoded = backend.read_upload_record("racing", "upload").expect("valid lock section");
+    assert_eq!(decoded.attributes.lock.as_ref().and_then(|lock| lock.hold), Some(true));
+    std::fs::write(&path, format!("{plain}lock/1 1\nINVALID - ON\n")).expect("corrupt lock upload");
     assert!(backend.read_upload_record("racing", "upload").is_none());
     let _ = std::fs::remove_dir_all(root);
 }

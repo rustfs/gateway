@@ -24,6 +24,8 @@
 
 use super::*;
 
+#[path = "object_lock.rs"]
+mod object_lock;
 #[path = "object_lock_write.rs"]
 mod object_lock_write;
 

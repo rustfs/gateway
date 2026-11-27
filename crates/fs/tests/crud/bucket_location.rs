@@ -391,13 +391,19 @@ async fn create_with_object_lock(service: &S3Service, bucket: &str, enabled: &'s
 }
 
 #[tokio::test]
-async fn object_lock_creation_is_refused_without_creating_a_bucket() {
+async fn object_lock_creation_enables_lock_and_versioning() {
     let root = TestRoot::new();
     let (_backend, service) = service(&root);
     let response = create_with_object_lock(&service, "lock-new", "true").await;
-    assert_eq!(response.status(), 501);
+    assert_eq!(response.status(), 200);
     let head = exchange(&service, signed(http::Method::HEAD, "/lock-new", Bytes::new())).await;
-    assert_eq!(head.status(), 404, "a refused lock request must not create a bucket");
+    assert_eq!(head.status(), 200);
+    let lock = exchange(&service, signed(http::Method::GET, "/lock-new?object-lock", Bytes::new())).await;
+    assert_eq!(lock.status(), 200);
+    assert_eq!(element(lock.body(), "ObjectLockEnabled").as_deref(), Some("Enabled"));
+    let versioning = exchange(&service, signed(http::Method::GET, "/lock-new?versioning", Bytes::new())).await;
+    assert_eq!(versioning.status(), 200);
+    assert_eq!(element(versioning.body(), "Status").as_deref(), Some("Enabled"));
 }
 
 #[tokio::test]
@@ -406,7 +412,10 @@ async fn object_lock_creation_is_refused_for_an_existing_bucket() {
     let (_backend, service) = service(&root);
     create_bucket(&service, "lock-existing").await;
     let response = create_with_object_lock(&service, "lock-existing", "true").await;
-    assert_eq!(response.status(), 501, "an existing bucket must not bypass the capability refusal");
+    assert_eq!(response.status(), 409, "recreating an existing bucket with Object Lock must fail");
+    assert_eq!(element(response.body(), "Code").as_deref(), Some("BucketAlreadyOwnedByYou"));
+    let lock = exchange(&service, signed(http::Method::GET, "/lock-existing?object-lock", Bytes::new())).await;
+    assert_eq!(lock.status(), 404, "refused creation must not enable Object Lock");
 }
 
 #[tokio::test]

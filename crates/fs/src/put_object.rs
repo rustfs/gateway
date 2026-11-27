@@ -26,7 +26,7 @@ use super::tagging::tags_from_header;
 use super::transitions::requested_storage_class;
 use super::{FsBackend, drain_with_trailers, etag};
 use rustfs_gateway::dto::{PutObject, PutObjectOutput, ServerSideEncryption};
-use rustfs_gateway::{Handler, HandlerError, HandlerResult, Req, Resp, Timestamp, request_checksum};
+use rustfs_gateway::{Handler, HandlerResult, Req, Resp, Timestamp, request_checksum};
 
 impl Handler<PutObject> for FsBackend {
     async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
@@ -44,7 +44,9 @@ impl FsBackend {
         // rather than as a body the handler abandoned. Every refusal still precedes publication:
         // a malformed tag header or an unknown class fails the request with no version written.
         let (bytes, trailers) = drain_with_trailers(input.body).await?;
-        refuse_unstored_object_lock!(input)?;
+        let lock = self
+            .resolve_write_object_lock(input.bucket.as_str(), write_lock_headers!(input))
+            .await?;
         let checksum = request_checksum(input.checksum_spec, &trailers)?;
         let encryption = self
             .write_encryption(
@@ -54,7 +56,7 @@ impl FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
-            lock: None,
+            lock,
             part_lengths: None,
             part_metadata: None,
             checksum: checksum.map(super::checksums::StoredChecksum::plain),

@@ -20,7 +20,6 @@ CrossLocationLoggingProhibited|bucket-logging family; PutBucketLogging is served
 IllegalVersioningConfigurationException|versioning family; PutBucketVersioning is served, shared/bucket_config.rs raises MalformedXML for invalid values, and bucket-state conflicts belong to the storage side
 IncorrectNumberOfFilesInPostRequest|browser POST upload; PostObject is served, and crates/gateway/src/post_object/refusals.rs maps form-file count/structure faults to MalformedPOSTRequest
 InlineDataTooLarge|browser POST upload; PostObject is served, and form prelude/size refusals map to MalformedPOSTRequest or EntityTooLarge in crates/gateway/src/post_object/refusals.rs
-InvalidBucketState|bucket-state conflict the storage side detects, not the protocol layer
 InvalidEncryptionAlgorithmError|SSE configuration family; PutBucketEncryption is served, shared/encryption.rs raises MalformedXML for unknown SSEAlgorithm values, and object SSE header refusals use InvalidArgument or InvalidRequest
 InvalidPayer|requester-pays; no payer billing model exists in this gateway (PutBucketRequestPayment validates Payer values as InvalidArgument)
 InvalidRetentionPeriod|object-lock family; crates/core/src/ops/shared/object_lock.rs validates retention periods and raises InvalidArgument for out-of-range periods and non-future RetainUntilDate

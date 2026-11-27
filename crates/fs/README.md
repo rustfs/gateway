@@ -15,8 +15,8 @@ configuration PUT/GET/DELETE is stored and reported as RustFS answers it, and no
 encrypted: this backend measures the protocol surface, not key management. Object writes record
 the SSE-S3 or SSE-KMS algorithm (and KMS key id) the request names, or the bucket default, and the
 write, `GET` and `HEAD` report it, again without encrypting a byte.
-`FsBackend::supported_operations`, `FsBackend::register_crud`, and
-`FsBackend::register_multipart`, `FsBackend::register_versioning`, and
+`FsBackend::supported_operations`, `FsBackend::register_crud`,
+`FsBackend::register_multipart`, `FsBackend::register_versioning`, `FsBackend::register_object_lock`,
 `FsBackend::register_listing`, `FsBackend::register_lifecycle`, and `FsBackend::register_tagging`
 consume one crate-local operation list so the advertised set and the production registry cannot
 drift independently.
@@ -212,6 +212,19 @@ Ranged reads resolve through the exported `evaluate_range` contract, so a suffix
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as
 they do everywhere else in this workspace rather than being re-derived here.
 
+Durable Object Lock (`Get/PutObjectLockConfiguration`, `Get/PutObjectRetention`,
+`Get/PutObjectLegalHold`) is stored atomically per bucket (`object-lock`) and per object version
+(`lock/1`). Creating a lock-enabled bucket atomically enables irreversible versioning; `PutObject`,
+`CopyObject`, and `CreateMultipartUpload` validate and persist standard retention/legal-hold headers
+and inherit bucket `DefaultRetention` (`Days` or UTC calendar `Years`) at publication. Explicit
+version deletion and `PutObjectRetention` enforce `COMPLIANCE` immutability, `GOVERNANCE` bypass
+(requiring both the DTO flag and the immutable accepted `x-amz-bypass-governance-retention: true`
+header), and legal-hold precedence; lifecycle noncurrent expiration preserves protected versions.
+Unsupported modeled extensions remain explicitly refused with `501 NotImplemented` (event-hold
+headers/XML members, `PostObject` form lock fields, and `DeleteObjects` governance bypass), and
+`GetObject`/`HeadObject` omit `x-amz-object-lock-*` response headers until independent non-gating
+retention/legal-hold visibility verdicts exist in `rustfs-gateway`.
+
 The backend coordinates version, bucket, and metadata operations across cooperating `FsBackend`
 instances in the same process (via a canonical-root mutex registry) and across OS processes (via an
 exclusive advisory file lock on `<root>/.version-lock`), failing closed on malformed or symlink lock
@@ -219,9 +232,9 @@ paths, skipping orphaned `.tmp-*` version staging directories, staging multipart
 before rename, and reconciling duplicate `null` versions safely against active protection. It
 remains a bounded reference implementation, not production storage: it does not promise
 crash-consistent disk durability, resistance to hostile non-cooperating filesystem modifications,
-public Object Lock enforcement, lifecycle transition scheduling, or physical storage tiers. Bucket
-names never become raw path components and object keys never become paths; symbolic-link roots and
-storage components are refused.
+lifecycle transition scheduling, or physical storage tiers. Bucket names never become raw path
+components and object keys never become paths; symbolic-link roots and storage components are
+refused.
 
 The remaining capabilities belong to later slices of rustfs/backlog#1741 rather than this core
 reference-backend slice.

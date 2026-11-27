@@ -119,6 +119,16 @@ macro_rules! register_lifecycle_entries {
     };
 }
 
+macro_rules! register_object_lock_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; object_lock $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_object_lock_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_object_lock_entries!($backend, $builder; $($rest)*)
+    };
+}
+
 #[cfg(feature = "external-payload")]
 macro_rules! register_external_entries {
     ($backend:expr, $builder:expr;) => { $builder };
@@ -244,6 +254,17 @@ impl FsBackend {
         macro_rules! register {
             ($($operations:tt)*) => {
                 register_lifecycle_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
+    /// Registers durable bucket and per-version Object Lock configuration, retention, and legal-hold operations.
+    #[must_use]
+    pub fn register_object_lock(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_object_lock_entries!(self, builder; $($operations)*)
             };
         }
         reference_operations!(register)

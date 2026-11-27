@@ -82,6 +82,9 @@ macro_rules! reference_operations {
             crud GetObject => "GetObject",
             acl GetObjectAcl => "GetObjectAcl",
             crud GetObjectAttributes => "GetObjectAttributes",
+            object_lock GetObjectLegalHold => "GetObjectLegalHold",
+            object_lock GetObjectLockConfiguration => "GetObjectLockConfiguration",
+            object_lock GetObjectRetention => "GetObjectRetention",
             tagging GetObjectTagging => "GetObjectTagging",
             policy GetPublicAccessBlock => "GetPublicAccessBlock",
             crud HeadBucket => "HeadBucket",
@@ -102,6 +105,9 @@ macro_rules! reference_operations {
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
             acl PutObjectAcl => "PutObjectAcl",
+            object_lock PutObjectLegalHold => "PutObjectLegalHold",
+            object_lock PutObjectLockConfiguration => "PutObjectLockConfiguration",
+            object_lock PutObjectRetention => "PutObjectRetention",
             tagging PutObjectTagging => "PutObjectTagging",
             policy PutPublicAccessBlock => "PutPublicAccessBlock",
             multipart UploadPart => "UploadPart",
@@ -118,22 +124,18 @@ macro_rules! capability_names {
 
 reference_operations!(capability_names);
 
-// Until Object Lock is fully enforced, never accept a write that asks for protection the
-// filesystem backend would discard. The same six model members appear on all three write inputs.
-macro_rules! refuse_unstored_object_lock {
-    ($input:ident) => {{
-        if $input.object_lock_mode.is_some()
-            || $input.object_lock_retain_until_date.is_some()
-            || $input.object_lock_legal_hold_status.is_some()
-            || $input.object_lock_event_hold.is_some()
-            || $input.object_lock_event_hold_duration_days.is_some()
-            || $input.object_lock_event_hold_duration_years.is_some()
-        {
-            Err(HandlerError::not_implemented("the filesystem backend does not yet enforce Object Lock"))
-        } else {
-            Ok(())
+// Extracts the Object Lock write headers shared by PutObject, CopyObject, and CreateMultipartUpload.
+macro_rules! write_lock_headers {
+    ($input:ident) => {
+        $crate::object_lock::WriteLockHeaders {
+            mode: $input.object_lock_mode.as_ref().map(|mode| mode.as_str()),
+            retain_until: $input.object_lock_retain_until_date.as_ref(),
+            legal_hold: $input.object_lock_legal_hold_status.as_ref().map(|status| status.as_str()),
+            has_event_hold: $input.object_lock_event_hold.is_some()
+                || $input.object_lock_event_hold_duration_days.is_some()
+                || $input.object_lock_event_hold_duration_years.is_some(),
         }
-    }};
+    };
 }
 
 // First, so the `request_content_headers!` reader it defines is in scope for every module below.
@@ -160,6 +162,7 @@ mod lifecycle_scheduler;
 mod listing;
 mod lock_record;
 mod object_attributes;
+mod object_lock;
 mod part_lengths;
 mod part_metadata;
 pub mod policy;
@@ -532,10 +535,12 @@ async fn drain_with_trailers(body: Option<ByteStream>) -> Result<(Vec<u8>, Trail
 impl Handler<CreateMultipartUpload> for FsBackend {
     async fn call(&self, request: Req<CreateMultipartUpload>) -> HandlerResult<CreateMultipartUpload> {
         let input = request.into_input();
-        refuse_unstored_object_lock!(input)?;
         let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
         let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
         let _guard = self.version_lock.lock_shared().await?;
+        let lock = self
+            .resolve_write_object_lock(input.bucket.as_str(), write_lock_headers!(input))
+            .await?;
         // S3 carries user metadata and the representation headers on the initiating request and on
         // neither the parts nor the completion, so this is the only call in the multipart family
         // that has them to persist.
@@ -548,6 +553,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
             .await?;
         let attributes = ObjectAttributes {
             checksum: None,
+            lock,
             tags: tagging::tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata.clone(),
             headers: request_content_headers!(self, input).with_encryption(encryption.clone()),

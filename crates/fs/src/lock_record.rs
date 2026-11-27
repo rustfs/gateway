@@ -14,27 +14,74 @@
 
 //! The private durable representation of one version's retention and legal hold.
 //!
-//! Responsible for: bounded serialization and fail-closed decoding of the lock record section.
-//! NOT responsible for: authorization, bucket enablement, retention updates, or bypass grants.
-//! Upstream: version records. Downstream: deletion checks under the version lock.
+//! Responsible for: bounded serialization, fail-closed decoding, and deletion protection checks
+//! (including governance bypass eligibility) of the `lock/1` version record section.
+//! NOT responsible for: authorization, bucket enablement, retention transitions, or bypass proof
+//! validation (`super::object_lock`).
+//! Upstream: version and upload records. Downstream: deletion checks under the version lock and
+//! `super::object_lock`.
 
+use rustfs_gateway::dto::Mode;
 use rustfs_gateway::{HandlerError, Timestamp};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LockState {
-    retention: Option<(RetentionMode, Timestamp)>,
-    hold: Option<bool>,
+    pub(super) retention: Option<(RetentionMode, Timestamp)>,
+    pub(super) hold: Option<bool>,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum RetentionMode {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RetentionMode {
     Governance,
     Compliance,
 }
 
+impl RetentionMode {
+    pub(super) fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "GOVERNANCE" => Some(Self::Governance),
+            "COMPLIANCE" => Some(Self::Compliance),
+            _ => None,
+        }
+    }
+
+    pub(super) const fn to_dto(self) -> Mode {
+        match self {
+            Self::Governance => Mode::GOVERNANCE,
+            Self::Compliance => Mode::COMPLIANCE,
+        }
+    }
+}
+
 impl LockState {
+    pub(super) const fn is_empty(&self) -> bool {
+        self.retention.is_none() && self.hold.is_none()
+    }
+
+    /// Returns the retention pair when it is still active at `now` (strictly in the future).
+    pub(super) fn active_retention(&self, now: i64) -> Option<(RetentionMode, Timestamp)> {
+        self.retention.filter(|(_, until)| *until > Timestamp::from_secs(now))
+    }
+
+    /// Whether this version cannot be permanently deleted at `now` without governance bypass.
     pub(super) fn prevents_deletion(&self, now: i64) -> bool {
-        self.hold == Some(true) || self.retention.is_some_and(|(_, until)| until > Timestamp::from_secs(now))
+        self.prevents_deletion_with_bypass(now, false)
+    }
+
+    /// Whether this version cannot be permanently deleted at `now` given `bypass_governance`.
+    ///
+    /// Legal hold (`ON`) and active `COMPLIANCE` retention always block deletion regardless of
+    /// `bypass_governance`. Active `GOVERNANCE` retention blocks deletion unless
+    /// `bypass_governance` is `true`.
+    pub(super) fn prevents_deletion_with_bypass(&self, now: i64, bypass_governance: bool) -> bool {
+        if self.hold == Some(true) {
+            return true;
+        }
+        match self.active_retention(now) {
+            None => false,
+            Some((RetentionMode::Compliance, _)) => true,
+            Some((RetentionMode::Governance, _)) => !bypass_governance,
+        }
     }
 }
 
@@ -111,7 +158,15 @@ pub(super) fn ensure_null_deletable(records: &[super::records::VersionRecord], k
 }
 
 pub(super) fn ensure_deletable(lock: Option<&LockState>, now: i64) -> Result<(), HandlerError> {
-    if lock.is_some_and(|state| state.prevents_deletion(now)) {
+    ensure_deletable_with_bypass(lock, now, false)
+}
+
+pub(super) fn ensure_deletable_with_bypass(
+    lock: Option<&LockState>,
+    now: i64,
+    bypass_governance: bool,
+) -> Result<(), HandlerError> {
+    if lock.is_some_and(|state| state.prevents_deletion_with_bypass(now, bypass_governance)) {
         return Err(HandlerError::new(
             rustfs_gateway::ErrorCode::ACCESS_DENIED,
             "the object version is protected",

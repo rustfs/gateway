@@ -606,7 +606,7 @@ impl FsBackend {
             _ => return Err(storage_error()),
         };
         let attributes = decode_trailing_sections(&mut lines)?;
-        if attributes.checksum.is_some() || attributes.part_lengths.is_some() || attributes.lock.is_some() {
+        if attributes.checksum.is_some() || attributes.part_lengths.is_some() {
             return Err(storage_error());
         }
         Ok(UploadRecord {
@@ -649,12 +649,13 @@ impl FsBackend {
         let (algorithm, kind) =
             checksum.map_or(("-", "-"), |checksum| (checksum.algorithm.wire_name(), checksum.kind.wire_name()));
         let record = format!(
-            "{}\n{}\n{}\n{}\n{algorithm}\n{kind}\n{}",
+            "{}\n{}\n{}\n{}\n{algorithm}\n{kind}\n{}{}",
             hex::encode(bucket.as_str()),
             hex::encode(key.as_str()),
             hex::encode(&upload_id),
             self.clock.now().unix_seconds(),
             encode_trailing_sections(attributes),
+            super::lock_record::encode(attributes.lock.as_ref()),
         );
         let std_file = std::fs::OpenOptions::new()
             .write(true)

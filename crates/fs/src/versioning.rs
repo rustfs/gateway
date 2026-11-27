@@ -46,10 +46,10 @@ use super::{FsBackend, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
-const RECORD_FILE: &str = "record";
+pub(super) const RECORD_FILE: &str = "record";
 const BODY_FILE: &str = "body";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VersioningState {
+pub(super) enum VersioningState {
     Never,
     Enabled,
     Suspended,
@@ -317,6 +317,7 @@ impl FsBackend {
                         body: None,
                         e_tag: None,
                         attributes: &ObjectAttributes::default(),
+                        lock: None,
                         held: &records,
                         superseded_nulls: &[],
                         supersedes_legacy: false,
@@ -354,6 +355,7 @@ impl FsBackend {
                         body: None,
                         e_tag: None,
                         attributes: &ObjectAttributes::default(),
+                        lock: None,
                         held: &records,
                         superseded_nulls: &superseded_nulls,
                         supersedes_legacy: legacy_object.is_some(),
@@ -421,6 +423,10 @@ impl FsBackend {
     /// unknown, and answering the current object anyway would report a guess as a fact.
     pub(super) async fn require_readable_versioning(&self, bucket: &str) -> Result<(), HandlerError> {
         self.versioning_state(bucket).await.map(|_state| ())
+    }
+
+    pub(super) async fn versioning_state_for_lock(&self, bucket: &str) -> Result<VersioningState, HandlerError> {
+        self.versioning_state(bucket).await
     }
 
     /// Whether a read of `bucket` reports the `null` version id.
@@ -558,6 +564,22 @@ impl Handler<PutBucketVersioning> for FsBackend {
             _ => return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "versioning status is required")),
         };
         let _guard = self.version_lock.lock().await?;
+        if self.bucket_has_object_lock(input.bucket.as_str()).await? {
+            if state == VersioningState::Suspended {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_BUCKET_STATE,
+                    "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.",
+                ));
+            }
+            if input.versioning_configuration.exclude_folders == Some(true)
+                || !input.versioning_configuration.excluded_prefixes.is_empty()
+            {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_BUCKET_STATE,
+                    "An Object Lock configuration is present on this bucket, so versioning exclusions cannot be enabled.",
+                ));
+            }
+        }
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores `MfaDelete` with the rest of the
         // configuration and neither enforces it — a delete never needs an MFA token — nor returns
         // it from GetBucketVersioning (`rustfs/src/app/bucket_usecase.rs:2265-2270` at
@@ -597,7 +619,7 @@ impl FsBackend {
         key: &str,
         version_id: Option<&str>,
     ) -> Result<DeleteObjectOutput, HandlerError> {
-        self.delete_object_version_if(bucket, key, version_id, None).await
+        self.delete_object_version_if(bucket, key, version_id, None, false).await
     }
 
     /// [`Self::delete_object_version`] under a delete's `If-Match`, judged inside the version lock
@@ -608,6 +630,7 @@ impl FsBackend {
         key: &str,
         version_id: Option<&str>,
         condition: Option<&DeleteIfMatch>,
+        bypass_governance: bool,
     ) -> Result<DeleteObjectOutput, HandlerError> {
         let guard = self.version_lock.lock().await?;
         let state = self.versioning_state(bucket).await?;
@@ -619,7 +642,11 @@ impl FsBackend {
                 self.judge_named(condition, bucket, key, version_id, record).await?;
             }
             if let Some(record) = record {
-                super::lock_record::ensure_deletable(record.lock.as_ref(), self.clock.now().unix_seconds())?;
+                super::lock_record::ensure_deletable_with_bypass(
+                    record.lock.as_ref(),
+                    self.clock.now().unix_seconds(),
+                    bypass_governance,
+                )?;
                 let delete_marker = matches!(record.kind, RecordKind::DeleteMarker);
                 let path = record.path.clone();
                 let removed_id = record.version_id.clone();
@@ -657,10 +684,18 @@ impl FsBackend {
 
 impl Handler<DeleteObject> for FsBackend {
     async fn call(&self, request: Req<DeleteObject>) -> HandlerResult<DeleteObject> {
+        let bypass =
+            super::object_lock::authorized_governance_bypass(request.input().bypass_governance_retention, request.context());
         let input = request.input();
         let condition = self.delete_condition(input.if_match.as_deref());
         let output = self
-            .delete_object_version_if(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref(), condition.as_ref())
+            .delete_object_version_if(
+                input.bucket.as_str(),
+                input.key.as_str(),
+                input.version_id.as_deref(),
+                condition.as_ref(),
+                bypass,
+            )
             .await?;
         Ok(Resp::new(output))
     }

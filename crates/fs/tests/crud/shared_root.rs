@@ -454,7 +454,8 @@ async fn independent_roots_and_post_release_cross_process_delete_succeed_while_o
     assert_eq!(list_a.status(), 200);
     assert!(String::from_utf8_lossy(list_a.body()).contains("<Name>alpha</Name>"));
 
-    // Public Object Lock refusals must remain intact (501 NotImplemented).
+    // Object Lock creation succeeds on the shared root while unlocked-bucket lock writes fail 400
+    // and unsupported event holds remain explicitly refused with 501 NotImplemented.
     let mut lock_bucket_headers = http::HeaderMap::new();
     lock_bucket_headers.insert(
         http::HeaderName::from_static("x-amz-bucket-object-lock-enabled"),
@@ -465,7 +466,7 @@ async fn independent_roots_and_post_release_cross_process_delete_succeed_while_o
         signed_with_headers(http::Method::PUT, "/locked-bkt", Bytes::new(), lock_bucket_headers),
     )
     .await;
-    assert_eq!(lock_bucket.status(), 501);
+    assert_eq!(lock_bucket.status(), 200);
 
     let mut lock_put_headers = http::HeaderMap::new();
     lock_put_headers.insert(
@@ -477,5 +478,17 @@ async fn independent_roots_and_post_release_cross_process_delete_succeed_while_o
         signed_with_headers(http::Method::PUT, "/alpha/obj2", Bytes::from_static(b"x"), lock_put_headers),
     )
     .await;
-    assert_eq!(lock_put.status(), 501);
+    assert_eq!(lock_put.status(), 400);
+
+    let mut event_hold_headers = http::HeaderMap::new();
+    event_hold_headers.insert(
+        http::HeaderName::from_static("x-amz-object-lock-event-hold"),
+        http::HeaderValue::from_static("ON"),
+    );
+    let event_hold_put = exchange(
+        &service_a,
+        signed_with_headers(http::Method::PUT, "/locked-bkt/obj3", Bytes::from_static(b"x"), event_hold_headers),
+    )
+    .await;
+    assert_eq!(event_hold_put.status(), 501);
 }
