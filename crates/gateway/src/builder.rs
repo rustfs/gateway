@@ -52,7 +52,7 @@ use rustfs_gateway_sig::{SecurityFloor, SignatureVerifier};
 use rustfs_gateway_types::NamePolicy;
 
 use crate::assembly::{AssemblyError, RuleRef};
-use crate::clock::{Clock, ClockPosture, ClockSkewAck, SystemMonotonic, system_clock};
+use crate::clock::{Clock, ClockPosture, ClockSkewAck, MonotonicClock, SystemMonotonic, system_clock};
 use crate::config::{AssemblySnapshot, ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
@@ -72,6 +72,7 @@ mod buffered_ceiling;
 pub(crate) mod buffered_lengths;
 mod claimed_bodies;
 mod client_quirks;
+mod clock;
 mod cors;
 pub(crate) mod credential_sentences;
 pub(crate) mod denial_sentences;
@@ -163,6 +164,7 @@ pub struct ServiceBuilder {
     observer: Arc<dyn Observer>,
     clock: Arc<dyn Clock>,
     clock_posture: ClockPosture,
+    authz_clock: Option<Arc<dyn MonotonicClock>>,
     traces: Arc<dyn TraceSource>,
     cors_source: Arc<dyn CorsSource>,
     cors_cache: CorsCacheConfig,
@@ -228,6 +230,7 @@ impl ServiceBuilder {
             observer: Arc::new(NoObserver),
             clock: Arc::new(system_clock()),
             clock_posture: ClockPosture::System,
+            authz_clock: None,
             traces: Arc::new(MintedTraces::new()),
             cors_source: Arc::new(NoCors),
             cors_cache: CorsCacheConfig::default(),
@@ -660,7 +663,7 @@ impl ServiceBuilder {
             header_token_verifier,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
             dangerously_replaced_signature_verifier: self.dangerously_replaced_signature_verifier,
-            authz_clock: Arc::new(SystemMonotonic::new()),
+            authz_clock: self.authz_clock.unwrap_or_else(|| Arc::new(SystemMonotonic::new())),
             bucket_owner_source: self.bucket_owner_source,
             host_resolver: self.host_resolver,
             governor,
