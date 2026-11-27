@@ -81,6 +81,7 @@ impl Handler<DeleteObjects> for FsBackend {
             .ok_or_else(|| HandlerError::internal_error("the delete authorization proof did not match"))?
             .cloned()
             .collect::<Vec<_>>();
+        super::object_lock::reject_batch_governance_bypass(request.input().bypass_governance_retention, request.context())?;
         let input = request.into_input();
         let bucket = input.bucket.as_str();
         // A missing bucket fails the whole request rather than every entry: there is no key in it

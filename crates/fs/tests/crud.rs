@@ -198,16 +198,15 @@ fn service_with_backend_and_credentials(
                 ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
             ),
     );
-    let service = backend
-        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
-            backend.register_tagging(
-                backend.register_lifecycle(
+    let service =
+        backend
+            .register_object_lock(backend.register_cors(backend.register_encryption(backend.register_policy(
+                backend.register_acl(backend.register_tagging(backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
-                ),
-            ),
-        ))))
-        .build()
-        .expect("the reference registry is a complete assembly");
+                ))),
+            ))))
+            .build()
+            .expect("the reference registry is a complete assembly");
     (backend, service)
 }
 
@@ -353,62 +352,21 @@ fn legacy_object_path(root: &TestRoot, bucket: &str, key: &str) -> PathBuf {
 async fn bucket_and_object_crud_runs_through_the_production_registry() {
     let root = TestRoot::new();
     let (backend, service) = service(&root);
-    assert_eq!(
-        backend.supported_operations().collect::<Vec<_>>(),
-        [
-            "AbortMultipartUpload",
-            "CompleteMultipartUpload",
-            "CopyObject",
-            "CreateBucket",
-            "CreateMultipartUpload",
-            "DeleteBucket",
-            "DeleteBucketCors",
-            "DeleteBucketEncryption",
-            "DeleteBucketLifecycle",
-            "DeleteBucketPolicy",
-            "DeleteBucketTagging",
-            "DeleteObject",
-            "DeleteObjectTagging",
-            "DeleteObjects",
-            "DeletePublicAccessBlock",
-            "GetBucketAcl",
-            "GetBucketCors",
-            "GetBucketEncryption",
-            "GetBucketLifecycleConfiguration",
-            "GetBucketLocation",
-            "GetBucketPolicy",
-            "GetBucketPolicyStatus",
-            "GetBucketTagging",
-            "GetBucketVersioning",
-            "GetObject",
-            "GetObjectAcl",
-            "GetObjectAttributes",
-            "GetObjectTagging",
-            "GetPublicAccessBlock",
-            "HeadBucket",
-            "HeadObject",
-            "ListBuckets",
-            "ListMultipartUploads",
-            "ListObjectVersions",
-            "ListObjects",
-            "ListObjectsV2",
-            "ListParts",
-            "PostObject",
-            "PutBucketAcl",
-            "PutBucketCors",
-            "PutBucketEncryption",
-            "PutBucketLifecycleConfiguration",
-            "PutBucketPolicy",
-            "PutBucketTagging",
-            "PutBucketVersioning",
-            "PutObject",
-            "PutObjectAcl",
-            "PutObjectTagging",
-            "PutPublicAccessBlock",
-            "UploadPart",
-            "UploadPartCopy"
-        ]
-    );
+    let expected: Vec<&str> = "\
+        AbortMultipartUpload CompleteMultipartUpload CopyObject CreateBucket CreateMultipartUpload \
+        DeleteBucket DeleteBucketCors DeleteBucketEncryption DeleteBucketLifecycle DeleteBucketPolicy \
+        DeleteBucketTagging DeleteObject DeleteObjectTagging DeleteObjects DeletePublicAccessBlock \
+        GetBucketAcl GetBucketCors GetBucketEncryption GetBucketLifecycleConfiguration GetBucketLocation \
+        GetBucketPolicy GetBucketPolicyStatus GetBucketTagging GetBucketVersioning GetObject \
+        GetObjectAcl GetObjectAttributes GetObjectLegalHold GetObjectLockConfiguration GetObjectRetention \
+        GetObjectTagging GetPublicAccessBlock HeadBucket HeadObject ListBuckets ListMultipartUploads \
+        ListObjectVersions ListObjects ListObjectsV2 ListParts PostObject PutBucketAcl PutBucketCors \
+        PutBucketEncryption PutBucketLifecycleConfiguration PutBucketPolicy PutBucketTagging \
+        PutBucketVersioning PutObject PutObjectAcl PutObjectLegalHold PutObjectLockConfiguration \
+        PutObjectRetention PutObjectTagging PutPublicAccessBlock UploadPart UploadPartCopy"
+        .split_ascii_whitespace()
+        .collect();
+    assert_eq!(backend.supported_operations().collect::<Vec<_>>(), expected);
     assert_eq!(
         service.operations().collect::<Vec<_>>(),
         backend.supported_operations().collect::<Vec<_>>()

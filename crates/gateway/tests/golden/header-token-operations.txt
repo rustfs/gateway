@@ -25,6 +25,9 @@ GetBucketVersioning
 GetObject
 GetObjectAcl
 GetObjectAttributes
+GetObjectLegalHold
+GetObjectLockConfiguration
+GetObjectRetention
 GetObjectTagging
 GetPublicAccessBlock
 HeadBucket
@@ -44,6 +47,9 @@ PutBucketTagging
 PutBucketVersioning
 PutObject
 PutObjectAcl
+PutObjectLegalHold
+PutObjectLockConfiguration
+PutObjectRetention
 PutObjectTagging
 PutPublicAccessBlock
 UploadPart

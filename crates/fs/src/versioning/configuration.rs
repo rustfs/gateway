@@ -160,6 +160,12 @@ impl FsBackend {
         Ok(self.exclusions(bucket).await?.excludes(key))
     }
 
+    /// Whether `bucket`'s persisted versioning configuration declares any exclusion rule.
+    pub(crate) async fn has_versioning_exclusions(&self, bucket: &str) -> Result<bool, HandlerError> {
+        let exclusions = self.exclusions(bucket).await?;
+        Ok(exclusions.folders || !exclusions.prefixes.is_empty())
+    }
+
     /// Persists the whole configuration, every member included, in legacy RustFS's persisted
     /// form. Written before the status, which stays the authority for the state.
     pub(super) async fn set_versioning_configuration(

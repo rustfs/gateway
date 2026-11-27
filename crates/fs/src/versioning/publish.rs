@@ -68,6 +68,7 @@ pub(super) struct StageVersion<'a> {
     pub(super) body: Option<&'a [u8]>,
     pub(super) e_tag: Option<&'a ETag>,
     pub(super) attributes: &'a ObjectAttributes,
+    pub(super) lock: Option<&'a super::super::lock_record::LockState>,
     pub(super) held: &'a [VersionRecord],
     pub(super) superseded_nulls: &'a [&'a VersionRecord],
     pub(super) supersedes_legacy: bool,
@@ -95,6 +96,9 @@ impl FsBackend {
         let state = state.for_write(self.excluded(plan.bucket, plan.key, state).await?);
         let mut existing = self.version_records(plan.bucket).await?;
         let now = self.clock.now().unix_seconds();
+        let effective_lock = self
+            .effective_object_lock(plan.bucket, plan.attributes.lock.as_ref(), now)
+            .await?;
         self.reconcile_nulls_for_key_locked(plan.bucket, plan.key, &mut existing)?;
         let version_id = if matches!(state, VersioningState::Enabled) {
             None
@@ -125,6 +129,7 @@ impl FsBackend {
                 body: Some(plan.bytes),
                 e_tag: Some(plan.e_tag),
                 attributes: plan.attributes,
+                lock: effective_lock.as_ref(),
                 held: &existing,
                 superseded_nulls: &superseded_nulls,
                 supersedes_legacy: legacy_object.is_some(),
@@ -179,6 +184,7 @@ impl FsBackend {
                 body,
                 e_tag,
                 attributes,
+                lock: attributes.lock.as_ref(),
                 held: &held,
                 superseded_nulls: &[],
                 supersedes_legacy: false,
@@ -253,7 +259,7 @@ impl FsBackend {
             checksum: stage.attributes.checksum,
             part_lengths: stage.attributes.part_lengths.clone(),
             part_metadata: stage.attributes.part_metadata.clone(),
-            lock: stage.attributes.lock.clone(),
+            lock: stage.lock.cloned(),
         });
         #[cfg(test)]
         {

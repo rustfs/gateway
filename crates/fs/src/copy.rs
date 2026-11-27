@@ -158,7 +158,9 @@ impl Handler<CopyObject> for FsBackend {
             .bucket()
             .ok_or_else(|| HandlerError::internal_error("a path copy source has no bucket"))?;
         let input = request.into_input();
-        refuse_unstored_object_lock!(input)?;
+        let lock = self
+            .resolve_write_object_lock(input.bucket.as_str(), write_lock_headers!(input))
+            .await?;
         let metadata_source = directive(&input)?;
         let tag_source = tagging_directive(&input)?;
         let checksum_algorithm = input
@@ -221,7 +223,7 @@ impl Handler<CopyObject> for FsBackend {
             }),
         };
         let attributes = ObjectAttributes {
-            lock: None,
+            lock,
             part_lengths: None,
             part_metadata: None,
             checksum,

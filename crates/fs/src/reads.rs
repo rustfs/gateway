@@ -436,6 +436,9 @@ impl Handler<GetObject> for super::FsBackend {
             ssekms_key_id: encryption.kms_key_id,
             expires: representation.headers.expires.map(Into::into),
             body: Some(ByteStream::from_bytes(Bytes::from(body))),
+            // Object Lock headers stay omitted on GET/HEAD until `rustfs-gateway` carries
+            // independent non-gating `s3:GetObjectRetention` / `s3:GetObjectLegalHold` visibility
+            // verdicts (rustfs/gateway#1512).
             ..GetObjectOutput::default()
         };
         set_object_checksum!(output, checksum.map(super::checksums::StoredChecksum::plain));
@@ -510,6 +513,9 @@ impl Handler<HeadObject> for super::FsBackend {
             server_side_encryption: encryption.reported_algorithm(),
             ssekms_key_id: encryption.kms_key_id,
             expires: representation.headers.expires.map(Into::into),
+            // Object Lock headers stay omitted on GET/HEAD until `rustfs-gateway` carries
+            // independent non-gating `s3:GetObjectRetention` / `s3:GetObjectLegalHold` visibility
+            // verdicts (rustfs/gateway#1512).
             ..HeadObjectOutput::default()
         };
         set_object_checksum!(output, checksum.map(super::checksums::StoredChecksum::plain));

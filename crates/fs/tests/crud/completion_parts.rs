@@ -49,13 +49,13 @@ fn normalizing(root: &TestRoot) -> S3Service {
             ),
     );
     backend
-        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
-            backend.register_tagging(
-                backend.register_lifecycle(
+        .register_object_lock(
+            backend.register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+                backend.register_tagging(backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
-                ),
-            ),
-        ))))
+                )),
+            )))),
+        )
         .build()
         .expect("the reference registry is a complete assembly")
 }

@@ -98,13 +98,13 @@ fn assembled_with(root: &DataRoot, profile: bool, install: impl FnOnce(ServiceBu
     };
     let builder = backend.register_crud(builder.authenticator(authenticator));
     backend
-        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
-            backend.register_tagging(
-                backend.register_lifecycle(
+        .register_object_lock(
+            backend.register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+                backend.register_tagging(backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
-                ),
-            ),
-        ))))
+                )),
+            )))),
+        )
         .build()
         .expect("a complete assembly")
 }

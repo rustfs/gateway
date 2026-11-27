@@ -46,8 +46,8 @@ use rustfs_gateway::{
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, bucket_cors, bucket_tagging, encryption, lifecycle, policy, storage_error,
-    versioning,
+    FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, bucket_cors, bucket_tagging, encryption, lifecycle, object_lock, policy,
+    storage_error, versioning,
 };
 
 /// The cursor `ListBuckets` pages with: a value this backend minted, never a bucket name.
@@ -157,9 +157,7 @@ impl Handler<ListBuckets> for FsBackend {
 impl Handler<CreateBucket> for FsBackend {
     async fn call(&self, request: Req<CreateBucket>) -> HandlerResult<CreateBucket> {
         let input = request.input();
-        if input.object_lock_enabled_for_bucket == Some(true) {
-            return Err(HandlerError::not_implemented("the filesystem backend does not support Object Lock"));
-        }
+        let enable_object_lock = input.object_lock_enabled_for_bucket == Some(true);
         // Judged before anything is written. A refused constraint that has already created
         // directories leaves a bucket the caller was told does not exist.
         resolve_location_constraint(
@@ -179,9 +177,10 @@ impl Handler<CreateBucket> for FsBackend {
                 self.require_bucket(bucket).await?;
                 // The status matrix is the operation's (`crates/core/src/ops/create_bucket.rs`):
                 // re-creating your own bucket is the historical `200` in us-east-1 and
-                // `409 BucketAlreadyOwnedByYou` in every other region. This backend has one owner,
-                // so an existing bucket is always the caller's own.
-                if self.region() != US_EAST_1 {
+                // `409 BucketAlreadyOwnedByYou` in every other region — and always `409` when
+                // `x-amz-bucket-object-lock-enabled: true` targets an existing bucket. This
+                // backend has one owner, so an existing bucket is always the caller's own.
+                if enable_object_lock || self.region() != US_EAST_1 {
                     return Err(HandlerErrorContext::owned_bucket_recreation().into());
                 }
                 return Ok(Resp::new(CreateBucketOutput {
@@ -198,6 +197,9 @@ impl Handler<CreateBucket> for FsBackend {
         std::fs::create_dir(staging.join(OBJECTS_DIR)).map_err(|_| storage_error())?;
         std::fs::create_dir(staging.join(UPLOADS_DIR)).map_err(|_| storage_error())?;
         std::fs::create_dir(staging.join(VERSIONS_DIR)).map_err(|_| storage_error())?;
+        if enable_object_lock {
+            object_lock::stage_object_lock_for_new_bucket(&staging)?;
+        }
         #[cfg(test)]
         super::staging::test_hooks::maybe_pause("create_bucket").await;
         match std::fs::rename(&staging, &path) {
@@ -210,7 +212,7 @@ impl Handler<CreateBucket> for FsBackend {
             Err(error) if matches!(error.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::DirectoryNotEmpty) => {
                 drop(temp_guard);
                 self.require_bucket(bucket).await?;
-                if self.region() != US_EAST_1 {
+                if enable_object_lock || self.region() != US_EAST_1 {
                     return Err(HandlerErrorContext::owned_bucket_recreation().into());
                 }
                 Ok(Resp::new(CreateBucketOutput {
@@ -327,6 +329,7 @@ impl Handler<DeleteBucket> for FsBackend {
             encryption::ENCRYPTION_FILE,
             bucket_tagging::BUCKET_TAGGING_FILE,
             bucket_cors::CORS_FILE,
+            object_lock::OBJECT_LOCK_FILE,
         ] {
             match tokio::fs::remove_file(self.bucket_path(bucket).join(record)).await {
                 Ok(()) => {}

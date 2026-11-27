@@ -272,40 +272,6 @@ async fn n_a_deleted_buckets_name_is_free_and_a_refused_delete_keeps_its_owner()
     assert_eq!(still_refused.status(), 403, "{}", body_of(&still_refused));
 }
 
-/// Negative — a creation the backend refused leaves no owner record behind, so the same
-/// identity may still create the bucket properly afterwards; the record follows the creation
-/// and not the admission (rustfs/gateway#811).
-#[tokio::test]
-async fn n_a_refused_creation_records_no_owner() {
-    let root = TestRoot::new();
-    let options = two_identity_options(&root, &[]);
-    let owners = Arc::new(BucketOwners::default());
-    let backend = Arc::new(open_backend(&options).expect("a usable data root"));
-    let service = build_service(&options, &backend, &owners).expect("a complete service");
-
-    // Object Lock is what the reference backend refuses at creation; the RustFS profile no longer
-    // refuses any `LocationConstraint` (rustfs/gateway#914), so that cannot be the trigger.
-    let object_lock = [("x-amz-bucket-object-lock-enabled", "true")];
-    let refused = exchange(
-        &service,
-        signed(ALT_KEY, ALT_SECRET, http::Method::PUT, "/unmade", Bytes::new(), &object_lock),
-    )
-    .await;
-    assert_eq!(refused.status(), 501, "{}", body_of(&refused));
-    {
-        use rustfs_gateway::BucketOwnerSource as _;
-        let name = rustfs_gateway::BucketName::new("unmade").expect("a valid bucket name");
-        assert!(owners.owner(&name).await.is_err(), "a refused creation must not be recorded");
-    }
-
-    assert_eq!(
-        exchange(&service, as_alt(http::Method::PUT, "/unmade", Bytes::new()))
-            .await
-            .status(),
-        200
-    );
-}
-
 /// Negative — with only one identity configured, no second identity can sign at all. This is
 /// what a suite that forgot to configure the second identity must run into: a service that
 /// cannot be reached as the second principal, rather than one that quietly serves it.
@@ -748,15 +714,10 @@ mod legacy_key_rule_tests;
 /// Successful answers' heads, written as legacy RustFS writes them (rustfs/gateway#1148).
 mod legacy_heads_tests;
 
-/// What a browser form's `PutObject` members store, as legacy RustFS stores them (rustfs/gateway#1129).
-mod post_object_field_tests;
-
-/// A browser form read under legacy RustFS's ceilings (rustfs/gateway#1173).
 mod post_form_ceiling_tests;
-
-/// A browser form's file and request head, stored as legacy RustFS stores them or kept out by the
-/// #1167 ruling (rustfs/gateway#1167).
 mod post_form_file_tests;
+/// Browser form `PutObject` fields, ceilings, and file handling (rustfs/gateway#1129, #1173, #1167).
+mod post_object_field_tests;
 
 /// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
 mod conditional_delete_tests;
@@ -798,3 +759,4 @@ mod version_action_tests;
 mod legacy_paths;
 
 mod fixed_clock_tests;
+mod object_lock_tests;

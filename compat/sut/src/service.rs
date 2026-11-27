@@ -255,10 +255,10 @@ pub(crate) fn build_service(
     let builder =
         match partial {
             Some(_) => builder,
-            None => backend.register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
-                backend.register_tagging(backend.register_lifecycle(
+            None => backend.register_object_lock(backend.register_cors(backend.register_encryption(backend.register_policy(
+                backend.register_acl(backend.register_tagging(backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
-                )),
+                ))),
             )))),
         };
     Ok(builder.build()?)
