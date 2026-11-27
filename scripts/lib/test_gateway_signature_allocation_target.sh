@@ -52,9 +52,14 @@ PYEOF
 }
 mut_gateway_signature_no_entry() { mut_gateway_signature_source 'fn main()' 'fn unused_main()'; }
 mut_gateway_signature_empty_entry() { mut_gateway_signature_source '    string_to_sign_owns_only_its_final_text();' ''; }
+mut_gateway_signature_missing_candidates() {
+    mut_gateway_signature_source '    candidate_storage_owns_only_selected_paths_and_method();' ''
+}
 expect_fail 'the signature allocation target cannot lose its main' mut_gateway_signature_no_entry \
     'signature allocation target must have exactly one main entry'
 expect_fail 'a successful empty allocation main cannot bypass the assertions' mut_gateway_signature_empty_entry \
+    'signature allocation main must execute the complete allocation suite'
+expect_fail 'the signature allocation main cannot drop candidate storage assertions' mut_gateway_signature_missing_candidates \
     'signature allocation main must execute the complete allocation suite'
 
 mut_gateway_signature_unexecuted_test() {

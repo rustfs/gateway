@@ -213,3 +213,125 @@ fn n_mismatch_detail_zeroizes_buffers_on_drop() {
     fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
     assert_zeroize_on_drop::<SignatureMismatchDetail>();
 }
+
+// ── owned candidate storage, ordering, fallback, double-encoding, and cloning (#1325) ────────
+
+const EXTENSION_METHOD: &str = "LONG-EXTENSION-METHOD-WITH-MORE-THAN-SIXTEEN-BYTES";
+const CANONICAL_TAIL: &str = concat!(
+    "\n",
+    "\n",
+    "host:example.amazonaws.com\n",
+    "x-amz-date:20150830T123600Z\n",
+    "\n",
+    "host;x-amz-date\n",
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+);
+
+fn build_owned_candidates(method: &str, paths: UriPathCandidates) -> CanonicalCandidates {
+    let method = Method::from_bytes(method.as_bytes()).expect("valid method");
+    let map = headers(&[("x-amz-date", "20150830T123600Z")]);
+    let signed = SignedHeaderSet::parse_and_enforce("host;x-amz-date", &map, None).expect("valid");
+    let query = RawQuery::new("");
+    let host = host();
+    CanonicalRequestSpec::new(
+        &method,
+        &paths,
+        &query,
+        &map,
+        &signed,
+        &host,
+        PayloadMode::Empty.canonical_payload_token(),
+    )
+    .candidates()
+    .expect("built")
+}
+
+#[test]
+fn owned_candidates_preserve_exact_bytes_order_and_clones_after_inputs_drop() {
+    for method in ["GET", "PUT", EXTENSION_METHOD] {
+        let paths = UriPathCandidates::new("/key/%7E").expect("valid");
+        let mut candidates = build_owned_candidates(method, paths);
+        let before = candidates.clone();
+        assert_eq!(candidates.len(), 2);
+        assert!(!candidates.is_empty());
+
+        let expected = [
+            (PathCandidate::Decoded, format!("{method}\n/key/~{CANONICAL_TAIL}")),
+            (PathCandidate::Raw, format!("{method}\n/key/%7E{CANONICAL_TAIL}")),
+        ];
+        let all_before: Vec<_> = before.map(|r| (r.path_candidate(), r.text().to_owned())).collect();
+        assert_eq!(all_before, expected);
+
+        let first = candidates.next().expect("decoded first");
+        assert_eq!((first.path_candidate(), first.text()), (expected[0].0, expected[0].1.as_str()));
+
+        let during: Vec<_> = candidates
+            .clone()
+            .map(|r| (r.path_candidate(), r.text().to_owned()))
+            .collect();
+        assert_eq!(during, expected[1..]);
+
+        let second = candidates.next().expect("raw second");
+        assert_eq!((second.path_candidate(), second.text()), (expected[1].0, expected[1].1.as_str()));
+        assert!(candidates.next().is_none());
+        assert!(candidates.clone().next().is_none());
+        assert_eq!(candidates.len(), 2);
+        assert!(!candidates.is_empty());
+    }
+}
+
+#[test]
+fn n_respelled_only_path_with_unencoded_bytes_fallback_never_yields_raw_candidate() {
+    let paths = UriPathCandidates::new("/key/%7E")
+        .expect("valid")
+        .with_raw_fallback(RawPathFallback::WithUnencodedBytes);
+    let mut candidates = build_owned_candidates("GET", paths);
+    assert_eq!(candidates.len(), 1);
+    let only = candidates.next().expect("decoded candidate");
+    assert_eq!(only.path_candidate(), PathCandidate::Decoded);
+    assert_eq!(only.text(), format!("GET\n/key/~{CANONICAL_TAIL}"));
+    assert!(candidates.next().is_none(), "unselected raw path must never be yielded");
+}
+
+#[test]
+fn n_double_encoded_and_s3vectors_paths_never_yield_raw_fallback_even_with_unencoded_bytes() {
+    for paths in [
+        UriPathCandidates::double_encoded("/bucket/a b%7E")
+            .expect("valid")
+            .with_raw_fallback(RawPathFallback::WhenRespelled),
+        UriPathCandidates::for_service("/bucket/a b%7E", SigService::S3Vectors)
+            .expect("valid")
+            .with_raw_fallback(RawPathFallback::WhenRespelled),
+    ] {
+        let mut candidates = build_owned_candidates("POST", paths);
+        assert_eq!(candidates.len(), 1);
+        let only = candidates.next().expect("single double-encoded candidate");
+        assert_eq!(only.path_candidate(), PathCandidate::Decoded);
+        assert_eq!(only.text(), format!("POST\n/bucket/a%20b%257E{CANONICAL_TAIL}"));
+        assert!(candidates.next().is_none(), "double_encoded must never fall back to raw");
+    }
+}
+
+#[test]
+fn n_dual_candidates_never_reverse_decoded_then_raw_order_and_sigv4a_stays_bound() {
+    let paths = UriPathCandidates::new("/my key").expect("valid");
+    let mut candidates = build_owned_candidates("GET", paths);
+    let first = candidates.next().expect("decoded");
+    let second = candidates.next().expect("raw");
+    assert_eq!(first.path_candidate(), PathCandidate::Decoded);
+    assert_eq!(second.path_candidate(), PathCandidate::Raw);
+    assert_ne!(first.hash_hex(), second.hash_hex());
+    let date = AmzDate::parse("20150830T123600Z").expect("valid");
+    let scope = SigV4aCredentialScope::parse("AKIDEXAMPLE/20150830/s3/aws4_request").expect("valid");
+    let sts_decoded = first.string_to_sign_v4a(&date, &scope);
+    let sts_raw = second.string_to_sign_v4a(&date, &scope);
+    assert!(
+        sts_decoded
+            .text()
+            .starts_with("AWS4-ECDSA-P256-SHA256\n20150830T123600Z\n20150830/s3/aws4_request\n")
+    );
+    assert!(sts_decoded.text().ends_with(&first.hash_hex()));
+    assert!(sts_raw.text().ends_with(&second.hash_hex()));
+    assert_ne!(sts_decoded, sts_raw);
+    assert!(candidates.next().is_none());
+}
