@@ -25,35 +25,14 @@
 
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use libfuzzer_sys::fuzz_target;
-use rustfs_gateway_http::TransportExtensions;
 use rustfs_gateway_sig::{
-    Admission, AmzDate, BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier, HeaderTokenClaim,
-    HeaderTokenRefused, HeaderTokenVerifier, Identity, OperationFloor, PayloadMode, QueryBearerClaim, RawHost, RawQuery,
-    RequestNow, ScopeDate, SecurityFloor, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, Verdict,
-    WireView,
+    Admission, AmzDate, HeaderTokenClaim, OperationFloor, PayloadMode, QueryBearerClaim, RawHost, RawQuery, RequestNow,
+    ScopeDate, SecurityFloor, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, WireView,
 };
 
 const NOW: i64 = 1_767_225_600;
 const BEARER_CLAIM: QueryBearerClaim = QueryBearerClaim::new("token", ".zip");
 const TOKEN_ALIASES: &[&str] = &["x-subject-token", "x-storage-token"];
-
-struct RejectBearer;
-
-impl BearerTokenVerifier for RejectBearer {
-    fn verify(&self, _request: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> {
-        Err(BearerRefused)
-    }
-}
-
-struct RejectHeaderToken;
-
-impl HeaderTokenVerifier for RejectHeaderToken {
-    type Established = u8;
-
-    fn identity(&self, _established: &u8, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
-        Err(HeaderTokenRefused)
-    }
-}
 
 fn take_str(input: &mut &[u8], max_len: usize) -> String {
     let Some((&len, rest)) = input.split_first() else {
@@ -104,13 +83,10 @@ fuzz_target!(|input: &[u8]| {
 
     let now = RequestNow::from_unix_seconds(NOW);
     let view = WireView::new(&headers, RawQuery::new(&raw_query));
-    let bearer_floor = OperationFloor::builtin("rustfs:DownloadZip", SigService::S3).with_query_bearer_claim(BEARER_CLAIM);
-    if let Ok(Admission::Bearer(admission)) = SecurityFloor::new().admit(view, &bearer_floor, now) {
-        let verdict = admission.verify(&RejectBearer, &raw_path);
-        assert!(matches!(verdict, Verdict::Reject(_)), "rejecting verifier must not authenticate");
-    }
+    let _ = BEARER_CLAIM.presented(&view);
 
-    // 2. HeaderTokenClaim with alias refusal.
+    // 2. HeaderTokenClaim with alias refusal and SecurityFloor::admit invariants
+    //    (ADR-0056 keeps token verification sealed inside rustfs-gateway).
     let claim = HeaderTokenClaim::new("x-auth-token")
         .expect("valid header name")
         .refusing_aliases(TOKEN_ALIASES)
@@ -118,11 +94,18 @@ fuzz_target!(|input: &[u8]| {
     let _ = claim.presented(&headers);
     let token_floor = OperationFloor::builtin("GetObject", SigService::S3);
     let security_floor = SecurityFloor::new().with_header_token_claim(claim);
-    if let Ok(Admission::HeaderToken(admission)) = security_floor.admit(view, &token_floor, now) {
-        let verdict = admission.verify(&RejectHeaderToken, &TransportExtensions::default());
+    let admitted = security_floor.admit(view, &token_floor, now);
+    if headers.contains_key("x-subject-token") {
         assert!(
-            matches!(verdict, Verdict::Reject(_)),
-            "absent/rejected header token must not authenticate"
+            !matches!(admitted, Ok(Admission::HeaderToken(_))),
+            "refused alias must never be admitted as a header token"
+        );
+    }
+    if matches!(admitted, Ok(Admission::HeaderToken(_))) {
+        assert!(headers.contains_key("x-auth-token"), "header token admission requires the claimed header");
+        assert!(
+            !headers.contains_key("authorization"),
+            "header token admission must not succeed alongside Authorization"
         );
     }
 
