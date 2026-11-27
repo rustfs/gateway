@@ -497,3 +497,24 @@ fn multipart_selector_overlap_artifacts_pass_the_decode_property() {
         check_decode(input).expect("only the exact multipart overlap is registered");
     }
 }
+
+/// Positive — the original and minimized UploadPart/PutObjectAcl overlap remain compared requests.
+#[test]
+fn upload_part_acl_overlap_artifacts_pass_the_decode_property() {
+    for input in [
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/upload-part-acl-original")[..],
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/upload-part-acl-minimal")[..],
+        b"PUT /bkt/k?partNumber=1&uploadId=u&acl\n\n".as_slice(),
+    ] {
+        let request = request_of(input).expect("the artifact remains a compared request");
+        let diff = crate::decode_diff(&request).expect("both stacks run");
+        assert_eq!(diff.operation.gateway.as_deref(), Some("UploadPart"));
+        assert_eq!(diff.operation.s3s.as_deref(), Some("PutObjectAcl"));
+        check_decode(input).unwrap_or_else(|error| {
+            panic!(
+                "only the exact UploadPart/PutObjectAcl overlap is registered: {error}\nfindings={:?}",
+                diff.findings()
+            )
+        });
+    }
+}

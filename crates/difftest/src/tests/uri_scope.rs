@@ -319,3 +319,130 @@ fn multipart_selector_overlap_rejects_other_findings() {
         assert!(!verdict.passed(), "the registration must not accept a different finding");
     }
 }
+
+fn upload_part_acl_overlap_route() -> Finding {
+    Finding {
+        kind: Kind::Decode,
+        operation: "UploadPart".to_owned(),
+        priority: Priority::Route,
+        item: Item::Route,
+        gateway: "UploadPart".to_owned(),
+        s3s: "PutObjectAcl".to_owned(),
+    }
+}
+
+fn upload_part_acl_overlap_outcome() -> Finding {
+    Finding {
+        kind: Kind::Decode,
+        operation: "UploadPart".to_owned(),
+        priority: Priority::Fail,
+        item: Item::Outcome,
+        gateway: "handled".to_owned(),
+        s3s: "501 NotImplemented: PutObjectAcl is not implemented yet".to_owned(),
+    }
+}
+
+/// Positive — a valid part-upload PUT carrying `acl` matches exactly kd-decode-0116 and kd-decode-0117.
+#[test]
+fn upload_part_acl_overlap_accepts_only_recorded_route_and_outcome() {
+    let register = KnownDiffs::checked_in().expect("the checked-in register parses");
+    let request = RawRequest::put("/bkt/k?partNumber=1&uploadId=u&acl", b"");
+    let diff = crate::decode_diff(&request).expect("both stacks run");
+    let verdict = register.verdict_for(&request, diff.findings());
+    assert!(verdict.passed(), "{verdict:?}");
+    assert_eq!(
+        verdict.known,
+        [
+            (upload_part_acl_overlap_route(), "kd-decode-0116".to_owned()),
+            (upload_part_acl_overlap_outcome(), "kd-decode-0117".to_owned()),
+        ],
+    );
+}
+
+/// Negative — all three literal query names must occur in the parsed request, never in a value,
+/// wrong case, percent-encoded lookalike, or fragment, for both route and outcome entries.
+#[test]
+fn upload_part_acl_overlap_rejects_missing_or_disguised_selectors() {
+    let register = KnownDiffs::checked_in().expect("the checked-in register parses");
+    for finding in [upload_part_acl_overlap_route(), upload_part_acl_overlap_outcome()] {
+        for target in [
+            "/bkt/k",
+            "/bkt/k?partNumber=1&uploadId=u",
+            "/bkt/k?partNumber=1&acl",
+            "/bkt/k?uploadId=u&acl",
+            "/bkt/k?partNumber=1&uploadId=u&prefix=acl",
+            "/bkt/k?partNumber=1&acl&prefix=uploadId",
+            "/bkt/k?uploadId=u&acl&prefix=partNumber",
+            "/bkt/k?PartNumber=1&uploadId=u&acl",
+            "/bkt/k?partNumber=1&UploadId=u&acl",
+            "/bkt/k?partNumber=1&uploadId=u&Acl",
+            "/bkt/k?%70artNumber=1&uploadId=u&acl",
+            "/bkt/k?partNumber=1&%75ploadId=u&acl",
+            "/bkt/k?partNumber=1&uploadId=u&%61cl",
+            "/bkt/k?partNumber=1&uploadId=u#&acl",
+            "/bkt/k?partNumber=1&acl#&uploadId=u",
+            "/bkt/k?uploadId=u&acl#&partNumber=1",
+        ] {
+            let verdict = register.verdict_for(&RawRequest::put(target, b""), vec![finding.clone()]);
+            assert!(!verdict.passed(), "{target}/{finding:?}");
+        }
+    }
+}
+
+/// Negative — missing request context, swapped or altered pins, and malformed-input decode
+/// differences remain unregistered even when all three query parameters are present.
+#[test]
+fn upload_part_acl_overlap_rejects_other_findings() {
+    let register = KnownDiffs::checked_in().expect("the checked-in register parses");
+    assert!(!register.verdict(vec![upload_part_acl_overlap_route()]).passed());
+    assert!(!register.verdict(vec![upload_part_acl_overlap_outcome()]).passed());
+
+    let mut operation = upload_part_acl_overlap_route();
+    operation.operation = "PutObject".to_owned();
+    let mut gateway = upload_part_acl_overlap_route();
+    gateway.gateway = "PutObject".to_owned();
+    let mut legacy = upload_part_acl_overlap_route();
+    legacy.s3s = "PutObject".to_owned();
+    let mut swapped = upload_part_acl_overlap_route();
+    swapped.gateway = "PutObjectAcl".to_owned();
+    swapped.s3s = "UploadPart".to_owned();
+    let mut status = upload_part_acl_overlap_route();
+    status.item = Item::Status;
+    let mut bad_outcome = upload_part_acl_overlap_outcome();
+    bad_outcome.s3s = "500 InternalError: unexpected".to_owned();
+    let request = RawRequest::put("/bkt/k?partNumber=1&uploadId=u&acl", b"");
+    for finding in [operation, gateway, legacy, swapped, status, bad_outcome] {
+        let verdict = register.verdict_for(&request, vec![finding.clone()]);
+        assert!(!verdict.passed(), "must not accept unrelated finding: {finding:?}");
+    }
+
+    // Malformed partNumber and malformed XML body must still fail closed on their outcome/refusal diffs.
+    let bad_part = RawRequest::put("/bkt/k?partNumber=0&uploadId=u&acl", b"");
+    let bad_part_verdict = register.verdict_for(&bad_part, crate::decode_diff(&bad_part).expect("both stacks run").findings());
+    assert!(
+        !bad_part_verdict.passed(),
+        "malformed partNumber refusal must stay unregistered: {bad_part_verdict:?}"
+    );
+
+    let bad_xml = RawRequest::put("/bkt/k?partNumber=1&uploadId=u&acl", b"x");
+    let bad_xml_verdict = register.verdict_for(&bad_xml, crate::decode_diff(&bad_xml).expect("both stacks run").findings());
+    assert!(
+        !bad_xml_verdict.passed(),
+        "malformed ACL XML refusal must stay unregistered: {bad_xml_verdict:?}"
+    );
+}
+
+/// Negative — non-PUT methods with the same three query keys never produce the registered
+/// UploadPart/PutObjectAcl overlap.
+#[test]
+fn upload_part_acl_overlap_other_methods_do_not_match_put_route_overlap() {
+    for method in [http::Method::GET, http::Method::POST, http::Method::DELETE] {
+        let request = RawRequest::new(method.clone(), "/bkt/k?partNumber=1&uploadId=u&acl");
+        let diff = crate::decode_diff(&request).expect("both stacks run");
+        assert!(
+            !(diff.operation.gateway.as_deref() == Some("UploadPart") && diff.operation.s3s.as_deref() == Some("PutObjectAcl")),
+            "{method} unexpectedly produced UploadPart vs PutObjectAcl: {:?}",
+            diff.operation
+        );
+    }
+}
