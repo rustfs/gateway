@@ -894,7 +894,11 @@ for module in gateway_modules + gateway_socket_timing_modules + ("signature_text
         opening = code_only.index("{", mains[0].start())
         end = balanced_end(code_only, opening, source_path)
         body = code_only[opening + 1 : end - 1]
-        if re.fullmatch(r"\s*string_to_sign_owns_only_its_final_text\s*\(\s*\)\s*;\s*", body) is None:
+        if re.fullmatch(
+            r"\s*string_to_sign_owns_only_its_final_text\s*\(\s*\)\s*;\s*"
+            r"candidate_storage_owns_only_selected_paths_and_method\s*\(\s*\)\s*;\s*",
+            body,
+        ) is None:
             fail("the signature allocation main must execute the complete allocation suite")
 
 gateway_integration_path = gateway_tests / "integration.rs"
