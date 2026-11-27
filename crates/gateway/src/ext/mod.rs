@@ -97,6 +97,7 @@ pub use self::authorizer::{
 };
 pub use self::authz_audit::{AuthzAuditEvent, AuthzAuditSink, AuthzStage, NoAuthzAudit};
 pub(crate) use self::authz_audit::{emit_input_safely, emit_safely};
+pub(crate) use self::bucket_owner::BucketOwnerErrorKind;
 pub use self::bucket_owner::{BucketOwnerError, BucketOwnerSource, NoBucketOwner};
 pub use self::client_facts::ClientFacts;
 pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};

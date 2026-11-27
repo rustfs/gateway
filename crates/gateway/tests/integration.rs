@@ -55,6 +55,8 @@ mod bodyless_bodies;
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "bucket_owner_errors.rs"]
+mod bucket_owner_errors;
 #[path = "buffered_ceiling.rs"]
 mod buffered_ceiling;
 #[path = "buffered_lengths.rs"]
