@@ -734,6 +734,7 @@ gateway_modules = (
     "bodyless_bodies",
     "bodyless_payload_digest",
     "bucket_config_reachability",
+    "bucket_owner_errors",
     "buffered_ceiling",
     "buffered_lengths",
     "checksum_omissions",

@@ -148,6 +148,7 @@ use crate::{response::into_response, routing::RuntimeAssembly};
 
 mod authenticate;
 mod body_preparation;
+mod bucket_owner;
 mod cors;
 pub(crate) mod extension_guards;
 pub(crate) mod host_tokens;
@@ -1044,37 +1045,10 @@ impl S3Service {
                 deciding = combined.deciding;
                 combined.decision
             };
-            // The raw map is asked first: it answers without allocating, and an absent owner — the
-            // common case — never reaches the view's reading of an empty line.
-            if !non_s3
-                && route_decision == Decision::Allow
-                && route_headers.contains_key("x-amz-expected-bucket-owner")
-                && route_meta.has_header("x-amz-expected-bucket-owner")
-            {
-                route_decision = match (route_meta.header("x-amz-expected-bucket-owner"), route_meta.bucket()) {
-                    (Some(expected_owner), Some(bucket)) => {
-                        match catch_boxed_future(|| route_service.inner.bucket_owner_source.owner(bucket)).await {
-                            Ok(Ok(actual_owner)) if actual_owner.as_ref() == expected_owner.as_ref() => Decision::Allow,
-                            Ok(Ok(_)) => Decision::Deny,
-                            Ok(Err(_)) | Err(()) => Decision::Indeterminate,
-                        }
-                    }
-                    (None, _) | (_, None) => Decision::Indeterminate,
-                };
-            }
-            if route_decision == Decision::Allow
-                && let Some(expected_owner) = route_post_expected_owner
-            {
-                route_decision = match route_meta.bucket() {
-                    Some(bucket) => match catch_boxed_future(|| route_service.inner.bucket_owner_source.owner(bucket)).await {
-                        Ok(Ok(actual_owner)) if actual_owner.as_ref() == expected_owner => Decision::Allow,
-                        Ok(Ok(_)) => Decision::Deny,
-                        Ok(Err(_)) | Err(()) => Decision::Indeterminate,
-                    },
-                    None => Decision::Indeterminate,
-                };
-            }
             // Each triggered, profile-required extra is all-of on top of the base decision.
+            // Evaluate every route-stage authorization rule before consulting `BucketOwnerSource`
+            // so a caller denied on an extra action (e.g. `s3:PutObjectTagging`) still receives
+            // `403 AccessDenied` rather than learning bucket absence (`404 NoSuchBucket`).
             let mut route_extras: Vec<AuthzRequest<'_>> = Vec::new();
             if route_decision == Decision::Allow {
                 for extra in extra_permissions {
@@ -1107,6 +1081,39 @@ impl S3Service {
                 }
                 if extra_decision != Decision::Allow {
                     route_decision = extra_decision;
+                }
+            }
+            // The raw map is asked first: it answers without allocating, and an absent owner — the
+            // common case — never reaches the view's reading of an empty line.
+            if !non_s3
+                && route_decision == Decision::Allow
+                && route_headers.contains_key("x-amz-expected-bucket-owner")
+                && route_meta.has_header("x-amz-expected-bucket-owner")
+            {
+                let outcome = bucket_owner::check_route_owner(
+                    route_service.inner.bucket_owner_source.as_ref(),
+                    route_meta.bucket(),
+                    route_meta.header("x-amz-expected-bucket-owner").as_deref(),
+                )
+                .await;
+                route_decision = outcome.decision;
+                if outcome.error.is_some() {
+                    route_error = outcome.error;
+                }
+            }
+            if !non_s3
+                && route_decision == Decision::Allow
+                && let Some(expected_owner) = route_post_expected_owner
+            {
+                let outcome = bucket_owner::check_route_owner(
+                    route_service.inner.bucket_owner_source.as_ref(),
+                    route_meta.bucket(),
+                    Some(expected_owner),
+                )
+                .await;
+                route_decision = outcome.decision;
+                if outcome.error.is_some() {
+                    route_error = outcome.error;
                 }
             }
             // Combine for the audit only when an extra was asked: nothing allocates otherwise.
@@ -1380,41 +1387,24 @@ impl S3Service {
                     .find(|decision| *decision != Decision::Allow)
                     .unwrap_or(Decision::Allow)
             };
-            if input_decision == Decision::Allow
+            let mut input_error = None;
+            if !non_s3
+                && input_decision == Decision::Allow
                 && (matches!(operation, "CopyObject" | "UploadPartCopy")
                     || resources.iter().any(|resource| resource.identity().is_some()))
                 && input_headers.contains_key("x-amz-source-expected-bucket-owner")
                 && input_meta.has_header("x-amz-source-expected-bucket-owner")
             {
-                let source_owner_decision = match input_meta.header("x-amz-source-expected-bucket-owner") {
-                    Some(expected_owner) if !resources.is_empty() => {
-                        let mut verdict = Decision::Allow;
-                        for resource in &resources {
-                            verdict = match (resource.identity(), resource.bucket()) {
-                                (None | Some(rustfs_gateway_core::ResourceIdentity::Path), Some(source_bucket)) => {
-                                    match catch_boxed_future(|| input_service.inner.bucket_owner_source.owner(source_bucket))
-                                        .await
-                                    {
-                                        Ok(Ok(actual_owner)) if actual_owner.as_ref() == expected_owner.as_ref() => {
-                                            Decision::Allow
-                                        }
-                                        Ok(Ok(_)) => Decision::Deny,
-                                        Ok(Err(_)) | Err(()) => Decision::Indeterminate,
-                                    }
-                                }
-                                _ => Decision::Indeterminate,
-                            };
-                            if verdict != Decision::Allow {
-                                break;
-                            }
-                        }
-                        verdict
-                    }
-                    _ => Decision::Indeterminate,
-                };
-                if source_owner_decision != Decision::Allow {
-                    stage = source_owner_decision;
-                    input_decision = source_owner_decision;
+                let outcome = bucket_owner::check_source_owner(
+                    input_service.inner.bucket_owner_source.as_ref(),
+                    &resources,
+                    input_meta.header("x-amz-source-expected-bucket-owner").as_deref(),
+                )
+                .await;
+                if outcome.decision != Decision::Allow {
+                    stage = outcome.decision;
+                    input_decision = outcome.decision;
+                    input_error = outcome.error;
                 }
             }
             let mut audited_resources = Vec::with_capacity(input_resources.len().saturating_add(1));
@@ -1447,7 +1437,10 @@ impl S3Service {
                     authz_started,
                 )
                 .await;
-                return Err(from_denial(denial, response_kind, input_service.inner.view_policy.denial_sentences()));
+                return Err(match input_error {
+                    Some(error) => from_handler(error, response_kind, ConnectionIntent::MayKeepAlive),
+                    None => from_denial(denial, response_kind, input_service.inner.view_policy.denial_sentences()),
+                });
             }
             let config = config.with_missing_object_visibility(visibility).authorized();
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);

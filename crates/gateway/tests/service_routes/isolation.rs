@@ -415,6 +415,7 @@ async fn s3vectors_isolates_s3_only_headers_expected_owner_ssec_and_checksums() 
             "",
             &[
                 ("x-amz-expected-bucket-owner", "123456789012"),
+                ("x-amz-source-expected-bucket-owner", "123456789012"),
                 ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
                 ("content-md5", "not-valid-base64!!!"),
                 ("x-amz-checksum-sha256", "not-valid-base64!!!"),
