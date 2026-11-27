@@ -36,15 +36,25 @@ control in the guard self-test.
 ## Timing side channels
 
 The register lives in `crates/sig/src/timing.rs` as `SIDE_CHANNELS` — **data, not prose**,
-so a test can assert every entry still has an owner. Ten channels, each closed here, deferred to a
-named task with its interface already constrained, or accepted with the reason recorded.
+so a test can assert every entry still has an owner. Eleven channels, each closed here, deferred to
+a named task with its interface already constrained, or accepted with the reason recorded.
 
-Two properties of the design are worth stating outside the code:
+Three properties of the design are worth stating outside the code:
 
 - **The unknown-access-key path does the same work as the known one.** It signs with a placeholder
   secret and runs the full four-step derivation and comparison before answering
   `InvalidAccessKeyId`. A wrong signature follows the same derivation path and uses the same
   generic message, so neither the work performed nor the prose confirms that an access key exists.
+- **Body-digest header paths do not buffer bodies for unknown or unusable keys (T11).** Legacy
+  RustFS `sts`-scoped header signatures and S3 Vectors header signatures that omit
+  `x-amz-content-sha256` must hash the request body to verify a usable credential (or a
+  token-matched expired session). Unknown keys, store faults, disabled keys, missing/mismatched
+  session tokens, and long-term keys presented with a token skip the body read to prevent
+  unauthenticated body-buffering DoS up to the service ceiling and to keep body-length refusals
+  from separating unusable keys from unknown ones (`rustfs/gateway#1581`). Those paths still run
+  the placeholder/key HMAC derivation and comparison over the empty payload and are held to
+  `FailureFloor` (T6); the remaining body-read work difference is recorded as accepted risk `T11`
+  in `SIDE_CHANNELS`.
 - **AWS error codes remain distinct.** An unknown access key answers `InvalidAccessKeyId`, while a
   known key with a wrong signature answers `SignatureDoesNotMatch`. Timing parity and the mandatory
   credential rate limit mitigate that compatibility-required enumeration surface; changing the
@@ -477,9 +487,10 @@ framework's half:
   `500 InternalError` instead, which SDKs retry
   (`SigV4Authenticator::answer_credential_store_faults_as_unavailable`, ADR-0051; the RustFS
   profile turns it on). The answer is given where an unknown key is answered — after the placeholder
-  derivation and comparison, except on the early lookup refusal of a header signature scoped to
-  `sts` without `x-amz-content-sha256` under `accept_legacy_rustfs_signing_services`, where both
-  answer before the body is read. It carries no request or provider text, and closes the connection
+  derivation and comparison; on header signatures scoped to `sts` (under
+  `accept_legacy_rustfs_signing_services`) or `s3vectors` without `x-amz-content-sha256`, both
+  unknown keys and store faults skip reading the body before running that placeholder derivation
+  (`timing::SIDE_CHANNELS`, row T11). It carries no request or provider text, and closes the connection
   while a body is owed, as an authentication failure does. It is opt-in because it reveals: a fault
   confined to a disabled, expired or tokenless-session record exposes a record otherwise hidden as
   an unknown key; a store slower for existing records than for misses becomes a `500`/`403`

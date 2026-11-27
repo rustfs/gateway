@@ -669,3 +669,132 @@ async fn n_an_unrouted_form_beside_a_header_token_is_neither_read_nor_verified()
     }
     assert_eq!(asked.load(Ordering::SeqCst), 0, "the host's verifier was asked about an unrouted request");
 }
+
+/// Negative — rustfs/gateway#1581: under the RustFS profile, an unrouted object-path POST form
+/// with an expired, disabled, or token-mismatched credential answers `403 InvalidAccessKeyId`
+/// (matching an unknown key) instead of `SignatureDoesNotMatch` or `405 MethodNotAllowed`, while
+/// live long-term and live session credentials with valid signatures keep `405 MethodNotAllowed`.
+#[tokio::test]
+async fn n_unrouted_form_unusable_keys_match_unknown_key_while_live_keys_keep_405() {
+    use sha2::{Digest as _, Sha256};
+    const FORM_TOKEN: &str = "FQoGZXIvYXdzEUnroutedWireToken";
+    const FORM_OTHER_TOKEN: &str = "FQoGZXIvYXdzEUnroutedOtherToken";
+
+    let hmac = |key: &[u8], data: &[u8]| -> [u8; 32] {
+        let mut block = [0_u8; 64];
+        for (slot, byte) in block.iter_mut().zip(key) {
+            *slot = *byte;
+        }
+        let inner = Sha256::new()
+            .chain_update(block.map(|b| b ^ 0x36))
+            .chain_update(data)
+            .finalize();
+        Sha256::new()
+            .chain_update(block.map(|b| b ^ 0x5c))
+            .chain_update(inner)
+            .finalize()
+            .into()
+    };
+    let b64 = |bytes: &[u8]| -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        bytes.chunks(3).fold(String::new(), |mut out, chunk| {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0_u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+            for i in 0..4 {
+                let ch = A.get(((n >> (18 - 6 * i)) & 63) as usize).copied().map_or('=', char::from);
+                out.push(if i <= chunk.len() { ch } else { '=' });
+            }
+            out
+        })
+    };
+    let now = crate::support::SIGNED_AT_UNIX_SECONDS;
+    let mk_session = |id: &str, exp: i64| {
+        let binding = rustfs_gateway::SessionBinding::new("sts.example.test", exp).expect("binding");
+        Credentials::new(id, b"secret")
+            .expect("valid")
+            .with_session(FORM_TOKEN, binding)
+            .expect("valid")
+    };
+    let creds = StaticCredentials::new()
+        .with(Credentials::new("AKIDLIVE", b"secret").expect("valid"))
+        .with(Credentials::new("AKIDDISABLED", b"secret").expect("valid").disable())
+        .with(mk_session("AKIDSESSION", now + 3_600))
+        .with(mk_session("AKIDEXPIRED", now - 1));
+    let seen = Arc::new(Seen::default());
+    let service = ServiceBuilder::new()
+        .authenticator(SigV4Authenticator::new(
+            Arc::new(creds),
+            RegionSet::new(["us-east-1"]).expect("non-empty"),
+        ))
+        .clock_with_skew_ack(fixed_clock(), ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry())
+        .authorizer(Allow)
+        .register::<PutObject, _>(Arc::new(Recorder(Arc::clone(&seen))))
+        .select_operations_as_legacy_rustfs()
+        .legacy_rustfs_post_forms()
+        .build()
+        .expect("complete service");
+
+    let send_form = |key_id: &str, signing: &str, token: Option<&str>| {
+        let cred = format!("{key_id}/20260102/us-east-1/s3/aws4_request");
+        let doc = format!(
+            r#"{{"expiration":"2099-01-01T00:00:00Z","conditions":[{{"x-amz-date":"20260102T030405Z"}},{{"x-amz-credential":"{cred}"}},{{"x-amz-algorithm":"AWS4-HMAC-SHA256"}}]}}"#
+        );
+        let policy = b64(doc.as_bytes());
+        let key = ["us-east-1", "s3", "aws4_request"]
+            .into_iter()
+            .fold(hmac(format!("AWS4{signing}").as_bytes(), b"20260102"), |k, p| hmac(&k, p.as_bytes()));
+        let sig = rustfs_gateway_sig::codec::encode_hex_lower(&hmac(&key, policy.as_bytes()));
+        let mut fields = vec![
+            ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
+            ("x-amz-credential", cred.as_str()),
+            ("x-amz-date", "20260102T030405Z"),
+            ("policy", policy.as_str()),
+            ("x-amz-signature", sig.as_str()),
+        ];
+        if let Some(t) = token {
+            fields.push(("x-amz-security-token", t));
+        }
+        let mut body: String = fields
+            .into_iter()
+            .map(|(n, v)| format!("--form\r\nContent-Disposition: form-data; name=\"{n}\"\r\n\r\n{v}\r\n"))
+            .collect();
+        body.push_str(std::str::from_utf8(FORM).expect("ascii"));
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("/bkt/obj")
+            .header("host", "s3.example.com")
+            .header("content-type", "multipart/form-data; boundary=form")
+            .header("content-length", body.len())
+            .body(Bytes::from(body))
+            .expect("valid request");
+        exchange_wire(&service, req)
+    };
+
+    let (mna, bad, fbd) = (
+        http::StatusCode::METHOD_NOT_ALLOWED,
+        http::StatusCode::BAD_REQUEST,
+        http::StatusCode::FORBIDDEN,
+    );
+    let (tok, oth) = (Some(FORM_TOKEN), Some(FORM_OTHER_TOKEN));
+    for (key_id, signing, token, status, code) in [
+        ("AKIDLIVE", "secret", None, mna, "MethodNotAllowed"),
+        ("AKIDSESSION", "secret", tok, mna, "MethodNotAllowed"),
+        ("AKIDEXPIRED", "secret", tok, bad, "ExpiredToken"),
+        ("AKIDUNKNOWN", "wrong", None, fbd, "InvalidAccessKeyId"),
+        ("AKIDEXPIRED", "wrong", tok, fbd, "InvalidAccessKeyId"),
+        ("AKIDEXPIRED", "wrong", None, fbd, "InvalidAccessKeyId"),
+        ("AKIDDISABLED", "wrong", None, fbd, "InvalidAccessKeyId"),
+        ("AKIDDISABLED", "secret", None, fbd, "InvalidAccessKeyId"),
+        ("AKIDSESSION", "wrong", None, fbd, "InvalidAccessKeyId"),
+        ("AKIDSESSION", "secret", oth, fbd, "InvalidAccessKeyId"),
+        ("AKIDLIVE", "wrong", tok, fbd, "InvalidAccessKeyId"),
+    ] {
+        let answer = send_form(key_id, signing, token).await;
+        let xml = String::from_utf8_lossy(answer.body());
+        assert_eq!(answer.status(), status, "{key_id}: {xml}");
+        assert!(xml.contains(&format!("<Code>{code}</Code>")), "{key_id}: {xml}");
+    }
+    assert!(seen.take().is_empty());
+}

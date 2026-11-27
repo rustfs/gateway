@@ -60,10 +60,11 @@
 //! as anonymous; the guarded provider counts the fault. By default the client gets the closed
 //! `403` of every other credential failure. Under
 //! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0051) it gets
-//! [`Unavailable`], a `500`, where an unknown key is answered: after the derivation and comparison,
-//! except for a header signature scoped to `sts` without `x-amz-content-sha256` under the legacy
-//! signing services, answered before its body is read — earlier than a wrong signature. Opt-in:
-//! it can reveal a record an unknown key's answer hides (ADR-0051 lists how).
+//! [`Unavailable`], a `500`, where an unknown key is answered: after the placeholder derivation
+//! and comparison (skipping only the pre-auth body read on legacy `sts` and `s3vectors`
+//! body-digest paths without `x-amz-content-sha256`, row `T11` of
+//! [`rustfs_gateway_sig::timing::SIDE_CHANNELS`]). Opt-in: it can reveal a record an unknown
+//! key's answer hides (ADR-0051 lists how).
 
 use std::sync::Arc;
 
@@ -546,7 +547,22 @@ impl SigV4Authenticator {
             }
         };
 
-        let sts_payload = self.sts_payload(request, &presented, &resolved).await?;
+        let sts_payload = match self
+            .sts_payload(request, &presented, &resolved, session_refusal.as_ref())
+            .await
+        {
+            Ok(payload) => payload,
+            Err(failure) => {
+                // Without a readable body the signature cannot verify, so a pending session
+                // refusal (an expired session presenting its token) stays the uniform refusal
+                // rather than leaking a body-length refusal that an unknown key never sees
+                // (rustfs/gateway#1581).
+                if let Some(pending) = session_refusal {
+                    return Err(pending.uniform().into());
+                }
+                return Err(failure);
+            }
+        };
         let payload = sts_payload.as_ref().unwrap_or_else(|| request.payload());
         let key = signing_key(&secret, &verified);
         let date = presented.signed_at(sealed);

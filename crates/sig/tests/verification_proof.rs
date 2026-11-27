@@ -155,17 +155,17 @@ fn a_correct_signature_authenticates_and_names_the_principal() {
 /// Positive — the side-channel register is complete and every entry still has an owner.
 #[test]
 fn the_side_channel_register_is_complete() {
-    assert_eq!(SIDE_CHANNELS.len(), 10);
+    assert_eq!(SIDE_CHANNELS.len(), 11);
     let closed = SIDE_CHANNELS
         .iter()
         .filter(|channel| channel.disposition == Disposition::ClosedHere)
         .count();
     assert!(closed >= 9, "every channel except documented accepted risks must be closed; saw {closed}");
-    assert!(
-        SIDE_CHANNELS
-            .iter()
-            .any(|channel| matches!(channel.disposition, Disposition::AcceptedRisk(_)))
-    );
+    let accepted = SIDE_CHANNELS
+        .iter()
+        .filter(|channel| matches!(channel.disposition, Disposition::AcceptedRisk(_)))
+        .count();
+    assert_eq!(accepted, 2, "T5 and T11 are the two documented accepted risks");
     assert!(
         !SIDE_CHANNELS
             .iter()

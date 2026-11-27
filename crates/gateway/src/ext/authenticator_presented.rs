@@ -145,11 +145,6 @@ impl<'a> Presented<'a> {
         }
     }
 
-    pub(super) fn session_token(&self) -> Option<&SessionToken> {
-        let Self::Form(policy) = self else { return None };
-        policy.session_token()
-    }
-
     /// Records session admission before comparison, as a refusal that only the comparison's proof
     /// can turn into anything but the uniform answer; the caller answers only after HMAC.
     pub(super) fn session_refusal(
@@ -158,18 +153,24 @@ impl<'a> Presented<'a> {
         sealed: &SealedAws<'_>,
         location: SigLocation,
     ) -> Option<crate::ext::PendingSessionRefusal> {
-        // Legacy-compat (rustfs/backlog#2684): an unrouted form uses only the key and HMAC
-        // before its method refusal. Session admission belongs to the upload path.
-        if matches!(self, Self::UnroutedForm(_)) {
-            return None;
-        }
         use crate::ext::credentials::SessionSurface;
 
         let view = sealed.view();
         let now = sealed.clock().now();
         match location {
             SigLocation::FormField => {
-                credentials.admit_surface_pending(self.session_token().map(SessionToken::expose), SessionSurface::Sts, now)
+                // Unrouted POST forms (rustfs/gateway#1581) read `x-amz-security-token` off the
+                // form view just like SigV2 POST forms and header requests, so disabled, expired,
+                // and token-mismatched credentials answer uniformly instead of leaking
+                // `SignatureDoesNotMatch` or bypassing admission.
+                let token = match self {
+                    Self::Form(policy) => policy.session_token().map(SessionToken::expose),
+                    Self::UnroutedForm(_) => view
+                        .form_value(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
+                        .map(str::as_bytes),
+                    Self::Header(_, _) | Self::Query(_, _) => None,
+                };
+                credentials.admit_surface_pending(token, SessionSurface::Sts, now)
             }
             SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN) => credentials
                 .admit_query_param_pending(view.query(), rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN, SessionSurface::Sts, now),
@@ -253,3 +254,7 @@ const fn hex_nibble_lower(byte: u8) -> Option<u8> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+#[path = "authenticator_presented_tests.rs"]
+mod tests;

@@ -108,6 +108,7 @@ impl SigV4Authenticator {
         request: &Authentication<'_>,
         presented: &Presented<'_>,
         resolved: &Result<CredentialLookup, super::super::credentials::ProviderError>,
+        session_refusal: Option<&super::super::session_answer::PendingSessionRefusal>,
     ) -> Result<Option<PayloadMode>, VerificationFailure> {
         let vectors = request.sealed().expected_service() == rustfs_gateway_sig::SigService::S3Vectors;
         let legacy_sts =
@@ -118,12 +119,17 @@ impl SigV4Authenticator {
         {
             return Ok(None);
         }
-        // An unknown key must never trigger a body read (which would let an unauthenticated caller
+        // An unknown key, a store fault, or a credential already refused without any possible
+        // `ExpiredToken` outcome (disabled, missing/mismatched token, or long-term key presented
+        // with a token) must never trigger a body read (which would let an unauthenticated caller
         // force buffering up to the service ceiling) or have its credential refusal replaced by a
-        // body-length refusal. A store fault is answered at the same point, so both keep one
-        // latency class here; both answer before the body read and signature comparison.
-        if !matches!(resolved, Ok(CredentialLookup::Found(_))) {
-            return Err(self.unresolved_lookup(resolved));
+        // body-length refusal (rustfs/gateway#1581). Returning `Ok(None)` skips only the body read
+        // while letting `try_verify` complete placeholder/key HMAC parity work over the empty
+        // payload (`timing::SIDE_CHANNELS`, row `T11`).
+        if !matches!(resolved, Ok(CredentialLookup::Found(_)))
+            || session_refusal.is_some_and(|pending| !pending.needs_signature_proof())
+        {
+            return Ok(None);
         }
         let reading = request.sts_body.as_ref().ok_or(AuthError::SignatureDoesNotMatch)?;
         let digest = reading
@@ -139,3 +145,7 @@ impl SigV4Authenticator {
 #[cfg(test)]
 #[path = "authenticator_sts_body_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "authenticator_sts_body_parity_tests.rs"]
+mod parity_tests;

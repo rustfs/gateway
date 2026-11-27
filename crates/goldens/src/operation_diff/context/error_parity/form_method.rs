@@ -428,12 +428,18 @@ fn n_an_unsupported_form_signature_keeps_the_existing_floor_refusal() {
     assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
 }
 
+/// Negative — rustfs/gateway#1581: presenting `x-amz-security-token` (`""` or an unexpected value)
+/// with a long-term credential on an unrouted object-path form is refused uniformly with
+/// `403 InvalidAccessKeyId` (matching an unknown key, routed POST forms, and SigV2 object forms)
+/// for both valid and forged signatures, whereas the pinned `s3s` `SimpleAuth` oracle models no
+/// session-token binding and answers `405 MethodNotAllowed` / `403 SignatureDoesNotMatch`.
+/// Neither stack reaches a handler.
 #[test]
 fn n_form_tokens_do_not_move_checks_ahead_of_the_method_refusal() {
     let mut answers = Vec::new();
     let mut expected = Vec::new();
     for token in ["", "extra-token"] {
-        for (signature, status, code) in [
+        for (signature, oracle_status, oracle_code) in [
             (None, 405, "MethodNotAllowed"),
             (Some("0".repeat(64)), 403, "SignatureDoesNotMatch"),
         ] {
@@ -452,7 +458,14 @@ fn n_form_tokens_do_not_move_checks_ahead_of_the_method_refusal() {
                 pair.gateway.reached,
                 pair.oracle.reached,
             ));
-            expected.push((status, status, Some(code.to_owned()), Some(code.to_owned()), false, false));
+            expected.push((
+                403,
+                oracle_status,
+                Some("InvalidAccessKeyId".to_owned()),
+                Some(oracle_code.to_owned()),
+                false,
+                false,
+            ));
         }
     }
     assert_eq!(answers, expected);
