@@ -308,6 +308,12 @@ impl RequestTrace {
                     headers.insert(HOST_ID_HEADER, value);
                 }
             }
+            Answer::RequestIdOnly => {
+                if let Some(value) = request_id {
+                    headers.insert(REQUEST_ID_HEADER, value);
+                }
+                headers.remove(HOST_ID_HEADER);
+            }
             Answer::LegacyRustfs => {
                 if let Some(value) = request_id {
                     headers.insert(X_REQUEST_ID_HEADER, value.clone());
@@ -329,7 +335,7 @@ impl RequestTrace {
                 xml.element("RequestId", self.request_id.as_str());
                 xml.element("HostId", self.host_id.as_str());
             }
-            Answer::LegacyRustfs => xml.element("RequestId", self.request_id.as_str()),
+            Answer::RequestIdOnly | Answer::LegacyRustfs => xml.element("RequestId", self.request_id.as_str()),
             Answer::HostWritten => {}
         }
     }

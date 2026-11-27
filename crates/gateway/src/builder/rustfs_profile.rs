@@ -123,6 +123,7 @@ use rustfs_gateway_types::{KeyFloor, PathSplit, SlashPolicy};
 
 use super::ServiceBuilder;
 use crate::ext::{GovernorRates, Rate, SigV4Authenticator};
+use crate::service::is_non_s3_service;
 use crate::{LegacyRustfsCors, UnreadBodyDrain};
 
 /// How long the RustFS profile waits for an unread HTTP/1 body behind an early answer: legacy
@@ -175,6 +176,24 @@ impl ServiceBuilder {
     /// `NAMING_POSTURE` name the floor, the lifetime rule and the naming readings as before.
     #[must_use]
     pub fn rustfs_profile(mut self) -> Self {
+        // Independently assembled non-S3 services (such as S3 Vectors) apply only the
+        // service-agnostic RustFS switches; S3-only path addressing, operation selection, 1 MiB
+        // admin / 20 MiB XML body caps, bucket CORS, SSE-C, checksum, listing, and POST-form
+        // switches stay scoped to S3 assemblies.
+        if is_non_s3_service(self.router.signing_service()) {
+            return self
+                .framework_governor_rates(rustfs_governor_rates())
+                .sign_base64_payload_digests_as_hex()
+                .answer_header_signatures_as_legacy_rustfs()
+                .answer_head_refusals_without_content_length()
+                .refuse_unsigned_amz_headers_before_routing()
+                .answer_body_refusals_with_legacy_rustfs_sentences()
+                .answer_credential_refusals_with_legacy_rustfs_sentences()
+                .answer_denials_with_legacy_rustfs_sentence()
+                .drain_unread_request_bodies(UnreadBodyDrain::with_idle_timeout(UNREAD_BODY_IDLE_TIMEOUT))
+                .read_empty_headers_as_absent()
+                .identify_requests_as_legacy_rustfs();
+        }
         // Onto the floor the host set, not over it: the five legacy readings, with the host's skew
         // window and custom schemes left alone.
         let floor = core::mem::take(&mut self.floor);
@@ -657,5 +676,39 @@ mod tests {
         assert_eq!(once.legacy_switches(), twice.legacy_switches());
         assert_eq!(format!("{:?}", once.floor), format!("{:?}", twice.floor));
         assert_eq!(once.governor_rates, twice.governor_rates);
+    }
+
+    /// Negative — on a non-S3 service such as S3 Vectors, `rustfs_profile()` excludes S3-only
+    /// addressing, selection, CORS, SSE-C, checksum, listing, POST-form, and body-cap switches.
+    #[test]
+    fn n_non_s3_rustfs_profile_excludes_s3_only_switches() {
+        let builder = ServiceBuilder::for_service(rustfs_gateway_sig::SigService::S3Vectors).rustfs_profile();
+        let switches = builder.legacy_switches();
+        for s3_only in [
+            "address_paths_as_legacy_rustfs",
+            "answer_cors_as_legacy_rustfs",
+            "bound_buffered_bodies_as_legacy_rustfs",
+            "bound_claimed_route_bodies_as_legacy_rustfs",
+            "refuse_plaintext_customer_keys_before_routing",
+            "accept_all_checksum_omissions",
+            "legacy_rustfs_post_forms",
+        ] {
+            assert!(!switches.contains(s3_only), "S3-only switch leaked: {s3_only}");
+        }
+        for kept in [
+            "answer_header_signatures_as_legacy_rustfs",
+            "answer_body_refusals_with_legacy_rustfs_sentences",
+            "answer_credential_refusals_with_legacy_rustfs_sentences",
+            "answer_denials_with_legacy_rustfs_sentence",
+            "identify_requests_as_legacy_rustfs",
+            "drain_unread_request_bodies",
+        ] {
+            assert!(switches.contains(kept), "expected service-agnostic switch missing: {kept}");
+        }
+        assert_eq!(
+            format!("{:?}", builder.floor),
+            format!("{:?}", SecurityFloor::new()),
+            "S3 floor relaxations must not be installed on non-S3 services"
+        );
     }
 }

@@ -44,11 +44,13 @@
 
 use http::StatusCode;
 use rustfs_gateway_core::{HandlerError, MetaView, RequestBodyMode};
+use rustfs_gateway_sig::SigService;
 use rustfs_gateway_types::ErrorCode;
 
 use super::ServiceBuilder;
 use crate::gate::BodyCeilings;
 use crate::render::{S3Error, from_transport_limit};
+use crate::service::is_non_s3_service;
 
 /// Legacy RustFS's ceiling on a buffered request body: 20 MiB.
 pub(crate) const LEGACY_RUSTFS_BUFFERED_BODY_BYTES: u64 = 20 * 1024 * 1024;
@@ -73,9 +75,19 @@ const fn buffered(mode: RequestBodyMode, claimed: bool) -> bool {
 }
 
 impl BufferedCeiling {
-    /// The ceilings a body of `mode` is read under: `model`, or under the switch, for a buffered
-    /// body, legacy RustFS's 20 MiB on the whole body and no operation cap below it.
-    pub(crate) const fn ceilings(self, mode: RequestBodyMode, claimed: bool, model: BodyCeilings) -> BodyCeilings {
+    /// The ceilings a body of `mode` is read under: `model`, or under the switch on an S3
+    /// assembly, for a buffered body, legacy RustFS's 20 MiB on the whole body and no operation
+    /// cap below it. Non-S3 services always keep `model`.
+    pub(crate) const fn ceilings(
+        self,
+        mode: RequestBodyMode,
+        claimed: bool,
+        signing_service: Option<SigService>,
+        model: BodyCeilings,
+    ) -> BodyCeilings {
+        if is_non_s3_service(signing_service) {
+            return model;
+        }
         match self {
             // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads every buffered body up to
             // 20 MiB whatever the operation, so a tag set, a versioning or a CORS document of 20 MiB
@@ -105,7 +117,17 @@ impl BufferedCeiling {
 
     /// The refusal of a buffered body of `mode`, answered as this switch says: the ceiling's `413`
     /// becomes `400 MaxMessageLengthExceeded`, its connection verdict and unread-body proof kept.
-    pub(crate) fn refusal(self, mode: RequestBodyMode, claimed: bool, refusal: S3Error) -> S3Error {
+    /// Non-S3 services keep `refusal` unchanged.
+    pub(crate) fn refusal(
+        self,
+        mode: RequestBodyMode,
+        claimed: bool,
+        signing_service: Option<SigService>,
+        refusal: S3Error,
+    ) -> S3Error {
+        if is_non_s3_service(signing_service) {
+            return refusal;
+        }
         let past_ceiling = refusal.status() == StatusCode::PAYLOAD_TOO_LARGE
             && refusal.code().is_some_and(|code| *code == ErrorCode::ENTITY_TOO_LARGE);
         if self != Self::LegacyRustfs || !buffered(mode, claimed) || !past_ceiling {
@@ -150,25 +172,30 @@ mod tests {
         declared: Some(2 * 1024 * 1024),
     };
 
-    /// Positive — under the switch a buffered body is bounded at 20 MiB with no cap below it.
+    /// Positive — under the switch an S3 buffered body is bounded at 20 MiB with no cap below it.
     #[test]
     fn the_switch_bounds_a_buffered_body_at_twenty_mebibytes() {
         for mode in [RequestBodyMode::Full, RequestBodyMode::Deferred] {
-            let ceilings = BufferedCeiling::LegacyRustfs.ceilings(mode, false, MODEL);
+            let ceilings = BufferedCeiling::LegacyRustfs.ceilings(mode, false, None, MODEL);
             assert_eq!(ceilings.buffered, 20 * 1024 * 1024, "{mode:?}");
             assert!(ceilings.whole_body, "{mode:?}");
             assert_eq!(ceilings.declared, None, "{mode:?}");
         }
     }
 
-    /// Negative — a claimed route, every other body mode and the default keep the model ceilings.
+    /// Negative — a claimed route, a non-S3 service, every other body mode and the default keep
+    /// the model ceilings.
     #[test]
     fn n_a_claimed_route_other_modes_and_the_default_keep_the_model() {
-        assert_eq!(BufferedCeiling::LegacyRustfs.ceilings(RequestBodyMode::Full, true, MODEL), MODEL);
+        assert_eq!(BufferedCeiling::LegacyRustfs.ceilings(RequestBodyMode::Full, true, None, MODEL), MODEL);
+        assert_eq!(
+            BufferedCeiling::LegacyRustfs.ceilings(RequestBodyMode::Full, false, Some(SigService::S3Vectors), MODEL),
+            MODEL
+        );
         for mode in [RequestBodyMode::None, RequestBodyMode::Streaming, RequestBodyMode::PostObject] {
-            assert_eq!(BufferedCeiling::LegacyRustfs.ceilings(mode, false, MODEL), MODEL, "{mode:?}");
+            assert_eq!(BufferedCeiling::LegacyRustfs.ceilings(mode, false, None, MODEL), MODEL, "{mode:?}");
         }
-        assert_eq!(BufferedCeiling::Model.ceilings(RequestBodyMode::Full, false, MODEL), MODEL);
+        assert_eq!(BufferedCeiling::Model.ceilings(RequestBodyMode::Full, false, None, MODEL), MODEL);
         assert_eq!(BufferedCeiling::default(), BufferedCeiling::Model);
     }
 
@@ -180,33 +207,41 @@ mod tests {
     /// MaxMessageLengthExceeded`, closing as the ceiling closed.
     #[test]
     fn the_ceiling_refusal_of_a_buffered_body_is_max_message_length_exceeded() {
-        let answered = BufferedCeiling::LegacyRustfs.refusal(RequestBodyMode::Full, false, ceiling_refusal());
+        let answered = BufferedCeiling::LegacyRustfs.refusal(RequestBodyMode::Full, false, None, ceiling_refusal());
         assert_eq!(answered.status(), StatusCode::BAD_REQUEST);
         assert_eq!(answered.code(), Some(&ErrorCode::MAX_MESSAGE_LENGTH_EXCEEDED));
         assert_eq!(answered.connection_intent(), ceiling_refusal().connection_intent());
     }
 
-    /// Negative — any other refusal, a claimed route, an unbuffered body and the default are
-    /// answered as they came.
+    /// Negative — any other refusal, a claimed route, a non-S3 service, an unbuffered body and the
+    /// default are answered as they came.
     #[test]
     fn n_other_refusals_and_bodies_are_answered_as_they_came() {
         let legacy = BufferedCeiling::LegacyRustfs;
         let other = crate::gate::incomplete();
         assert_eq!(
-            legacy.refusal(RequestBodyMode::Full, false, other).code(),
+            legacy.refusal(RequestBodyMode::Full, false, None, other).code(),
             Some(&ErrorCode::INCOMPLETE_BODY)
         );
         assert_eq!(
-            legacy.refusal(RequestBodyMode::Full, true, ceiling_refusal()).status(),
+            legacy
+                .refusal(RequestBodyMode::Full, false, Some(SigService::S3Vectors), ceiling_refusal())
+                .status(),
             StatusCode::PAYLOAD_TOO_LARGE
         );
         assert_eq!(
-            legacy.refusal(RequestBodyMode::Streaming, false, ceiling_refusal()).status(),
+            legacy.refusal(RequestBodyMode::Full, true, None, ceiling_refusal()).status(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert_eq!(
+            legacy
+                .refusal(RequestBodyMode::Streaming, false, None, ceiling_refusal())
+                .status(),
             StatusCode::PAYLOAD_TOO_LARGE
         );
         assert_eq!(
             BufferedCeiling::Model
-                .refusal(RequestBodyMode::Full, false, ceiling_refusal())
+                .refusal(RequestBodyMode::Full, false, None, ceiling_refusal())
                 .status(),
             StatusCode::PAYLOAD_TOO_LARGE
         );

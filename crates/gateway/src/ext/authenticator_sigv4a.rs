@@ -209,7 +209,7 @@ impl SigV4Authenticator {
             return Err(AuthError::SignatureDoesNotMatch.into());
         }
 
-        let paths = self.path_candidates(request.raw_path(), request.claimed)?;
+        let paths = self.path_candidates(request.raw_path(), request.claimed, service)?;
         let query = view.query();
         let mut spec = CanonicalRequestSpec::new(
             request.method(),

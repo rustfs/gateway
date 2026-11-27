@@ -77,6 +77,7 @@ pub(crate) fn is_reserved(name: &HeaderName) -> bool {
         || *name == DATE
         || *name == http::header::CONTENT_TYPE
         || *name == http::header::CONTENT_LENGTH
+        || *name == crate::render::json::AMZN_ERROR_TYPE_HEADER
 }
 
 /// Writes the framework-guaranteed headers into a response head: `Server`, `Date`, and the
@@ -191,6 +192,7 @@ mod tests {
         for name in [
             http::header::CONTENT_TYPE,
             http::header::CONTENT_LENGTH,
+            crate::render::json::AMZN_ERROR_TYPE_HEADER,
             REQUEST_ID_HEADER,
             HOST_ID_HEADER,
             SERVER,

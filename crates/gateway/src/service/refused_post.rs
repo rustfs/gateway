@@ -48,7 +48,8 @@ use crate::render::{S3Error, from_auth, from_handler};
 const FORM_UNAUTHENTICATED: &str = "the form could not be authenticated";
 
 pub(crate) fn applies_to<B>(router: &Router, wire: &WireRequest<B>, target: TargetKind, error: &PreAuthError) -> bool {
-    router.selection() == Selection::RustfsLegacy
+    router.signing_service().is_none()
+        && router.selection() == Selection::RustfsLegacy
         && target == TargetKind::Object
         && *wire.method() == Method::POST
         && error.message() == NO_ROUTE_MESSAGE

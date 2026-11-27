@@ -91,13 +91,15 @@ impl S3Service {
         let snapshot = self.inner.config.load_full();
         let runtime = snapshot.runtime();
         let router = &runtime.routing.router;
+        let signing_service = router.signing_service();
+        let non_s3 = crate::service::is_non_s3_service(signing_service);
         let kind = if head.method == http::Method::HEAD {
             ResponseKind::Head
         } else {
             ResponseKind::Other
         };
         let mut parts = copy(head);
-        crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
+        crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, signing_service, &mut parts);
         if let Err(error) = crate::service::extension_guards::run_wire_filters(&runtime.filters, &mut parts, None) {
             return Classification::refused(&from_handler(error, kind, ConnectionIntent::MayKeepAlive));
         }
@@ -106,33 +108,39 @@ impl S3Service {
             Ok(wire) => wire,
             Err(reject) => return Classification::refused(&from_wire_reject(reject)),
         };
-        let resolved = match crate::panic_boundary::contain_decision(|| {
-            self.inner.host_resolver.resolve(&HostQuery {
-                host: wire.host(),
-                path: wire.raw_path().as_str(),
-                method: wire.method(),
-            })
-        }) {
-            Ok(resolved) => resolved,
-            Err(()) => {
-                return Classification::refused(&from_handler(
-                    rustfs_gateway_core::HandlerError::internal_error("the host resolver failed"),
-                    kind,
-                    ConnectionIntent::MayKeepAlive,
-                ));
+        let resolved = if non_s3 {
+            crate::ext::ResolvedHost::standard(crate::ext::target_of_path(wire.raw_path().as_str()))
+        } else {
+            match crate::panic_boundary::contain_decision(|| {
+                self.inner.host_resolver.resolve(&HostQuery {
+                    host: wire.host(),
+                    path: wire.raw_path().as_str(),
+                    method: wire.method(),
+                })
+            }) {
+                Ok(resolved) => resolved,
+                Err(()) => {
+                    return Classification::refused(&from_handler(
+                        rustfs_gateway_core::HandlerError::internal_error("the host resolver failed"),
+                        kind,
+                        ConnectionIntent::MayKeepAlive,
+                    ));
+                }
             }
         };
-        match classify_preflight(wire.method(), &wire.headers()) {
-            PreflightClass::NotPreflight => {}
-            PreflightClass::HeaderlessOptions => {
-                let refusal = PreAuthError::bad_request("An Origin header is required for this OPTIONS request");
-                return Classification::refused(&from_pre_auth(refusal, kind));
-            }
-            PreflightClass::Malformed => return Classification::Preflight,
-            PreflightClass::Preflight(_) => {
-                let valid_target = crate::service::preflight_bucket(wire.raw_path().as_str(), &resolved).is_some();
-                if preflight_bypasses_pipeline() && (invalid_target_is_uniform_refusal() || valid_target) {
-                    return Classification::Preflight;
+        if !non_s3 {
+            match classify_preflight(wire.method(), &wire.headers()) {
+                PreflightClass::NotPreflight => {}
+                PreflightClass::HeaderlessOptions => {
+                    let refusal = PreAuthError::bad_request("An Origin header is required for this OPTIONS request");
+                    return Classification::refused(&from_pre_auth(refusal, kind));
+                }
+                PreflightClass::Malformed => return Classification::Preflight,
+                PreflightClass::Preflight(_) => {
+                    let valid_target = crate::service::preflight_bucket(wire.raw_path().as_str(), &resolved).is_some();
+                    if preflight_bypasses_pipeline() && (invalid_target_is_uniform_refusal() || valid_target) {
+                        return Classification::Preflight;
+                    }
                 }
             }
         }

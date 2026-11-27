@@ -114,11 +114,24 @@ pub(crate) struct SignedHead<'a> {
 impl HeaderRefusals {
     /// Legacy RustFS's refusal of `head` before its credential lookup, when it refuses one and
     /// this assembly answers with it; `None` leaves the request to the floor and the authenticator.
+    #[cfg(test)]
     pub(crate) fn refusal(self, head: &SignedHead<'_>, response: ResponseKind, body_owed: bool) -> Option<S3Error> {
+        self.refusal_for_service(head, response, body_owed, None)
+    }
+
+    /// [`Self::refusal`] scoped to `expected_service`: non-S3 services omit legacy RustFS's S3
+    /// service-list refusal so the authenticator enforces the service's own scope cleanly.
+    pub(crate) fn refusal_for_service(
+        self,
+        head: &SignedHead<'_>,
+        response: ResponseKind,
+        body_owed: bool,
+        expected_service: Option<rustfs_gateway_sig::SigService>,
+    ) -> Option<S3Error> {
         if self == Self::Gateway {
             return None;
         }
-        let (code, sentence) = legacy_refusal(head)?;
+        let (code, sentence) = legacy_refusal(head, expected_service)?;
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS answers these before it has
         // authenticated anything, with sentences that tell a forged request which of its fields
         // was wrong, and one that echoes the requested service. The intended future behaviour is
@@ -132,15 +145,22 @@ impl HeaderRefusals {
 }
 
 /// The code and sentence of legacy RustFS's first pre-lookup refusal of `head`, if any.
-fn legacy_refusal(head: &SignedHead<'_>) -> Option<(ErrorCode, String)> {
+fn legacy_refusal(
+    head: &SignedHead<'_>,
+    expected_service: Option<rustfs_gateway_sig::SigService>,
+) -> Option<(ErrorCode, String)> {
     match header_signature(head)? {
-        HeaderScheme::SigV4(value) => sigv4_refusal(head, value),
+        HeaderScheme::SigV4(value) => sigv4_refusal(head, value, expected_service),
         HeaderScheme::SigV2 => sigv2_refusal(head),
     }
 }
 
 /// Legacy RustFS's pre-lookup refusal of a SigV4 `Authorization` `value`.
-fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, String)> {
+fn sigv4_refusal(
+    head: &SignedHead<'_>,
+    value: &str,
+    expected_service: Option<rustfs_gateway_sig::SigService>,
+) -> Option<(ErrorCode, String)> {
     let Some(credential) = read_authorization(value) else {
         // An unreadable value that starts with the SigV4 token is RustFS's guard's to answer.
         // A 4-field SigV4a header is validated by `sigv4_header_guard`, `SecurityFloor`, and
@@ -153,7 +173,11 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
     if credential.algorithm != SIGV4_ALGORITHM || !credential.canonical_signature {
         return None;
     }
-    if !SIGNING_SERVICES.contains(&credential.scope.service) && !matches!(credential.scope.service, "s3vectors" | "s3express") {
+    let non_s3 = crate::service::is_non_s3_service(expected_service);
+    if !non_s3
+        && !SIGNING_SERVICES.contains(&credential.scope.service)
+        && !matches!(credential.scope.service, "s3vectors" | "s3express")
+    {
         let service = credential.scope.service;
         let expected = SIGNING_SERVICES.join(", ");
         return Some((

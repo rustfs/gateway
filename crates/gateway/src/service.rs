@@ -110,14 +110,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use http::{Method, Request, Response};
-use rustfs_gateway_core::cors::{
-    CorsPolicy, PreflightClass, PreflightRefusalCause, classify, invalid_target_is_uniform_refusal, preflight_bypasses_pipeline,
-};
+use rustfs_gateway_core::cors::CorsPolicy;
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
     RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
     StaticDispatchOutcome, TransportSecurity,
-    dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
+    dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, SERVICE_NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{
@@ -153,12 +151,14 @@ mod body_preparation;
 mod cors;
 pub(crate) mod extension_guards;
 pub(crate) mod host_tokens;
+mod isolation;
 mod outcome;
 pub(crate) mod refused_post;
 mod state;
 mod update;
 
 pub(crate) use self::cors::preflight_bucket;
+pub(crate) use self::isolation::is_non_s3_service;
 use self::outcome::{LegacyCorsDisposition, Outcome};
 
 /// The one sentence a request gets when the authenticator itself could not answer.
@@ -297,18 +297,16 @@ impl S3Service {
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
         // stated over the request method, and every stage below has either forgotten it or never had it.
         let method = request.method().clone();
-        // Read here for the same reason as the method: this is the last place the whole request exists, and
-        // `WireRequest::accept` publishes no way back to its extensions. Absent means cleartext, which is what
-        // makes the customer-key gate fail closed for a transport that has not been taught to declare anything.
-        // The file-body path is decided here too, and applied last (rustfs/gateway#949).
+        let signing_service = runtime.routing.router.signing_service();
+        let non_s3 = is_non_s3_service(signing_service);
         let connection = connection_security(request.extensions());
-        // Legacy RustFS's CORS decoration needs the request after the pipeline has consumed it.
-        let legacy_cors = self.legacy_cors_request(&request);
+        let legacy_cors = (!non_s3).then(|| self.legacy_cors_request(&request)).flatten();
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let file_body_path = crate::file_fallback::FileBodyPath::of(request.extensions(), request.version());
         #[cfg(feature = "external-payload")]
         let download = request.extensions().get::<crate::external_payload::DownloadEntry>().cloned();
-        let mut outcome = Outcome::new(&trace, &method, self.inner.view_policy.credential_sentences());
+        let error_format = crate::render::json::ErrorFormat::for_service(signing_service);
+        let mut outcome = Outcome::new(&trace, &method, self.inner.view_policy.credential_sentences(), error_format);
         let response = self
             .run(
                 request,
@@ -324,12 +322,13 @@ impl S3Service {
             )
             .await;
         let prepare_response = async |mut response: Response<Body>, outcome: &mut Outcome<'_>| {
-            // The RustFS profile's `304` carries legacy RustFS's object headers (`builder/not_modified_headers.rs`).
             let status = response.status();
-            self.inner
-                .view_policy
-                .not_modified_headers
-                .apply(outcome.operation, status, response.headers_mut());
+            if !non_s3 {
+                self.inner
+                    .view_policy
+                    .not_modified_headers
+                    .apply(outcome.operation, status, response.headers_mut());
+            }
             outcome.decorate_response_cors(&mut response);
             // Legacy RustFS decorates answers that reach its CORS layer, including authentication
             // refusals, but its earlier cleartext customer-key gate is outside that layer.
@@ -462,6 +461,8 @@ impl S3Service {
         M: OperationMode,
     {
         let router = &runtime.routing.router;
+        let signing_service = router.signing_service();
+        let non_s3 = is_non_s3_service(signing_service);
         if let Some(error) = crate::external_marker::rejection(request.extensions()) {
             return outcome.refuse_handler(error);
         }
@@ -471,19 +472,11 @@ impl S3Service {
             client_addr,
         } = context;
         let response_kind = outcome.response_kind;
-        // `WireRequest` publishes no way back to the header map — that is the boundary it exists to
-        // draw — while `SecurityFloor` and the canonical request are defined over the raw map. The
-        // copy is taken before acceptance and used only after it has succeeded, so what is held is
-        // an accepted map. Removing the copy needs a signing accessor on `WireRequest` itself.
-        //
-        // It is also the whole of "a stage filter cannot touch a signature". This line runs before
-        // the wire seam below, so every verifier downstream reads the head as the *caller* sent it:
-        // a filter that writes an `Authorization` header does not make an anonymous request
-        // authenticated, and one that deletes it does not make a signed request fail.
+        // Snapshot caller head before acceptance and wire filters so filters cannot affect signatures.
         let (mut parts, body) = request.into_parts();
         let external_entry = crate::external_marker::explicit_entry(&parts.extensions);
         let external_bound = crate::external_marker::bound_entry(&parts.extensions);
-        crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
+        crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, signing_service, &mut parts);
         let headers = parts.headers.clone();
         #[cfg(feature = "external-payload")]
         crate::external_payload::apply_logical_head(&mut parts);
@@ -508,61 +501,43 @@ impl S3Service {
             return outcome.refuse_at(Refused::Wire, crate::external_marker::refusal(response_kind));
         }
         let config = config.wire();
-        // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
-        let early = self.inner.view_policy.plaintext_customer_keys;
-        if let Some(refusal) = early.refusal(&self.inner.sse, connection, &headers, response_kind) {
+        // The RustFS profile's cleartext customer-key gate (S3-only).
+        if !non_s3
+            && let Some(refusal) =
+                self.inner
+                    .view_policy
+                    .plaintext_customer_keys
+                    .refusal(&self.inner.sse, connection, &headers, response_kind)
+        {
             outcome.legacy_cors_disposition = LegacyCorsDisposition::PlaintextCustomerKeyRefusal;
             return outcome.refuse_at(Refused::Wire, refusal);
         }
 
-        // The host's one reading, and the bucket label SigV2 signs from it (rustfs/gateway#1232).
+        // The host's one reading, and the bucket label SigV2 signs from it (S3-only).
         let (resolved, vhost_bucket) =
-            match extension_guards::resolve_host_safely(&*self.inner.host_resolver, &wire, Some(outcome.trace)) {
+            match isolation::resolve_host_for_service(&*self.inner.host_resolver, &wire, signing_service, Some(outcome.trace)) {
                 Ok(resolved) => resolved,
                 Err(error) => return outcome.refuse_handler(error),
             };
         let config = config.targeted();
         let target_origin = resolved.origin();
 
-        // ── CORS preflight ───────────────────────────────────────────────────────────────
-        // Acceptance runs first so that CORS cannot bypass framing or header refusals.
-        // Host resolution determines the bucket before classification; routing has no OPTIONS operation.
-        // Entirely headerless OPTIONS returns the observed S3 BadRequest; malformed
-        // preflights retain their uniform refusal and valid ones use the stored document.
-        // No signature admission, authenticator, authorizer or handler runs in these
-        // branches. Refusal latency uses the same security floor as other failures.
-        if let Some(legacy) = self.inner.legacy_cors.as_ref()
-            && *wire.method() == Method::OPTIONS
+        // ── CORS preflight (S3-only) ─────────────────────────────────────────────────────
+        if !non_s3
+            && let Some(response) = self
+                .maybe_serve_preflight(
+                    wire.method(),
+                    wire.raw_path().as_str(),
+                    wire.headers(),
+                    &headers,
+                    &resolved,
+                    outcome,
+                    now,
+                    client_addr,
+                )
+                .await
         {
-            let path = wire.raw_path().as_str();
-            return self
-                .serve_legacy_preflight(legacy, path, &headers, outcome, now, client_addr)
-                .await;
-        }
-        match classify(wire.method(), &wire.headers()) {
-            PreflightClass::NotPreflight => {}
-            PreflightClass::HeaderlessOptions => {
-                let started = self.inner.authz_clock.monotonic();
-                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
-                let refusal = rustfs_gateway_core::error::PreAuthError::bad_request(
-                    "An Origin header is required for this OPTIONS request",
-                );
-                return outcome.refuse_at(Refused::Wire, from_pre_auth(refusal, response_kind));
-            }
-            PreflightClass::Malformed => {
-                let started = self.inner.authz_clock.monotonic();
-                return self
-                    .refuse_preflight(outcome, PreflightRefusalCause::Malformed, started)
-                    .await;
-            }
-            PreflightClass::Preflight(preflight) => {
-                let valid_target = preflight_bucket(wire.raw_path().as_str(), &resolved).is_some();
-                if preflight_bypasses_pipeline() && (invalid_target_is_uniform_refusal() || valid_target) {
-                    return self
-                        .serve_preflight(wire.raw_path().as_str(), resolved, &preflight, outcome, now, client_addr)
-                        .await;
-                }
-            }
+            return response;
         }
         // The RustFS profile's SigV4 header guard, where legacy RustFS asks it: before routing.
         let guard_started = self.inner.authz_clock.monotonic();
@@ -635,9 +610,12 @@ impl S3Service {
         outcome.operation = Some(operation);
 
         let Some(op) = mode.entry(operation) else {
-            // Unreachable through `build`, which refuses an operation the router knows and this
-            // crate has no codec for. Answered rather than panicked.
-            return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NOT_REGISTERED_MESSAGE));
+            let message = if non_s3 {
+                SERVICE_NOT_REGISTERED_MESSAGE
+            } else {
+                NOT_REGISTERED_MESSAGE
+            };
+            return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, message));
         };
         let request_body_mode = M::request_body_mode(&op);
         #[cfg(feature = "external-payload")]
@@ -773,14 +751,22 @@ impl S3Service {
         };
         let body_owed = wire.framing().has_body();
         if let Some(response) = self
-            .pre_lookup_auth_refusal(&signed_head, by_header_token, response_kind, body_owed, auth_started, outcome)
+            .pre_lookup_auth_refusal(
+                &signed_head,
+                by_header_token,
+                signing_service,
+                response_kind,
+                body_owed,
+                auth_started,
+                outcome,
+            )
             .await
         {
             return response;
         }
         let presence = detect_credentials(&view);
         // Presenting nothing leaves no signature to verify first: legacy RustFS's claimed-route ceiling precedes the floor.
-        let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed);
+        let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed, signing_service);
         let aws_credential_marker = self.inner.floor.credential_marker(&view);
         let presented = presence.any()
             || aws_credential_marker.is_some()
@@ -1055,7 +1041,8 @@ impl S3Service {
             };
             // The raw map is asked first: it answers without allocating, and an absent owner — the
             // common case — never reaches the view's reading of an empty line.
-            if route_decision == Decision::Allow
+            if !non_s3
+                && route_decision == Decision::Allow
                 && route_headers.contains_key("x-amz-expected-bucket-owner")
                 && route_meta.has_header("x-amz-expected-bucket-owner")
             {
@@ -1150,12 +1137,14 @@ impl S3Service {
             if let Some(refusal) = trailer_refusal {
                 return Err(refusal);
             }
-            // A claimed row's path is not a bucket surface: a bound bucket's CORS rules do not
-            // answer an admin request (ADR-0025).
             let cors_bucket = if claimed { None } else { route_meta.bucket() };
-            let cors = route_service
-                .actual_cors(route_headers, cors_bucket, route_wire.method(), now)
-                .await;
+            let cors = if non_s3 {
+                None
+            } else {
+                route_service
+                    .actual_cors(route_headers, cors_bucket, route_wire.method(), now)
+                    .await
+            };
             let mut stored = route_cors.lock().map_err(|_| {
                 from_handler(
                     HandlerError::internal_error("the request configuration state failed"),
@@ -1185,13 +1174,14 @@ impl S3Service {
         let body_wire = &wire;
         let view_policy = self.inner.view_policy;
         let read_body = move |state: AuthorizedRoute| async move {
-            let sse = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse)
-                .and_then(|proof| match &accepted_body {
-                    AcceptedBody::PostObject(post) => post.sse_proof(proof, connection, &body_service.inner.sse),
-                    AcceptedBody::Ordinary(_) => Ok(proof),
-                })
-                .or_else(|no| view_policy.sse_refusals.settle(no, !accepted_body.is_post(), response_kind))?;
-            if let Some(refusal) = view_policy.refusal_before_decode(operation, &body_wire.headers()) {
+            let sse =
+                rustfs_gateway_core::sse::enforce_for_service(signing_service, body_meta, connection, &body_service.inner.sse)
+                    .and_then(|proof| match &accepted_body {
+                        AcceptedBody::PostObject(post) => post.sse_proof(proof, connection, &body_service.inner.sse),
+                        AcceptedBody::Ordinary(_) => Ok(proof),
+                    })
+                    .or_else(|no| view_policy.sse_refusals.settle(no, !accepted_body.is_post(), response_kind))?;
+            if !non_s3 && let Some(refusal) = view_policy.refusal_before_decode(operation, &body_wire.headers()) {
                 return Err(from_handler(refusal, response_kind, ConnectionIntent::MayKeepAlive));
             }
             let ingest = match framing_mode.as_ref() {
@@ -1219,10 +1209,17 @@ impl S3Service {
                 AcceptedBody::Ordinary(sealed) => {
                     let model =
                         BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
-                    let ceilings = view_policy.buffered_ceiling.ceilings(request_body_mode, claimed, model);
+                    let ceilings = view_policy
+                        .buffered_ceiling
+                        .ceilings(request_body_mode, claimed, signing_service, model);
                     let body_quota = state.config.body_quota();
-                    // The accepted head, not the pre-filter copy: it is the map the codec binds from.
-                    let integrity = crate::integrity::resolve_in(body_meta, &body_wire.headers(), body_wire.method(), operation)?;
+                    let integrity = isolation::resolve_integrity_for_service(
+                        signing_service,
+                        body_meta,
+                        &body_wire.headers(),
+                        body_wire.method(),
+                        operation,
+                    )?;
                     let object_ceiling = crate::gate::object_ceiling_for(request_body_mode, operation, state.config.config());
                     let sealed = sealed.with_object_ceiling(object_ceiling);
                     let (framed, lengths) = (ingest.is_some(), view_policy.buffered_lengths);
@@ -1240,7 +1237,11 @@ impl S3Service {
                             integrity,
                         )
                         .await
-                        .map_err(|refusal| view_policy.buffered_ceiling.refusal(request_body_mode, claimed, refusal))?;
+                        .map_err(|refusal| {
+                            view_policy
+                                .buffered_ceiling
+                                .refusal(request_body_mode, claimed, signing_service, refusal)
+                        })?;
                     if let (rustfs_gateway_core::RequestBody::Buffered(bytes), _) = &handed
                         && let Some(refusal) = lengths.after_read(request_body_mode, framed, declared_length, bytes)
                     {

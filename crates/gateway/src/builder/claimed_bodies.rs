@@ -41,7 +41,10 @@
 //! its body mode alone: a buffered one up to the assembly's buffered ceiling, an unread one not at
 //! all.
 
+use rustfs_gateway_sig::SigService;
+
 use super::ServiceBuilder;
+use crate::service::is_non_s3_service;
 
 /// Legacy RustFS's ceiling on the declared body of a request to its admin surface.
 pub(crate) const LEGACY_RUSTFS_CLAIMED_ROUTE_BODY_BYTES: u64 = 1024 * 1024;
@@ -57,9 +60,13 @@ pub(crate) enum ClaimedBodies {
 }
 
 impl ClaimedBodies {
-    /// The declared length past which a request is refused before its authorization: a claimed
-    /// route's under the switch, and no request's otherwise.
-    pub(crate) const fn ceiling(self, claimed: bool) -> Option<u64> {
+    /// The declared length past which a request is refused before its authorization: an S3 claimed
+    /// route's under the switch, and no request's otherwise (including non-S3 independent services
+    /// such as S3 Vectors).
+    pub(crate) const fn ceiling(self, claimed: bool, signing_service: Option<SigService>) -> Option<u64> {
+        if is_non_s3_service(signing_service) {
+            return None;
+        }
         match (self, claimed) {
             (Self::LegacyRustfs, true) => Some(LEGACY_RUSTFS_CLAIMED_ROUTE_BODY_BYTES),
             _ => None,
@@ -89,18 +96,21 @@ impl ServiceBuilder {
 mod tests {
     use super::*;
 
-    /// Positive — under the switch a claimed route is bounded at 1 MiB.
+    /// Positive — under the switch an S3 claimed route is bounded at 1 MiB.
     #[test]
     fn the_switch_bounds_a_claimed_route_at_one_mebibyte() {
-        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(true), Some(1024 * 1024));
+        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(true, None), Some(1024 * 1024));
+        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(true, Some(SigService::S3)), Some(1024 * 1024));
     }
 
-    /// Negative — an unclaimed operation is never bounded by it, and nothing is without the switch.
+    /// Negative — an unclaimed operation, a non-S3 service, and the default are never capped at 1 MiB.
     #[test]
-    fn n_an_unclaimed_operation_and_the_default_are_unbounded() {
-        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(false), None);
+    fn n_an_unclaimed_operation_non_s3_and_the_default_are_unbounded() {
+        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(false, None), None);
+        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(true, Some(SigService::S3Vectors)), None);
+        assert_eq!(ClaimedBodies::LegacyRustfs.ceiling(true, Some(SigService::Sts)), None);
         for claimed in [false, true] {
-            assert_eq!(ClaimedBodies::ByBodyMode.ceiling(claimed), None, "{claimed}");
+            assert_eq!(ClaimedBodies::ByBodyMode.ceiling(claimed, None), None, "{claimed}");
         }
         assert_eq!(ClaimedBodies::default(), ClaimedBodies::ByBodyMode);
     }

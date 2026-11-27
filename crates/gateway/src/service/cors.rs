@@ -26,9 +26,11 @@
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use rustfs_gateway_core::TargetKind;
 use rustfs_gateway_core::cors::{
-    ACCESS_CONTROL_ALLOW_ORIGIN, CorsHeaders, ORIGIN, PreflightOutcome, PreflightRefusalCause, PreflightRequest, VARY,
-    VARY_ORIGIN, answer_actual, answer_preflight, headers_apply_to_post_auth_errors, preflight_uses_resolved_target,
+    ACCESS_CONTROL_ALLOW_ORIGIN, CorsHeaders, ORIGIN, PreflightClass, PreflightOutcome, PreflightRefusalCause, PreflightRequest,
+    VARY, VARY_ORIGIN, answer_actual, answer_preflight, classify, headers_apply_to_post_auth_errors,
+    invalid_target_is_uniform_refusal, preflight_bypasses_pipeline, preflight_uses_resolved_target,
 };
+use rustfs_gateway_http::HeaderView;
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::BucketName;
@@ -36,6 +38,8 @@ use rustfs_gateway_types::BucketName;
 use crate::clock::MonotonicNow;
 use crate::cors_legacy::{ActualPlan, PreflightPlan, bucket_headers};
 use crate::ext::{CORS_PREFLIGHT, ClassKind, ClientAddr, GovernorRequest, ResolvedHost};
+use crate::logging::Refused;
+use crate::render::from_pre_auth;
 use crate::request_deadline::hold_failure_floor;
 
 use super::{Outcome, S3Service};
@@ -71,6 +75,59 @@ impl Outcome<'_> {
 }
 
 impl S3Service {
+    /// Answers an S3 CORS preflight (or legacy RustFS `OPTIONS`) before routing, or returns `None`
+    /// when the request is not a CORS preflight.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn maybe_serve_preflight(
+        &self,
+        method: &Method,
+        path: &str,
+        wire_headers: HeaderView<'_>,
+        headers: &HeaderMap,
+        resolved: &ResolvedHost,
+        outcome: &mut Outcome<'_>,
+        now: RequestNow,
+        client_addr: Option<ClientAddr>,
+    ) -> Option<Response<Body>> {
+        if let Some(legacy) = self.inner.legacy_cors.as_ref()
+            && *method == Method::OPTIONS
+        {
+            return Some(
+                self.serve_legacy_preflight(legacy, path, headers, outcome, now, client_addr)
+                    .await,
+            );
+        }
+        match classify(method, &wire_headers) {
+            PreflightClass::NotPreflight => None,
+            PreflightClass::HeaderlessOptions => {
+                let started = self.inner.authz_clock.monotonic();
+                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
+                let refusal = rustfs_gateway_core::error::PreAuthError::bad_request(
+                    "An Origin header is required for this OPTIONS request",
+                );
+                Some(outcome.refuse_at(Refused::Wire, from_pre_auth(refusal, outcome.response_kind)))
+            }
+            PreflightClass::Malformed => {
+                let started = self.inner.authz_clock.monotonic();
+                Some(
+                    self.refuse_preflight(outcome, PreflightRefusalCause::Malformed, started)
+                        .await,
+                )
+            }
+            PreflightClass::Preflight(preflight) => {
+                let valid_target = preflight_bucket(path, resolved).is_some();
+                if preflight_bypasses_pipeline() && (invalid_target_is_uniform_refusal() || valid_target) {
+                    Some(
+                        self.serve_preflight(path, resolved.clone(), &preflight, outcome, now, client_addr)
+                            .await,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     /// Answers one preflight, and never anything else.
     ///
     /// The order below is the mitigation, in three steps that may not be reordered:

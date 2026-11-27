@@ -587,7 +587,7 @@ impl SigV4Signer {
         query: &str,
         exclusion: QueryExclusion,
     ) -> Result<(String, String, String), SignerError> {
-        let paths = UriPathCandidates::new(request.path)?;
+        let paths = UriPathCandidates::for_service(request.path, self.scope.service())?;
         let raw_query = RawQuery::new(query);
         let spec = CanonicalRequestSpec::new(
             request.method,

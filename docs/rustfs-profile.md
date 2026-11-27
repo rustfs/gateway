@@ -22,6 +22,13 @@ assembled result moves. Regenerate it deliberately and say why in the pull reque
 UPDATE_GOLDEN=1 cargo test -p rustfs-gateway --test integration rustfs_profile::
 ```
 
+On an independently assembled non-S3 service (`ServiceBuilder::for_service(SigService::S3Vectors)`),
+`ServiceBuilder::rustfs_profile` applies only the service-agnostic switches (unlimited governor
+rates, legacy header-signature/credential/denial/body refusals, unread-body drain, empty-header
+reading, and request-id headers without `x-amz-id-2`) and omits S3-only path addressing, operation
+selection, 1 MiB admin / 20 MiB XML body caps, bucket CORS, SSE-C, checksum, listing, and
+POST-form switches.
+
 ## What stays the host's
 
 The preset applies readings; it installs no instance and takes no deployment choice. These stay

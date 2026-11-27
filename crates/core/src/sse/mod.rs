@@ -435,6 +435,31 @@ pub fn enforce(request: &MetaView<'_>, transport: TransportSecurity, config: &Ss
     enforce_read(&SseHeaders::read(request), transport, config)
 }
 
+/// Applies [`enforce`] for S3 assemblies, and returns an empty [`SseEnforced`] proof for non-S3
+/// services whose headers are outside S3 SSE-C and SSE-KMS rules.
+///
+/// The gate still owns every [`SseEnforced`] value: an ordinary S3 assembly (`None`) and an
+/// explicit `SigService::S3` assembly always run [`enforce`].
+///
+/// # Errors
+///
+/// [`SseRejection`] naming the first S3 SSE rule broken on an S3 assembly.
+pub fn enforce_for_service(
+    service: Option<rustfs_gateway_sig::SigService>,
+    request: &MetaView<'_>,
+    transport: TransportSecurity,
+    config: &SseConfig,
+) -> Result<SseEnforced, SseRejection> {
+    if service.is_some_and(|service| service != rustfs_gateway_sig::SigService::S3) {
+        return Ok(SseEnforced {
+            customer: None,
+            copy_source: None,
+            managed: Managed::Absent,
+        });
+    }
+    enforce(request, transport, config)
+}
+
 /// [`enforce`] over a lookup by exact header name rather than a request head.
 ///
 /// For the one request whose SSE members travel elsewhere than its headers: a POST Object form

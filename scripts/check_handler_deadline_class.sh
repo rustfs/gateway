@@ -505,14 +505,16 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # crates/gateway/tests/authz_contract/route_result.rs states Standard for its Full-codec probe.
 # explicit=55: the S3 Vectors service-routing fixtures in crates/core/tests/service_routes.rs
 # and crates/gateway/tests/service_routes.rs each declare Standard on their custom operation spec.
-if central_builders != 122 or explicit_builders != 54:
+# explicit=55: the S3 Vectors isolation fixture in crates/gateway/tests/service_routes/fixture.rs
+# declares Standard on its custom operation spec alongside the existing service-routing fixtures.
+if central_builders != 122 or explicit_builders != 55:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=122 explicit=54"
+        f"central={central_builders} explicit={explicit_builders}, expected central=122 explicit=55"
     )
 
 print(
-    "check_handler_deadline_class: 181 repository builder sites are inventoried "
-    "(176 classified: 122 central standard, 54 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 182 repository builder sites are inventoried "
+    "(177 classified: 122 central standard, 55 explicit; 5 authority tests)"
 )
 PY

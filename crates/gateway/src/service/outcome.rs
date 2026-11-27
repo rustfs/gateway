@@ -30,7 +30,8 @@ use super::cors::CorsDecoration;
 use crate::builder::credential_sentences::CredentialSentences;
 use crate::close::ConnectionIntent;
 use crate::logging::Refused;
-use crate::render::{S3Error, from_codec, from_handler, from_pre_auth, from_resolution, render};
+use crate::render::json::{ErrorFormat, render_for_format};
+use crate::render::{S3Error, from_codec, from_handler, from_pre_auth, from_resolution};
 use crate::trace::RequestTrace;
 
 /// Whether an answer reached legacy RustFS's CORS layer.
@@ -58,6 +59,7 @@ pub(super) struct Outcome<'a> {
     pub(super) legacy_cors_disposition: LegacyCorsDisposition,
     pub(super) response_kind: ResponseKind,
     pub(super) credential_sentences: CredentialSentences,
+    pub(super) error_format: ErrorFormat,
     /// The stage that refused the request, when the gateway refused it; reported once, at the end
     /// (`crate::logging::request_refused`).
     pub(super) refused: Option<Refused>,
@@ -65,7 +67,12 @@ pub(super) struct Outcome<'a> {
 
 impl<'a> Outcome<'a> {
     /// An outcome that knows nothing yet, except which request it is about.
-    pub(super) fn new(trace: &'a RequestTrace, method: &Method, credential_sentences: CredentialSentences) -> Self {
+    pub(super) fn new(
+        trace: &'a RequestTrace,
+        method: &Method,
+        credential_sentences: CredentialSentences,
+        error_format: ErrorFormat,
+    ) -> Self {
         Self {
             trace,
             operation: None,
@@ -74,6 +81,7 @@ impl<'a> Outcome<'a> {
             cors: None,
             legacy_cors_disposition: LegacyCorsDisposition::Decorate,
             credential_sentences,
+            error_format,
             refused: None,
             response_kind: if *method == Method::HEAD {
                 ResponseKind::Head
@@ -87,7 +95,7 @@ impl<'a> Outcome<'a> {
     pub(super) fn refuse(&mut self, error: S3Error) -> Response<Body> {
         let error = self.credential_sentences.restyle(error);
         self.error = error.code().cloned();
-        render(&error, self.trace)
+        render_for_format(&error, self.trace, self.error_format)
     }
 
     pub(super) fn refuse_handler(&mut self, error: HandlerError) -> Response<Body> {
@@ -157,7 +165,7 @@ impl<'a> Outcome<'a> {
             from_pre_auth(refusal, self.response_kind)
         };
         self.error = error.code().cloned();
-        let mut response = render(&error, self.trace);
+        let mut response = render_for_format(&error, self.trace, self.error_format);
         response.headers_mut().insert(VARY, VARY_ORIGIN);
         response
     }

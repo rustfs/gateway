@@ -38,6 +38,7 @@
 
 use core::fmt;
 
+use http::Method;
 use zeroize::Zeroizing;
 
 use crate::scheme::SigService;
@@ -225,22 +226,37 @@ impl<'q> RawQuery<'q> {
     ///   the shape of a parameter-smuggling bypass (s3s#176). A notification subscription explicitly
     ///   signs every value of its multi-valued `events` filter; the subscriber reads them all.
     pub fn canonical(&self, exclusion: QueryExclusion) -> Result<String, AuthError> {
-        self.canonical_for_service(exclusion, SigService::S3)
+        self.canonical_with_lists(exclusion, false)
     }
 
-    /// Rebuilds the canonical query with this signing service's list-valued parameters.
+    /// Rebuilds the canonical query for one routed request, admitting repeated `tagKeys` values
+    /// only for S3 Vectors' `UntagResource` route (`DELETE /tags/{+resourceArn}`).
     ///
-    /// Only [`SigService::S3Vectors`] permits repeated occurrences of the exact percent-decoded
-    /// name `tagKeys`. Every value, including repeated values, remains in the encoded tuple sort.
-    /// An enabled notification event list retains each `events` value in wire order.
-    /// All other retained names must be unique; [`QueryExclusion`] keeps its existing behavior.
-    /// A verifier supplies its routed service after checking the credential scope. This method
-    /// does not authenticate a scope or validate an operation's parameter values.
+    /// Every admitted `tagKeys` value, including repeated values, stays in the encoded tuple sort.
+    /// An enabled notification event list retains each `events` value in wire order. All other
+    /// retained names — and `tagKeys` on every other method, path, or signing service — remain
+    /// unique; [`QueryExclusion`] keeps its existing behavior.
     ///
     /// # Errors
     ///
-    /// The errors of [`Self::canonical`], except for the stated `tagKeys` list permission.
-    pub fn canonical_for_service(&self, exclusion: QueryExclusion, service: SigService) -> Result<String, AuthError> {
+    /// The errors of [`Self::canonical`], except for the stated `UntagResource` `tagKeys` list
+    /// permission.
+    pub fn canonical_for_request(
+        &self,
+        exclusion: QueryExclusion,
+        service: SigService,
+        method: &Method,
+        raw_path: &str,
+    ) -> Result<String, AuthError> {
+        let allow_repeated_tag_keys = service == SigService::S3Vectors
+            && *method == Method::DELETE
+            && raw_path
+                .strip_prefix("/tags/")
+                .is_some_and(|rest| !rest.trim_matches('/').is_empty());
+        self.canonical_with_lists(exclusion, allow_repeated_tag_keys)
+    }
+
+    fn canonical_with_lists(&self, exclusion: QueryExclusion, allow_repeated_tag_keys: bool) -> Result<String, AuthError> {
         if self.raw.is_empty() {
             return Ok(String::new());
         }
@@ -266,8 +282,8 @@ impl<'q> RawQuery<'q> {
                 Some(value) => percent_encode(&percent_decode(value)?),
                 None => String::new(),
             };
-            let list_value = (self.signed_event_list && decoded_key == b"events")
-                || (service == SigService::S3Vectors && decoded_key == b"tagKeys");
+            let list_value =
+                (self.signed_event_list && decoded_key == b"events") || (allow_repeated_tag_keys && decoded_key == b"tagKeys");
             if !list_value && pairs.iter().any(|(existing, _)| *existing == key) {
                 return Err(AuthError::AuthorizationHeaderMalformed);
             }
@@ -527,9 +543,12 @@ mod tests {
     fn service_lists_keep_their_independent_value_ordering() {
         let query = "tagKeys=z&events=created&tagKeys=a&events=accessed&tagKeys=a";
         assert_eq!(
-            RawQuery::new(query)
-                .with_signed_event_list(true)
-                .canonical_for_service(QueryExclusion::None, SigService::S3Vectors),
+            RawQuery::new(query).with_signed_event_list(true).canonical_for_request(
+                QueryExclusion::None,
+                SigService::S3Vectors,
+                &Method::DELETE,
+                "/tags/resource"
+            ),
             Ok("events=created&events=accessed&tagKeys=a&tagKeys=a&tagKeys=z".into())
         );
         assert_eq!(
@@ -539,27 +558,40 @@ mod tests {
             Ok("events=created&events=accessed".into())
         );
         assert_eq!(
-            RawQuery::new("tagKeys=z&tagKeys=a&tagKeys=a").canonical_for_service(QueryExclusion::None, SigService::S3Vectors),
+            RawQuery::new("tagKeys=z&tagKeys=a&tagKeys=a").canonical_for_request(
+                QueryExclusion::None,
+                SigService::S3Vectors,
+                &Method::DELETE,
+                "/tags/resource"
+            ),
             Ok("tagKeys=a&tagKeys=a&tagKeys=z".into())
         );
     }
 
     #[test]
     fn list_contexts_reject_unrelated_duplicate_names() {
-        for (query, event_list, service) in [
-            ("events=a&events=b", false, SigService::S3Vectors),
-            ("events=a&events=b", false, SigService::S3),
-            ("tagKeys=a&tagKeys=b", true, SigService::S3),
-            ("prefix=a&prefix=b", true, SigService::S3),
-            ("prefix=a&prefix=b", true, SigService::S3Vectors),
-            ("X-Amz-Date=a&X-Amz-Date=b", true, SigService::S3Vectors),
+        for (query, event_list, service, method, path) in [
+            ("events=a&events=b", false, SigService::S3Vectors, Method::DELETE, "/tags/resource"),
+            ("events=a&events=b", false, SigService::S3, Method::DELETE, "/tags/resource"),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3, Method::DELETE, "/tags/resource"),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3Vectors, Method::POST, "/PutVectors"),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3Vectors, Method::GET, "/tags/resource"),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3Vectors, Method::POST, "/tags/resource"),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3Vectors, Method::DELETE, "/tags"),
+            ("tagKeys=a&tagKeys=b", true, SigService::S3Vectors, Method::DELETE, "/tags/"),
+            ("prefix=a&prefix=b", true, SigService::S3, Method::DELETE, "/tags/resource"),
+            ("prefix=a&prefix=b", true, SigService::S3Vectors, Method::DELETE, "/tags/resource"),
+            ("X-Amz-Date=a&X-Amz-Date=b", true, SigService::S3Vectors, Method::DELETE, "/tags/resource"),
         ] {
             assert_eq!(
-                RawQuery::new(query)
-                    .with_signed_event_list(event_list)
-                    .canonical_for_service(QueryExclusion::None, service),
+                RawQuery::new(query).with_signed_event_list(event_list).canonical_for_request(
+                    QueryExclusion::None,
+                    service,
+                    &method,
+                    path
+                ),
                 Err(AuthError::AuthorizationHeaderMalformed),
-                "unexpected duplicate permission for {query}"
+                "unexpected duplicate permission for {query} on {method} {path}"
             );
         }
     }
@@ -568,12 +600,12 @@ mod tests {
     fn event_list_canonicalization_distinguishes_changed_values_and_order() {
         let original = RawQuery::new("events=created&events=accessed")
             .with_signed_event_list(true)
-            .canonical_for_service(QueryExclusion::None, SigService::S3Vectors)
+            .canonical_for_request(QueryExclusion::None, SigService::S3Vectors, &Method::DELETE, "/tags/resource")
             .expect("the enabled event list");
         for changed in ["events=created&events=removed", "events=accessed&events=created"] {
             let changed = RawQuery::new(changed)
                 .with_signed_event_list(true)
-                .canonical_for_service(QueryExclusion::None, SigService::S3Vectors)
+                .canonical_for_request(QueryExclusion::None, SigService::S3Vectors, &Method::DELETE, "/tags/resource")
                 .expect("the changed event list");
             assert_ne!(original, changed);
         }
