@@ -314,6 +314,16 @@ fn build_with_source(
     policy: CorsPolicy,
     governor: Option<RefusingGovernor>,
 ) -> Built {
+    build_with_source_and_clock(source, reads, policy, governor, rustfs_gateway::SystemMonotonic::new())
+}
+
+fn build_with_source_and_clock(
+    source: impl CorsSource,
+    reads: Arc<AtomicUsize>,
+    policy: CorsPolicy,
+    governor: Option<RefusingGovernor>,
+    monotonic_clock: impl rustfs_gateway::MonotonicClock,
+) -> Built {
     let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id");
     let mut builder = ServiceBuilder::new()
         .register::<BucketPing, _>(Arc::new(PingBackend::plain()))
@@ -328,6 +338,7 @@ fn build_with_source(
             FixedClock::at_unix_seconds(1_767_225_600),
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
+        .monotonic_clock(monotonic_clock)
         .cors_source(source)
         .cors_policy(policy);
     if let Some(governor) = governor {
@@ -359,18 +370,6 @@ async fn send(service: &S3Service, method: &str, uri: &str, headers: &[(&str, &s
 
 fn header(response: &WireResponse, name: &str) -> Option<String> {
     response.header(name).map(str::to_owned)
-}
-
-async fn assert_refusal_enters_failure_floor(future: impl Future<Output = WireResponse>) {
-    let mut future = Box::pin(future);
-    let mut context = Context::from_waker(Waker::noop());
-    assert!(
-        matches!(future.as_mut().poll(&mut context), Poll::Pending),
-        "a preflight refusal completed before entering the shared failure floor"
-    );
-    let response = future.await;
-    assert_eq!(response.status().as_u16(), 403);
-    assert_eq!(header(&response, "vary").as_deref(), Some("origin"));
 }
 
 fn rss_bytes() -> Option<usize> {
@@ -525,60 +524,84 @@ async fn a_repeated_preflight_for_a_failing_source_reads_once() {
     assert_eq!(built.reads.load(Ordering::SeqCst), 1, "a failed source read was not collapsed");
 }
 
-/// Negative — every cheap and expensive CORS refusal enters the same failure-floor helper. The
-/// first poll is the deterministic assertion: an immediate refusal cannot complete until the
-/// floor's runtime-independent delay has been armed. Source timeout is included even though its
-/// own one-second deadline already exceeds the default floor.
+/// Negative — every cheap and expensive CORS refusal enters the same failure-floor helper. A
+/// frozen counting [`ManualMonotonic`](rustfs_gateway::ManualMonotonic) eliminates real-clock
+/// scheduler flake (#1580) and distinguishes entering `hold_failure_floor` (2 clock reads) from
+/// waiting on an earlier future such as `NeverSource`'s timeout (1 read until timeout, then 2).
 #[tokio::test]
 async fn every_preflight_refusal_enters_the_shared_failure_floor() {
-    let ordinary = build(&[NAMED], &["PUT"], CorsPolicy::default(), None);
-    assert_refusal_enters_failure_floor(send(&ordinary.service, "OPTIONS", PREFLIGHT, &[("origin", NAMED)])).await;
-    assert_refusal_enters_failure_floor(send(
-        &ordinary.service,
-        "OPTIONS",
-        "/",
-        &[("origin", NAMED), ("access-control-request-method", "PUT")],
-    ))
-    .await;
-    assert_refusal_enters_failure_floor(send(
-        &ordinary.service,
-        "OPTIONS",
-        "/never-existed/key.txt",
-        &[("origin", NAMED), ("access-control-request-method", "PUT")],
-    ))
-    .await;
-    assert_refusal_enters_failure_floor(send(
-        &ordinary.service,
-        "OPTIONS",
-        PREFLIGHT,
-        &[("origin", NAMED), ("access-control-request-method", "DELETE")],
-    ))
-    .await;
+    let clock = failure_floor::CountingMonotonic::at_millis(0);
+    let ordinary_reads = Arc::new(AtomicUsize::new(0));
+    let ordinary = build_with_source_and_clock(
+        CountingSource::new(&ordinary_reads, &[NAMED], &["PUT"]),
+        ordinary_reads,
+        CorsPolicy::default(),
+        None,
+        clock.clone(),
+    );
+    for (label, uri, headers) in [
+        ("malformed-preflight", PREFLIGHT, &[("origin", NAMED)][..]),
+        ("invalid-target", "/", &[("origin", NAMED), ("access-control-request-method", "PUT")][..]),
+        (
+            "missing-document",
+            "/never-existed/key.txt",
+            &[("origin", NAMED), ("access-control-request-method", "PUT")][..],
+        ),
+        (
+            "rule-mismatch",
+            PREFLIGHT,
+            &[("origin", NAMED), ("access-control-request-method", "DELETE")][..],
+        ),
+    ] {
+        failure_floor::assert_immediate_refusal_enters_failure_floor(
+            label,
+            &clock,
+            send(&ordinary.service, "OPTIONS", uri, headers),
+        )
+        .await;
+    }
 
+    let failed_clock = failure_floor::CountingMonotonic::at_millis(0);
     let failed_reads = Arc::new(AtomicUsize::new(0));
-    let failed = build_with_source(
+    let failed = build_with_source_and_clock(
         FailingSource {
             reads: Arc::clone(&failed_reads),
         },
         failed_reads,
         CorsPolicy::default(),
         None,
+        failed_clock.clone(),
     );
-    assert_refusal_enters_failure_floor(send(
-        &failed.service,
-        "OPTIONS",
-        PREFLIGHT,
-        &[("origin", NAMED), ("access-control-request-method", "PUT")],
-    ))
+    failure_floor::assert_immediate_refusal_enters_failure_floor(
+        "failing-source",
+        &failed_clock,
+        send(
+            &failed.service,
+            "OPTIONS",
+            PREFLIGHT,
+            &[("origin", NAMED), ("access-control-request-method", "PUT")],
+        ),
+    )
     .await;
 
-    let never = build_with_source(NeverSource, Arc::new(AtomicUsize::new(0)), CorsPolicy::default(), None);
-    assert_refusal_enters_failure_floor(send(
-        &never.service,
-        "OPTIONS",
-        PREFLIGHT,
-        &[("origin", NAMED), ("access-control-request-method", "PUT")],
-    ))
+    let timeout_clock = failure_floor::CountingMonotonic::at_millis(0);
+    let never = build_with_source_and_clock(
+        NeverSource,
+        Arc::new(AtomicUsize::new(0)),
+        CorsPolicy::default(),
+        None,
+        timeout_clock.clone(),
+    );
+    failure_floor::assert_timeout_refusal_enters_failure_floor(
+        "source-timeout",
+        &timeout_clock,
+        send(
+            &never.service,
+            "OPTIONS",
+            PREFLIGHT,
+            &[("origin", NAMED), ("access-control-request-method", "PUT")],
+        ),
+    )
     .await;
 }
 
@@ -752,5 +775,7 @@ async fn n_ordinary_cors_decoration_preserves_existing_vary_header() {
     assert_eq!(origin_count, 1, "Vary must not duplicate Origin: {:?}", response.headers());
 }
 
+#[path = "cors_runtime/failure_floor.rs"]
+mod failure_floor;
 #[path = "cors_runtime/headerless.rs"]
 mod headerless;

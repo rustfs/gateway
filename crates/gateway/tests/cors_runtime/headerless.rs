@@ -67,6 +67,10 @@ impl Handler<rustfs_gateway::dto::HeadObject> for CountingRead {
 }
 
 fn observed_service() -> (S3Service, Calls) {
+    observed_service_with_clock(rustfs_gateway::SystemMonotonic::new())
+}
+
+fn observed_service_with_clock(monotonic_clock: impl rustfs_gateway::MonotonicClock) -> (S3Service, Calls) {
     let calls = Calls::default();
     let authz = Arc::clone(&calls.authorization);
     let backend = Arc::new(CountingRead(Arc::clone(&calls.handler)));
@@ -90,6 +94,7 @@ fn observed_service() -> (S3Service, Calls) {
             crate::support::fixed_clock(),
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
+        .monotonic_clock(monotonic_clock)
         .cors_source(CountingSource::new(&calls.source, &[NAMED], &["GET"]))
         .build()
         .expect("complete fixture");
@@ -166,10 +171,16 @@ async fn headerless_options_does_not_poll_the_request_body() {
 
 #[tokio::test]
 async fn headerless_options_waits_for_the_security_failure_floor() {
-    let (service, _) = observed_service();
+    let clock = super::failure_floor::CountingMonotonic::at_millis(0);
+    let (service, _) = observed_service_with_clock(clock.clone());
     let mut future = Box::pin(send(&service, "OPTIONS", PREFLIGHT, &[]));
     let mut context = Context::from_waker(Waker::noop());
-    assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+    assert!(
+        matches!(future.as_mut().poll(&mut context), Poll::Pending),
+        "headerless OPTIONS completed before entering the shared failure floor (clock readings={})",
+        clock.readings()
+    );
+    assert_eq!(clock.readings(), 2, "expected entry + hold_failure_floor clock reads");
     assert_bad_request(&future.await);
 }
 

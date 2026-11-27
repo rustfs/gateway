@@ -626,6 +626,44 @@ mod tests {
         // Positive control: a zero floor never adds wait.
         assert_eq!(failure_floor_remaining(FailureFloor::new(Duration::ZERO), &clock, started), None);
     }
+
+    /// Negative — `hold_failure_floor` arms a pending delay on a frozen clock through the 25 ms
+    /// quantized boundary, completes immediately once elapsed reaches 26 ms, and completes
+    /// immediately on the zero-floor control (`FailureFloor::new(Duration::ZERO)`).
+    #[tokio::test]
+    async fn n_hold_failure_floor_arms_delay_until_twenty_six_ms_and_zero_floor_completes_immediately() {
+        let clock = crate::clock::ManualMonotonic::at_millis(0);
+        let started = clock.monotonic();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+
+        let mut zero_floor = Box::pin(hold_failure_floor(FailureFloor::new(Duration::ZERO), &clock, started));
+        assert!(
+            matches!(zero_floor.as_mut().poll(&mut context), Poll::Ready(())),
+            "zero FailureFloor must complete on poll 1 without arming a timer"
+        );
+
+        let mut default_floor = Box::pin(hold_failure_floor(FailureFloor::DEFAULT, &clock, started));
+        assert!(
+            matches!(default_floor.as_mut().poll(&mut context), Poll::Pending),
+            "default FailureFloor on a frozen clock must pend on poll 1"
+        );
+        default_floor.await;
+
+        clock.advance_millis(25);
+        let mut boundary_minus_one = Box::pin(hold_failure_floor(FailureFloor::DEFAULT, &clock, started));
+        assert!(
+            matches!(boundary_minus_one.as_mut().poll(&mut context), Poll::Pending),
+            "25 ms tick difference still owes 1 ms under millisecond quantization"
+        );
+        boundary_minus_one.await;
+
+        clock.advance_millis(1);
+        let mut boundary_elapsed = Box::pin(hold_failure_floor(FailureFloor::DEFAULT, &clock, started));
+        assert!(
+            matches!(boundary_elapsed.as_mut().poll(&mut context), Poll::Ready(())),
+            "26 ms tick difference guarantees >= 25 ms elapsed and must complete on poll 1"
+        );
+    }
 }
 
 #[cfg(test)]
