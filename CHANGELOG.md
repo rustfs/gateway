@@ -1,5 +1,28 @@
 # Changelog
 
+## Seal bearer and header-token verdict and receipt construction (sig 0.18.0, core 0.67.0, dialect-rustfs-admin 0.15.0, gateway 0.70.0)
+
+BREAKING: removes the public inherent methods `BearerAdmission::verify`,
+`BearerAdmission::verify_alongside`, `SecurityFloor::bearer_alongside_signature`,
+`HeaderTokenAdmission::verify`, `OperationFloor::with_query_bearer_claim`,
+`RequestContextView::with_bearer_receipt`, and `RequestContextView::without_bearer_token`, and
+narrows `rustfs_gateway_dialect_rustfs_admin::admin::zip_token_floor` to `pub(crate)` (ADR-0056,
+rustfs/gateway#1574). Migration: hosts installing verifiers through
+`ServiceBuilder::bearer_token_verifier` and `ServiceBuilder::host_verified_header_token` and
+reading `RequestContextView::bearer()` or `RequestContextView::header_token_principal()` require no
+source changes; direct callers of the removed methods must route requests through `S3Service` and
+install the RustFS admin dialect via `rustfs_admin_dialect()`.
+
+Additive / hardening: `BearerReceipt::claim()` exposes the read-only `QueryBearerClaim` descriptor
+(name and suffix only; never the token); `RequestContextView::from_pipeline` strips the bearer
+query parameter automatically for `Verdict::Bearer`; cross-crate calls move behind
+`#[doc(hidden)]` `__facade_internal` modules gated by `FacadeSeal` (never re-exported by
+`rustfs-gateway`), merging `bearer_alongside_signature` + `verify_alongside` into an atomic
+`Verdict::Authenticated`-gated helper and replacing `with_bearer_receipt`/`without_bearer_token`
+with an invariant-checking atomic `attach_signed_bearer_receipt` helper; `scripts/check_token_sealing_surface.sh`
+polices the boundary while retaining run-time `from_own_admission` (`bearer_admitted` /
+`header_token_admitted`) checks.
+
 ## Host-verified header token claim (sig 0.15.0, core 0.60.0, gateway 0.62.0)
 
 BREAKING: `AuthSchemeRef` gains `HeaderToken`, the scheme of a request admitted by the service's

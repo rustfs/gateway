@@ -43,6 +43,7 @@ fn p2_04_compile_time_boundaries_are_not_openable() {
     cases.compile_fail("tests/compile_fail/c_sig_034[56]_*.rs");
     cases.compile_fail("tests/compile_fail/c_sig_0354_*.rs");
     cases.compile_fail("tests/compile_fail/c_sig_0377_*.rs");
+    cases.compile_fail("tests/compile_fail/token_sealing_*.rs");
 }
 
 #[test]

@@ -1,0 +1,5 @@
+error[E0599]: no method named `without_bearer_token` found for struct `RequestContextView` in the current scope
+  --> tests/compile_fail/token_sealing_context_without_bearer_token.rs:25:13
+   |
+25 |     context.without_bearer_token(claim)
+   |             ^^^^^^^^^^^^^^^^^^^^ method not found in `RequestContextView`

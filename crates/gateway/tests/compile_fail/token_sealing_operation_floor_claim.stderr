@@ -1,0 +1,11 @@
+error[E0599]: no method named `with_query_bearer_claim` found for struct `OperationFloor` in the current scope
+  --> tests/compile_fail/token_sealing_operation_floor_claim.rs:25:16
+   |
+25 |     let _ = op.with_query_bearer_claim();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `query_bearer_claim` with a similar name
+   |
+25 -     let _ = op.with_query_bearer_claim();
+25 +     let _ = op.query_bearer_claim();
+   |

@@ -57,8 +57,11 @@ mod tests {
     fn the_line_names_the_claim_its_refused_aliases_and_only_the_admitting_operations() {
         let standard = OperationFloor::builtin("PutObject", SigService::S3);
         let privileged = OperationFloor::custom("example:Admin", SigService::S3);
-        let bearer = OperationFloor::builtin("example:Download", SigService::S3)
-            .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+        let bearer = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+            rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+            OperationFloor::builtin("example:Download", SigService::S3),
+            QueryBearerClaim::new("token", ".zip"),
+        );
         let signed_only =
             OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3).require_sigv4_under_every_policy();
         let form = OperationFloor::builtin("example:Form", SigService::S3).allow_post_policy();

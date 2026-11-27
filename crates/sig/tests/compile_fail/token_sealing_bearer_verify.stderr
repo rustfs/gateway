@@ -1,0 +1,5 @@
+error[E0599]: no method named `verify` found for struct `BearerAdmission` in the current scope
+  --> tests/compile_fail/token_sealing_bearer_verify.rs:31:23
+   |
+31 |     let _ = admission.verify(&V, "/x/a.zip");
+   |                       ^^^^^^ method not found in `BearerAdmission`

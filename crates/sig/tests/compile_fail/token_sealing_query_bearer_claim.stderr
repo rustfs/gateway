@@ -1,0 +1,11 @@
+error[E0599]: no method named `with_query_bearer_claim` found for struct `OperationFloor` in the current scope
+  --> tests/compile_fail/token_sealing_query_bearer_claim.rs:25:59
+   |
+25 |     let _ = OperationFloor::custom("a:B", SigService::S3).with_query_bearer_claim(claim);
+   |                                                           ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `query_bearer_claim` with a similar name, but with different arguments
+  --> src/operation.rs
+   |
+   |     pub const fn query_bearer_claim(&self) -> Option<QueryBearerClaim> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

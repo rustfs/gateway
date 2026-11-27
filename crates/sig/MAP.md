@@ -4,7 +4,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 
 | File | Responsibility | Read it when |
 |---|---|---|
-| `src/lib.rs` | Public signature state machine and generated policy wiring. | Start here for an authentication task or a missing signature-policy consumer. |
+| `src/lib.rs`, `src/facade_internal.rs`, `src/facade_internal_tests.rs` | Public signature state machine, generated policy wiring, and ADR-0056 `#[doc(hidden)]` facade-sealed token bridge (`FacadeSeal`) with unit tests. | Start here for an authentication task, a missing signature-policy consumer, or token-sealing boundaries. |
 | `src/canonical.rs` | Canonical request construction, including the explicit RustFS path constructor (#1314, #1315; `tests/legacy_paths.rs`). | A signature differs despite the same request. |
 | `src/canonical_tests.rs` | The canonical request's own unit suite, split out at the 800-line limit. | A canonical-request rule decidable from the module's private items changes. |
 | `src/clock.rs` | Single request-time snapshot, skew policy, and why a presigned URL's past bound is its lifetime. | Header, query, and POST-policy paths disagree about time. |

@@ -227,10 +227,16 @@ fn n_the_answer_equals_the_sigv4_requirements_answer() {
 /// the claim-only floor is sealed for SigV2 verification, which is the control.
 #[test]
 fn n_a_sigv2_header_carrying_a_bearer_token_is_refused() {
-    let refusing = OperationFloor::custom("example:Zip", SigService::S3)
-        .refuse_sigv2_under_every_policy()
-        .with_query_bearer_claim(BEARER);
-    let control = OperationFloor::custom("example:Zip", SigService::S3).with_query_bearer_claim(BEARER);
+    let refusing = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom("example:Zip", SigService::S3).refuse_sigv2_under_every_policy(),
+        BEARER,
+    );
+    let control = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom("example:Zip", SigService::S3),
+        BEARER,
+    );
     let header = sigv2_header(KEYS[0], SIGV2_SIGNATURE);
     for (at, floor) in sigv2_floors() {
         for query in ["", "token=t"] {
@@ -318,9 +324,11 @@ fn anonymous_bearer_and_custom_admissions_are_unchanged() {
     for (at, floor) in sigv2_floors() {
         let view = WireView::new(&empty, RawQuery::new(""));
         assert_eq!(outcome(floor.admit(view, &sts_shaped(), now())), Ok("Anonymous"), "{at}");
-        let bearer = OperationFloor::custom("example:Zip", SigService::S3)
-            .refuse_sigv2_under_every_policy()
-            .with_query_bearer_claim(BEARER);
+        let bearer = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+            rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+            OperationFloor::custom("example:Zip", SigService::S3).refuse_sigv2_under_every_policy(),
+            BEARER,
+        );
         let view = WireView::new(&empty, RawQuery::new("token=t"));
         assert_eq!(outcome(floor.admit(view, &bearer, now())), Ok("Bearer"), "{at}");
     }

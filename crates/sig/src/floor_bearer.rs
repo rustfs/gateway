@@ -73,16 +73,10 @@ impl SecurityFloor {
 
     /// The bearer token a signed request on a bearer-claimed operation also carries (ADR-0042).
     ///
-    /// Run by the facade after the signature verified, and only when a verifier for the claim is
-    /// installed: the token is then validated on the signed path too, and must name the signed
-    /// principal ([`BearerAdmission::verify_alongside`]). `Ok(None)` for an operation without a
-    /// claim, whose signed path is unchanged.
-    ///
-    /// # Errors
-    ///
-    /// [`AuthError::AccessDenied`] when the claimed operation's token is absent, repeated, empty or
-    /// undecodable.
-    pub fn bearer_alongside_signature(
+    /// Crate-private (ADR-0056): reached from the facade only through the atomic
+    /// `Verdict::Authenticated`-gated bridge (`__facade_internal::verify_bearer_alongside_signature`),
+    /// never as a detached public `BearerAdmission`.
+    pub(crate) fn bearer_alongside_signature_inner(
         &self,
         view: &WireView<'_>,
         operation: &OperationFloor,

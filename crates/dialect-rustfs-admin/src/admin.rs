@@ -273,10 +273,12 @@ pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", 
 /// with or without a token (ADR-0052, rustfs/gateway#1592): RustFS's access check refuses SigV2
 /// on this route once credentials are presented, and the bearer path reads no AWS credential.
 #[must_use]
-pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3)
-        .refuse_sigv2_under_every_policy()
-        .with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
+pub(crate) const fn zip_token_floor(name: &'static str) -> OperationFloor {
+    rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom(name, SigService::S3).refuse_sigv2_under_every_policy(),
+        ZIP_DOWNLOAD_TOKEN,
+    )
 }
 
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): SigV4 header-signed or

@@ -279,19 +279,29 @@ fn external_context_copy_preserves_verified_bearer_state() {
     }
 
     let headers = http::HeaderMap::new();
-    let operation = OperationFloor::custom("fixture:Download", SigService::S3)
-        .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
-    let wire = WireView::new(&headers, RawQuery::new("token=fixture"));
-    let admission = SecurityFloor::new().admit(wire, &operation, RequestNow::from_unix_seconds(1));
+    let operation = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom("fixture:Download", SigService::S3),
+        rustfs_gateway_sig::QueryBearerClaim::new("token", ".zip"),
+    );
+    let wire_view = WireView::new(&headers, RawQuery::new("token=fixture"));
+    let admission = SecurityFloor::new().admit(wire_view, &operation, RequestNow::from_unix_seconds(1));
     let Ok(Admission::Bearer(admission)) = admission else { panic!("expected bearer admission") };
-    let verdict = admission.verify(&VerifiedDownload, "/downloads/fixture.zip");
-    let context = RequestContextView::detached("fixture:Download")
-        .with_bearer_receipt(verdict.bearer_receipt().expect("verified fixture receipt"));
+    let verdict = rustfs_gateway_sig::__facade_internal::verify_bearer(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        admission,
+        &VerifiedDownload,
+        "/downloads/fixture.zip",
+    );
+    let req_wire = wire("/downloads/fixture.zip?note=1&token=fixture", &[]);
+    let context = RequestContextView::from_pipeline("fixture:Download", &req_wire, path_style(), &verdict, None)
+        .expect("verified bearer context");
     let copy = context.clone_without_caller_secret();
     let verified = copy
         .bearer()
         .and_then(|bearer| bearer.state::<u16>().map(|state| (bearer.identity().access_key_id(), *state)));
     assert_eq!(verified, Some(("zip-downloader", 42)));
+    assert_eq!(copy.raw_query(), "note=1");
 }
 
 #[test]
@@ -373,7 +383,12 @@ fn header_token_verdict(principal: &'static str) -> Verdict {
         .expect("a fixture request");
     carrier.extensions_mut().insert(Established(principal));
     let accepted = WireRequest::accept(carrier, &Limits::default()).expect("an accepted fixture");
-    admission.verify(&Names, accepted.transport_extensions())
+    rustfs_gateway_sig::__facade_internal::verify_header_token(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        admission,
+        &Names,
+        accepted.transport_extensions(),
+    )
 }
 
 /// Positive — a header-token verdict builds a context that names the host-established principal
@@ -475,4 +490,140 @@ fn only_aws_post_form_session_verdicts_project_the_verified_token() {
                 .is_none()
         );
     }
+}
+
+fn signed_fixture_verdict(principal: &str) -> Verdict {
+    use rustfs_gateway_sig::{AuthScheme, CtBytes, Signature};
+
+    let signature = Signature::HmacSha256(CtBytes::from_array([9; 32]));
+    let proof = signature.ct_verify(&signature).expect("fixture match");
+    Verdict::authenticated(
+        Identity::new(principal).expect("fixture identity"),
+        AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3),
+        proof,
+    )
+}
+
+fn bearer_fixture_verdict(operation_name: &'static str, principal: &'static str, state: u16) -> Verdict {
+    use rustfs_gateway_sig::{BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier};
+
+    struct FixtureHost {
+        principal: &'static str,
+        state: u16,
+    }
+    impl BearerTokenVerifier for FixtureHost {
+        fn verify(&self, request: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> {
+            let identity = Identity::new(self.principal).map_err(|_| BearerRefused)?;
+            Ok(BearerGrant::new(identity, request.resource(), i64::MAX, Arc::new(self.state)))
+        }
+    }
+
+    let headers = HeaderMap::new();
+    let operation = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom(operation_name, SigService::S3),
+        rustfs_gateway_sig::QueryBearerClaim::new("token", ".zip"),
+    );
+    let view = WireView::new(&headers, RawQuery::new("token=secret-sentinel"));
+    let Ok(Admission::Bearer(admission)) = SecurityFloor::new().admit(view, &operation, RequestNow::from_unix_seconds(1)) else {
+        panic!("expected bearer admission");
+    };
+    rustfs_gateway_sig::__facade_internal::verify_bearer(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        admission,
+        &FixtureHost { principal, state },
+        "/downloads/archive.zip",
+    )
+}
+
+#[test]
+fn n_from_pipeline_strips_bearer_token_from_raw_query() {
+    let verdict = bearer_fixture_verdict("fixture:ZipDownload", "ALICE", 11);
+    for (target, expected_query) in [
+        ("/downloads/archive.zip?note=1&token=secret-sentinel&z=2", "note=1&z=2"),
+        ("/downloads/archive.zip?token=secret-sentinel&other=kept", "other=kept"),
+        ("/downloads/archive.zip?token=secret-sentinel", ""),
+    ] {
+        let req_wire = wire(target, &[]);
+        let context = RequestContextView::from_pipeline("fixture:ZipDownload", &req_wire, path_style(), &verdict, None)
+            .expect("bearer context");
+        assert_eq!(context.raw_query(), expected_query, "{target}");
+        assert!(!context.raw_query().contains("secret-sentinel"), "{target}");
+        assert_eq!(context.bearer().and_then(|b| b.state::<u16>()), Some(&11));
+    }
+}
+
+#[test]
+fn n_attach_signed_bearer_receipt_refuses_detached_anonymous_wrong_op_wrong_principal_and_duplicate() {
+    let receipt_verdict = bearer_fixture_verdict("fixture:ZipDownload", "ALICE", 55);
+    let receipt = receipt_verdict.bearer_receipt().expect("fixture receipt");
+
+    // 1. Detached context (no signed principal).
+    let detached = crate::__facade_internal::attach_signed_bearer_receipt(
+        crate::__facade_internal::FacadeSeal::new(),
+        RequestContextView::detached("fixture:ZipDownload"),
+        receipt,
+    );
+    assert!(detached.bearer().is_none());
+
+    // 2. Anonymous context.
+    let req_wire = wire("/downloads/archive.zip?token=secret-sentinel&note=1", &[]);
+    let anonymous =
+        RequestContextView::from_pipeline("fixture:ZipDownload", &req_wire, path_style(), &anonymous_verdict(&req_wire), None)
+            .expect("anonymous context");
+    let anonymous =
+        crate::__facade_internal::attach_signed_bearer_receipt(crate::__facade_internal::FacadeSeal::new(), anonymous, receipt);
+    assert!(anonymous.bearer().is_none());
+
+    // 3. Wrong operation on a signed context.
+    let wrong_op =
+        RequestContextView::from_pipeline("GetObject", &req_wire, path_style(), &signed_fixture_verdict("ALICE"), None)
+            .expect("signed context");
+    let wrong_op =
+        crate::__facade_internal::attach_signed_bearer_receipt(crate::__facade_internal::FacadeSeal::new(), wrong_op, receipt);
+    assert!(wrong_op.bearer().is_none());
+
+    // 4. Wrong signed principal.
+    let wrong_principal =
+        RequestContextView::from_pipeline("fixture:ZipDownload", &req_wire, path_style(), &signed_fixture_verdict("BOB"), None)
+            .expect("signed context");
+    let wrong_principal = crate::__facade_internal::attach_signed_bearer_receipt(
+        crate::__facade_internal::FacadeSeal::new(),
+        wrong_principal,
+        receipt,
+    );
+    assert!(wrong_principal.bearer().is_none());
+
+    // 5. Duplicate attachment cannot overwrite an already-attached bearer context.
+    let signed =
+        RequestContextView::from_pipeline("fixture:ZipDownload", &req_wire, path_style(), &signed_fixture_verdict("ALICE"), None)
+            .expect("signed context");
+    let first =
+        crate::__facade_internal::attach_signed_bearer_receipt(crate::__facade_internal::FacadeSeal::new(), signed, receipt);
+    let second_verdict = bearer_fixture_verdict("fixture:ZipDownload", "ALICE", 99);
+    let second_receipt = second_verdict.bearer_receipt().expect("second receipt");
+    let after_second = crate::__facade_internal::attach_signed_bearer_receipt(
+        crate::__facade_internal::FacadeSeal::new(),
+        first,
+        second_receipt,
+    );
+    assert_eq!(after_second.bearer().and_then(|b| b.state::<u16>()), Some(&55));
+}
+
+#[test]
+fn attach_signed_bearer_receipt_attaches_and_strips_on_matching_signed_context() {
+    let receipt_verdict = bearer_fixture_verdict("fixture:ZipDownload", "ALICE", 77);
+    let receipt = receipt_verdict.bearer_receipt().expect("fixture receipt");
+    let req_wire = wire("/downloads/archive.zip?note=keep&token=secret-sentinel", &[]);
+    let signed =
+        RequestContextView::from_pipeline("fixture:ZipDownload", &req_wire, path_style(), &signed_fixture_verdict("ALICE"), None)
+            .expect("signed context");
+    assert!(signed.raw_query().contains("secret-sentinel"));
+
+    let attached =
+        crate::__facade_internal::attach_signed_bearer_receipt(crate::__facade_internal::FacadeSeal::new(), signed, receipt);
+    assert_eq!(attached.principal().map(RequestPrincipal::access_key_id), Some("ALICE"));
+    assert_eq!(attached.bearer().and_then(|b| b.state::<u16>()), Some(&77));
+    assert_eq!(attached.raw_query(), "note=keep");
+    assert!(!attached.raw_query().contains("secret-sentinel"));
 }

@@ -1,0 +1,5 @@
+error[E0599]: no method named `verify` found for struct `HeaderTokenAdmission` in the current scope
+  --> tests/compile_fail/token_sealing_header_token_verify.rs:35:23
+   |
+35 |     let _ = admission.verify(&V, state);
+   |                       ^^^^^^ method not found in `HeaderTokenAdmission`

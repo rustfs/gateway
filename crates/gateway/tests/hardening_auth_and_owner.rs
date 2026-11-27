@@ -79,8 +79,11 @@ static BEARER_SPEC: OperationSpec = OperationSpec::builder("example:BearerDownlo
     .auth(AuthRequirement::new("example:BearerDownload", ResourceShape::Service))
     .build();
 
-static BEARER_FLOOR: OperationFloor =
-    OperationFloor::custom("example:BearerDownload", SigService::S3).with_query_bearer_claim(BEARER_CLAIM);
+static BEARER_FLOOR: OperationFloor = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+    rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+    OperationFloor::custom("example:BearerDownload", SigService::S3),
+    BEARER_CLAIM,
+);
 
 static BEARER_GET: &[Predicate] = &[Predicate::Method(Method::GET)];
 

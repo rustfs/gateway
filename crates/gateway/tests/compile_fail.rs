@@ -27,5 +27,6 @@ fn gateway_compile_fail_contracts_are_enforced() {
     cases.compile_fail("tests/compile_fail/c_mw_*.rs");
     cases.compile_fail("tests/compile_fail/error_resolution_*.rs");
     cases.compile_fail("tests/compile_fail/host_resolver_*.rs");
+    cases.compile_fail("tests/compile_fail/token_sealing_*.rs");
     cases.compile_fail("tests/trybuild/credential/*.rs");
 }

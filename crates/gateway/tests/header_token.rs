@@ -404,7 +404,12 @@ async fn n_a_header_token_verdict_from_another_admission_authenticates_nothing()
     };
     let carrier = established_as(PRINCIPAL, support::plain(http::Method::GET, "/")).map(|_| ());
     let accepted = rustfs_gateway::WireRequest::accept(carrier, &rustfs_gateway::Limits::default()).expect("an accepted fixture");
-    let minted = admission.verify(&Reports("FORGEDPRINCIPAL"), accepted.transport_extensions());
+    let minted = rustfs_gateway_sig::__facade_internal::verify_header_token(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        admission,
+        &Reports("FORGEDPRINCIPAL"),
+        accepted.transport_extensions(),
+    );
     assert!(minted.header_token_receipt().is_some(), "the fixture must hold a header-token verdict");
 
     let mut registry = CustomSchemeRegistry::new();

@@ -51,21 +51,32 @@ const fn spec(index: usize) -> OperationSpec {
 static SPECS: [OperationSpec; 6] = [spec(0), spec(1), spec(2), spec(3), spec(4), spec(5)];
 
 static FLOORS: [OperationFloor; 6] = [
-    OperationFloor::builtin_presigned(NAMES[0], SigService::S3)
-        .require_sigv4_under_every_policy()
-        .with_query_bearer_claim(CLAIM),
+    rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::builtin_presigned(NAMES[0], SigService::S3).require_sigv4_under_every_policy(),
+        CLAIM,
+    ),
     OperationFloor::builtin_presigned(NAMES[1], SigService::S3).require_sigv4_under_every_policy(),
-    OperationFloor::custom(NAMES[2], SigService::S3).with_query_bearer_claim(CLAIM),
-    OperationFloor::custom(NAMES[3], SigService::S3)
-        .refuse_sigv2_under_every_policy()
-        .with_query_bearer_claim(CLAIM),
+    rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom(NAMES[2], SigService::S3),
+        CLAIM,
+    ),
+    rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom(NAMES[3], SigService::S3).refuse_sigv2_under_every_policy(),
+        CLAIM,
+    ),
     OperationFloor::builtin_presigned(NAMES[4], SigService::S3)
         .refuse_sigv2_under_every_policy()
         .require_sigv4_under_every_policy(),
-    OperationFloor::builtin_presigned(NAMES[5], SigService::S3)
-        .refuse_sigv2_under_every_policy()
-        .require_sigv4_under_every_policy()
-        .with_query_bearer_claim(CLAIM),
+    rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::builtin_presigned(NAMES[5], SigService::S3)
+            .refuse_sigv2_under_every_policy()
+            .require_sigv4_under_every_policy(),
+        CLAIM,
+    ),
 ];
 
 // The fixtures sit inside their own `#[cfg(test)]` item for `check_op_file_shape.sh`, which admits
