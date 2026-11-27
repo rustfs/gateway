@@ -309,21 +309,51 @@ impl Credentials {
         surface: SessionSurface,
         now: RequestNow,
     ) -> Result<(), CredentialRefusal> {
+        self.admit_surface_with(token, surface, now, |expected, presented| expected.ct_verify(presented).is_ok())
+    }
+
+    /// Token to compare against on disabled and long-term refusal arms so session admission does
+    /// the same work before refusing as on active temporary and unknown keys (rustfs/gateway#1584).
+    fn equalizing_token(&self) -> Option<&SessionToken> {
+        self.session
+            .as_ref()
+            .map(|session| &session.token)
+            .or_else(|| super::session_answer::placeholder_session().and_then(Self::session_token))
+    }
+
+    fn admit_surface_with<F>(
+        &self,
+        token: Option<&[u8]>,
+        surface: SessionSurface,
+        now: RequestNow,
+        mut compare_token: F,
+    ) -> Result<(), CredentialRefusal>
+    where
+        F: FnMut(&SessionToken, &[u8]) -> bool,
+    {
         if self.disabled {
+            if let (Some(presented), Some(expected)) = (token, self.equalizing_token()) {
+                let _ = core::hint::black_box(compare_token(expected, presented));
+            }
             return Err(CredentialRefusal::Disabled);
         }
         match (&self.session, token) {
             // The token and surface before the lifetime, so `SessionExpired` implies the issued
             // token arrived on its own wire surface (rustfs/gateway#1575).
             (Some(session), Some(presented)) => {
-                let matched = session.token.ct_verify(presented).is_ok();
+                let matched = compare_token(&session.token, presented);
                 if !matched || session.surface != surface {
                     return Err(CredentialRefusal::SessionTokenMismatch);
                 }
                 session.within_lifetime(now)
             }
             (Some(_), None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
-            (None, Some(_)) => Err(CredentialRefusal::TokenWithoutSessionCredential),
+            (None, Some(presented)) => {
+                if let Some(expected) = self.equalizing_token() {
+                    let _ = core::hint::black_box(compare_token(expected, presented));
+                }
+                Err(CredentialRefusal::TokenWithoutSessionCredential)
+            }
             (None, None) => Ok(()),
         }
     }
@@ -343,13 +373,31 @@ impl Credentials {
         surface: SessionSurface,
         now: RequestNow,
     ) -> Result<(), CredentialRefusal> {
+        self.admit_query_param_with(surface, now, |expected| query.session_token_matches(param, expected))
+    }
+
+    fn admit_query_param_with<F>(
+        &self,
+        surface: SessionSurface,
+        now: RequestNow,
+        mut match_query_token: F,
+    ) -> Result<(), CredentialRefusal>
+    where
+        F: FnMut(&SessionToken) -> Result<Option<bool>, rustfs_gateway_sig::AuthError>,
+    {
         if self.disabled {
+            if let Some(expected) = self.equalizing_token() {
+                let _ = core::hint::black_box(match_query_token(expected));
+            }
             return Err(CredentialRefusal::Disabled);
         }
         let Some(session) = &self.session else {
+            if let Some(expected) = self.equalizing_token() {
+                let _ = core::hint::black_box(match_query_token(expected));
+            }
             return Err(CredentialRefusal::TokenWithoutSessionCredential);
         };
-        match query.session_token_matches(param, &session.token) {
+        match match_query_token(&session.token) {
             Ok(Some(true)) if session.surface == surface => session.within_lifetime(now),
             Ok(Some(_)) | Err(_) => Err(CredentialRefusal::SessionTokenMismatch),
             Ok(None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
@@ -367,6 +415,17 @@ impl Credentials {
         self.admit_surface(token, surface, now).err().map(pending)
     }
 
+    #[cfg(test)]
+    pub(super) fn admit_surface_pending_with<F: FnMut(&SessionToken, &[u8]) -> bool>(
+        &self,
+        token: Option<&[u8]>,
+        surface: SessionSurface,
+        now: RequestNow,
+        compare_token: F,
+    ) -> Option<PendingSessionRefusal> {
+        self.admit_surface_with(token, surface, now, compare_token).err().map(pending)
+    }
+
     /// The presigned-query spelling of [`Credentials::admit_surface_pending`], naming the query
     /// parameter and wire surface.
     pub(crate) fn admit_query_param_pending(
@@ -377,6 +436,20 @@ impl Credentials {
         now: RequestNow,
     ) -> Option<PendingSessionRefusal> {
         self.admit_query_param(query, param, surface, now).err().map(pending)
+    }
+
+    #[cfg(test)]
+    pub(super) fn admit_query_param_pending_with<
+        F: FnMut(&SessionToken) -> Result<Option<bool>, rustfs_gateway_sig::AuthError>,
+    >(
+        &self,
+        surface: SessionSurface,
+        now: RequestNow,
+        match_query_token: F,
+    ) -> Option<PendingSessionRefusal> {
+        self.admit_query_param_with(surface, now, match_query_token)
+            .err()
+            .map(pending)
     }
 
     /// A deep copy, secret included.
@@ -487,13 +560,18 @@ mod tests {
         assert!(rendered.contains("sts.example.com"), "{rendered}");
     }
 
-    /// Negative — a long-term credential refuses a request that presented a token. Ignoring the
-    /// token would silently drop the scope the caller believed it was operating under.
+    /// Negative — a long-term credential refuses a request that presented a token on both header
+    /// and presigned query surfaces. Ignoring the token would silently drop the scope the caller
+    /// believed it was operating under.
     #[test]
     fn a_long_term_credential_refuses_a_presented_token() {
         let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("valid");
         assert_eq!(
             credentials.admit(Some(b"token"), NOW),
+            Err(CredentialRefusal::TokenWithoutSessionCredential)
+        );
+        assert_eq!(
+            credentials.admit_query(RawQuery::new("X-Amz-Security-Token=token"), NOW),
             Err(CredentialRefusal::TokenWithoutSessionCredential)
         );
         assert_eq!(credentials.admit(None, NOW), Ok(()));

@@ -489,9 +489,10 @@ framework's half:
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
   answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1). On the
   SigV4 path the session rules cost the same too: an unknown key is admitted against a
-  placeholder session (`session_answer::placeholder_session`) and the result discarded, so it
-  pays the token comparison, or the presigned query scan and decode, that a known session pays.
-  The SigV2 path does not yet do this placeholder session work.
+  placeholder session (`session_answer::placeholder_session`) and the result discarded, and a
+  disabled key or a long-term key that presents a token pays the same token comparison or
+  presigned query scan before returning its refusal, so every credential state pays the same
+  session work. The SigV2 path does not yet do this placeholder session work.
 - **A credential that exists but cannot be used answers as one that does not exist.** Disabled,
   expired, presented without the session token it is bound to, presented with another token, or
   presented with a token when it is long-term: all are `InvalidAccessKeyId`, byte for byte the
@@ -510,8 +511,8 @@ framework's half:
     any request with them, so this is nothing new.
   - The bearer of a signed artifact it did not mint learns that the session behind it has
     expired rather than being revoked or disabled. This covers a presigned URL, a POST form or a
-    captured request replayed inside the skew window; the bearer holds neither the secret nor the
-    token. A revoked or disabled session answers the uniform refusal.
+    captured request replayed inside the skew window; each carries the session token, so the bearer
+    lacks only the secret. A revoked or disabled session answers the uniform refusal.
   - A caller holding neither a valid signature nor the issued token learns nothing: it gets the
     same bytes as for an unknown access key.
 
