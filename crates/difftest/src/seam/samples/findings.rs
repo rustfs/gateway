@@ -154,6 +154,34 @@ pub(super) fn rows() -> Vec<SeamRow> {
              <EventHoldDuration><Days>2</Days></EventHoldDuration></Retention>",
             "sd-0042",
         ),
+        (
+            "put-bucket-replication-use-source-multi-region-key",
+            "/bucket?replication",
+            "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><ID>r1</ID>\
+             <Priority>1</Priority><Filter/><Status>Enabled</Status><DeleteMarkerReplication><Status>Disabled</Status>\
+             </DeleteMarkerReplication><Destination><Bucket>arn:aws:s3:::dest</Bucket><EncryptionConfiguration>\
+             <UseSourceMultiRegionKey><Status>Enabled</Status></UseSourceMultiRegionKey></EncryptionConfiguration>\
+             </Destination></Rule></ReplicationConfiguration>",
+            "sd-0059",
+        ),
+        (
+            "put-bucket-replication-filter-not",
+            "/bucket?replication",
+            "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><ID>r1</ID>\
+             <Priority>1</Priority><Filter><Not><Prefix>tmp/</Prefix></Not></Filter><Status>Enabled</Status>\
+             <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Destination>\
+             <Bucket>arn:aws:s3:::dest</Bucket></Destination></Rule></ReplicationConfiguration>",
+            "sd-0060",
+        ),
+        (
+            "put-bucket-replication-filter-and-not",
+            "/bucket?replication",
+            "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><ID>r1</ID>\
+             <Priority>1</Priority><Filter><And><Prefix>logs/</Prefix><Not><Prefix>logs/tmp/</Prefix></Not></And></Filter>\
+             <Status>Enabled</Status><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>\
+             <Destination><Bucket>arn:aws:s3:::dest</Bucket></Destination></Rule></ReplicationConfiguration>",
+            "sd-0060",
+        ),
     ] {
         rows.push(row(name, super::document(Method::PUT, target, body), Expect::FailsClosed(finding)));
     }

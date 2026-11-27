@@ -25,7 +25,10 @@ fn the_replication_filter_guard_uses_its_shape_child_names() {
     let generated = body(&artifacts(), "generated/codec/ops/put_bucket_replication.rs");
 
     assert!(generated.contains("if !child.children.is_empty()"), "{generated}");
-    assert!(generated.contains("let recognized = [\"And\", \"Prefix\", \"Tag\"];"), "{generated}");
+    assert!(
+        generated.contains("let recognized = [\"And\", \"Not\", \"Prefix\", \"Tag\"];"),
+        "{generated}"
+    );
     assert!(generated.contains("recognized.contains(&nested.name.as_str())"), "{generated}");
     assert!(
         generated.contains("a non-empty structure contains no recognized child element"),

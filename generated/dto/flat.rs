@@ -56,12 +56,13 @@ pub use crate::ops::shapes::{
     OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus, Progress, ProgressEvent,
     PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, RecordsEvent, Redirect, RedirectAllRequestsTo,
     ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter,
-    ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus,
-    RoutingRule, S3KeyFilter, S3Location, S3TablesDestination, S3TablesDestinationResult, ScanRange,
-    SelectObjectContentEventStream, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-    ServerSideEncryptionRule, SessionCredentials, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms,
-    SsekmsEncryption, Sses3, Stats, StatsEvent, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant,
-    TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
+    ReplicationRuleNotOperator, ReplicationRuleOrOperator, ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration,
+    RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter, S3Location, S3TablesDestination,
+    S3TablesDestinationResult, ScanRange, SelectObjectContentEventStream, SelectParameters, ServerSideEncryptionByDefault,
+    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SessionCredentials, SimplePrefix, SourceSelectionCriteria,
+    SseKmsEncryptedObjects, Ssekms, SsekmsEncryption, Sses3, Stats, StatsEvent, StorageClassAnalysis,
+    StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition,
+    UseSourceMultiRegionKey, VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{

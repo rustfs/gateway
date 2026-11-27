@@ -152,6 +152,8 @@ jobs:
       # Pinned models must match their recorded checksums before anything is generated from them.
       - name: Model integrity
         run: python3 model/tools/verify.py
+      - name: Model drift trait tests
+        run: python3 model/tools/test_drift.py
       - name: Admin inventory reader tests
         run: python3 scripts/test_admin_route_variants.py
       # The opt-in RDMA build helper must refuse a missing, malformed or mismatched private pin;

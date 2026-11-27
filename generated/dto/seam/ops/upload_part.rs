@@ -157,6 +157,7 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartOutput) -> Result<crate::ops:
         ssekms_key_id,
         bucket_key_enabled,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
+        version_id: Default::default(),
     })
 }
 
@@ -169,6 +170,9 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartOutput) -> Result<crate::ops:
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_to_s3s(output: crate::ops::upload_part::Output) -> Result<s3s::dto::UploadPartOutput, ConversionError> {
     let checksum_spec = output.checksum_spec;
+    if output.version_id.is_some() {
+        return Err(ConversionError { field: "version_id", reason: "a multipart upload version id, which no pinned s3s output shape carries" });
+    }
     Ok(s3s::dto::UploadPartOutput {
         bucket_key_enabled: output.bucket_key_enabled,
         checksum_crc32: leaf::checksum_value(checksum_spec.as_ref(), crate::ChecksumAlgorithm::Crc32),

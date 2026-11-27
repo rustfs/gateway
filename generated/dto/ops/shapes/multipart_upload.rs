@@ -45,6 +45,8 @@ pub struct MultipartUpload {
     pub checksum_algorithm: Option<crate::ops::enums::ChecksumAlgorithm>,
     /// Wire `ChecksumType`, bound as BodyXml. Optional.
     pub checksum_type: Option<crate::ops::enums::ChecksumType>,
+    /// Wire `VersionId`, bound as BodyXml. Optional.
+    pub version_id: Option<String>,
 }
 
 impl MultipartUpload {

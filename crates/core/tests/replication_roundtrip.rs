@@ -312,7 +312,11 @@ fn replication_rule_filter() -> impl Strategy<Value = dto::ReplicationRuleFilter
                 usize::from(prefix.is_some()) + tags.len() >= 2
             })
             .prop_map(|(prefix, tags)| dto::ReplicationRuleFilter {
-                and: Some(dto::ReplicationRuleAndOperator { prefix, tags }),
+                and: Some(dto::ReplicationRuleAndOperator {
+                    prefix,
+                    tags,
+                    ..dto::ReplicationRuleAndOperator::default()
+                }),
                 ..dto::ReplicationRuleFilter::default()
             }),
     ]
@@ -347,6 +351,7 @@ fn destination() -> impl Strategy<Value = dto::Destination> {
                 }),
                 encryption_configuration: key_id.map(|replica_kms_key_id| dto::EncryptionConfiguration {
                     replica_kms_key_id: Some(replica_kms_key_id),
+                    ..dto::EncryptionConfiguration::default()
                 }),
                 replication_time: replication_time.map(|(status, minutes)| dto::ReplicationTime {
                     status,

@@ -232,6 +232,9 @@ fn write_multipart_upload(
     if let Some(v) = value.checksum_type.as_ref() {
         writer.element("ChecksumType", v.as_str());
     }
+    if let Some(v) = value.version_id.as_ref() {
+        writer.element("VersionId", v.as_str());
+    }
     Ok(())
 }
 
@@ -254,6 +257,6 @@ fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -
 mod rustfs_order {
     pub(super) const RESPONSE: &[&str] = &["Bucket", "CommonPrefixes", "Delimiter", "EncodingType", "IsTruncated", "KeyMarker", "MaxUploads", "NextKeyMarker", "NextUploadIdMarker", "Prefix", "UploadIdMarker", "Upload"];
     pub(super) const INITIATOR: &[&str] = &["DisplayName", "ID"];
-    pub(super) const MULTIPART_UPLOAD: &[&str] = &["ChecksumAlgorithm", "ChecksumType", "Initiated", "Initiator", "Key", "Owner", "StorageClass", "UploadId"];
+    pub(super) const MULTIPART_UPLOAD: &[&str] = &["ChecksumAlgorithm", "ChecksumType", "Initiated", "Initiator", "Key", "Owner", "StorageClass", "UploadId", "VersionId"];
     pub(super) const OWNER: &[&str] = &["DisplayName", "ID"];
 }

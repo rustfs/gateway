@@ -356,6 +356,7 @@ fn c_dto_n027_a_replication_destination_never_prints_its_account_or_replica_key(
         account: Some("account-must-never-be-logged".to_owned()),
         encryption_configuration: Some(dto::EncryptionConfiguration {
             replica_kms_key_id: Some("replica-key-must-never-be-logged".to_owned()),
+            ..Default::default()
         }),
         ..Default::default()
     };
@@ -375,4 +376,109 @@ fn c_dto_n027_a_replication_destination_never_prints_its_account_or_replica_key(
     );
     let absent = format!("{:?}", dto::Destination::default());
     assert!(absent.contains("account: None"), "an absent account must not look present: {absent}");
+}
+
+#[test]
+fn c_dto_p009_2026_11_21_model_additions_are_optional_and_representable() {
+    // Positive — the 2026-11-21 S3 model additions (rustfs/gateway#1623) are present on the
+    // generated DTOs and carry their declared values.
+    let abort = dto::AbortMultipartUploadOutput {
+        version_id: Some("v1".to_owned()),
+        ..Default::default()
+    };
+    let create = dto::CreateMultipartUploadOutput {
+        version_id: Some("v2".to_owned()),
+        ..Default::default()
+    };
+    let list_parts = dto::ListPartsOutput {
+        version_id: Some("v3".to_owned()),
+        ..Default::default()
+    };
+    let upload = dto::MultipartUpload {
+        version_id: Some("v4".to_owned()),
+        ..Default::default()
+    };
+    let part = dto::UploadPartOutput {
+        version_id: Some("v5".to_owned()),
+        ..Default::default()
+    };
+    let part_copy = dto::UploadPartCopyOutput {
+        version_id: Some("v6".to_owned()),
+        ..Default::default()
+    };
+    assert_eq!(
+        [
+            abort.version_id.as_deref(),
+            create.version_id.as_deref(),
+            list_parts.version_id.as_deref(),
+            upload.version_id.as_deref(),
+            part.version_id.as_deref(),
+            part_copy.version_id.as_deref(),
+        ],
+        [Some("v1"), Some("v2"), Some("v3"), Some("v4"), Some("v5"), Some("v6")]
+    );
+
+    let filter = dto::ReplicationRuleFilter {
+        and: Some(dto::ReplicationRuleAndOperator {
+            not: Some(dto::ReplicationRuleNotOperator {
+                or: Some(dto::ReplicationRuleOrOperator {
+                    prefixes: vec!["a/".to_owned(), "b/".to_owned()],
+                    tags: vec![dto::Tag {
+                        key: Some("env".to_owned()),
+                        value: Some("dev".to_owned()),
+                    }],
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        not: Some(dto::ReplicationRuleNotOperator {
+            prefix: Some("tmp/".to_owned()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert_eq!(filter.not.as_ref().and_then(|n| n.prefix.as_deref()), Some("tmp/"));
+    assert_eq!(
+        filter
+            .and
+            .as_ref()
+            .and_then(|a| a.not.as_ref())
+            .and_then(|n| n.or.as_ref())
+            .map(|o| o.prefixes.len()),
+        Some(2)
+    );
+
+    let kms = dto::UseSourceMultiRegionKey {
+        status: dto::Status::ENABLED,
+    };
+    assert!(kms.status.is_known());
+    assert_eq!(kms.status.as_str(), "Enabled");
+}
+
+#[test]
+fn c_dto_n028_2026_11_21_model_additions_default_absent_and_preserve_redaction() {
+    // Negative — every newly added optional member defaults to `None` rather than fabricating a
+    // value, unknown Status spellings stay unrecognised, and setting UseSourceMultiRegionKey never
+    // weakens replica KMS key redaction in Debug output.
+    assert!(dto::AbortMultipartUploadOutput::default().version_id.is_none());
+    assert!(dto::CreateMultipartUploadOutput::default().version_id.is_none());
+    assert!(dto::ListPartsOutput::default().version_id.is_none());
+    assert!(dto::MultipartUpload::default().version_id.is_none());
+    assert!(dto::UploadPartOutput::default().version_id.is_none());
+    assert!(dto::UploadPartCopyOutput::default().version_id.is_none());
+    assert!(dto::EncryptionConfiguration::default().use_source_multi_region_key.is_none());
+    assert!(dto::ReplicationRuleAndOperator::default().not.is_none());
+    assert!(dto::ReplicationRuleFilter::default().not.is_none());
+    assert!(!dto::Status::custom("FutureStatus").is_known());
+
+    let enc = dto::EncryptionConfiguration {
+        replica_kms_key_id: Some("secret-replica-kms-key".to_owned()),
+        use_source_multi_region_key: Some(dto::UseSourceMultiRegionKey {
+            status: dto::Status::DISABLED,
+        }),
+    };
+    let rendered = format!("{enc:?}");
+    assert!(!rendered.contains("secret-replica-kms-key"), "key leaked: {rendered}");
+    assert!(rendered.contains("use_source_multi_region_key: Some("), "new field visible: {rendered}");
 }

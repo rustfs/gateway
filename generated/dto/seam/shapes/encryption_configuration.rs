@@ -27,6 +27,9 @@ use crate::compat::ConversionError;
 /// [`ConversionError`] naming a member the other side cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn encryption_configuration_to_s3s(value: crate::ops::shapes::EncryptionConfiguration) -> Result<s3s::dto::EncryptionConfiguration, ConversionError> {
+    if value.use_source_multi_region_key.is_some() {
+        return Err(ConversionError { field: "use_source_multi_region_key", reason: "a replication filter negation or multi-region KMS setting, which no pinned s3s shape holds and RustFS does not store" });
+    }
     Ok(s3s::dto::EncryptionConfiguration {
         replica_kms_key_id: value.replica_kms_key_id,
     })
@@ -44,6 +47,7 @@ pub fn encryption_configuration_input_from_s3s(value: s3s::dto::EncryptionConfig
     } = value;
     Ok(crate::ops::shapes::EncryptionConfiguration {
         replica_kms_key_id,
+        use_source_multi_region_key: Default::default(),
     })
 }
 
@@ -59,5 +63,6 @@ pub fn encryption_configuration_output_from_s3s(value: s3s::dto::EncryptionConfi
     } = value;
     Ok(crate::ops::shapes::EncryptionConfiguration {
         replica_kms_key_id,
+        use_source_multi_region_key: Default::default(),
     })
 }

@@ -86,6 +86,18 @@ const NESTED: &[Nested] = &[
     ("Object", &[], &["ListObjectsOutput", "ListObjectsV2Output"]),
     ("ObjectVersion", &[], &["ListObjectVersionsOutput"]),
     ("DeleteMarkerEntry", &[], &["ListObjectVersionsOutput"]),
+    ("MultipartUpload", &[], &["ListMultipartUploadsOutput"]),
+    (
+        "EncryptionConfiguration",
+        &[("PutBucketReplication", "")],
+        &["GetBucketReplicationOutput"],
+    ),
+    (
+        "ReplicationRuleAndOperator",
+        &[("PutBucketReplication", "")],
+        &["GetBucketReplicationOutput"],
+    ),
+    ("ReplicationRuleFilter", &[("PutBucketReplication", "")], &["GetBucketReplicationOutput"]),
 ];
 
 /// Output-side overrides no row can exercise, and the test that proves each: (rule, owner, file,

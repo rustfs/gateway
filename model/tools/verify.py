@@ -41,6 +41,12 @@ import sys
 import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+if TOOLS_DIR not in sys.path:
+    sys.path.insert(0, TOOLS_DIR)
+
+import drift  # noqa: E402
+
 UPSTREAM = "https://github.com/aws/api-models-aws"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 MODELS = ("s3", "sts")
@@ -183,8 +189,25 @@ def main(argv=None):
             operations,
         )
 
+        unknown_traits = drift.project(model)["unknown_traits"]
+        unknown_names = sorted({t for names in unknown_traits.values() for t in names})
+        c.check(
+            not unknown_names,
+            "every Smithy trait in the pinned model is classified in model/tools/drift.py",
+            "0 unclassified traits",
+            unknown_names,
+        )
+
         print(f"  info  {len(blob)} bytes, sha256 {digest}")
         print(f"  info  {len(shapes)} shapes, {operations} operations")
+
+    overlap = sorted(drift.WIRE_TRAITS & drift.IGNORED_TRAITS)
+    c.check(
+        not overlap,
+        "drift.py WIRE_TRAITS and IGNORED_TRAITS are disjoint",
+        "[]",
+        overlap,
+    )
 
     elapsed = time.time() - started
     if c.failures:

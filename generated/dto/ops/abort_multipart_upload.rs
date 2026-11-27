@@ -125,6 +125,8 @@ impl std::fmt::Debug for Input {
 pub struct Output {
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
+    /// Wire `x-amz-version-id`, bound as Header. Optional.
+    pub version_id: Option<String>,
 }
 
 impl Output {

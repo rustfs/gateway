@@ -95,6 +95,7 @@ fn replication_and(prefix: Option<&str>, tags: Vec<Tag>) -> ReplicationRuleAndOp
     ReplicationRuleAndOperator {
         prefix: prefix.map(str::to_owned),
         tags,
+        ..ReplicationRuleAndOperator::default()
     }
 }
 
@@ -306,24 +307,35 @@ fn n_replication_refuses_any_direct_child_beside_an_and() {
             "a prefix",
             ReplicationRuleFilter {
                 prefix: Some("logs/".to_owned()),
-                tag: None,
                 and: Some(legal_replication_and()),
+                ..ReplicationRuleFilter::default()
             },
         ),
         (
             "an empty prefix",
             ReplicationRuleFilter {
                 prefix: Some(String::new()),
-                tag: None,
                 and: Some(legal_replication_and()),
+                ..ReplicationRuleFilter::default()
             },
         ),
         (
             "a tag",
             ReplicationRuleFilter {
-                prefix: None,
                 tag: Some(tag("env", "prod")),
                 and: Some(legal_replication_and()),
+                ..ReplicationRuleFilter::default()
+            },
+        ),
+        (
+            "a not operator",
+            ReplicationRuleFilter {
+                not: Some(rustfs_gateway_types::dto::ReplicationRuleNotOperator {
+                    prefix: Some("logs/tmp/".to_owned()),
+                    ..Default::default()
+                }),
+                and: Some(legal_replication_and()),
+                ..ReplicationRuleFilter::default()
             },
         ),
     ] {
@@ -332,11 +344,75 @@ fn n_replication_refuses_any_direct_child_beside_an_and() {
 }
 
 #[test]
+fn replication_accepts_not_alone_and_paired_inside_and() {
+    let not_op = rustfs_gateway_types::dto::ReplicationRuleNotOperator {
+        prefix: Some("logs/tmp/".to_owned()),
+        ..Default::default()
+    };
+    assert_eq!(
+        replication(ReplicationRuleFilter {
+            not: Some(not_op.clone()),
+            ..ReplicationRuleFilter::default()
+        }),
+        Ok(())
+    );
+    assert_eq!(
+        replication(ReplicationRuleFilter {
+            and: Some(ReplicationRuleAndOperator {
+                prefix: Some("logs/".to_owned()),
+                not: Some(not_op),
+                ..ReplicationRuleAndOperator::default()
+            }),
+            ..ReplicationRuleFilter::default()
+        }),
+        Ok(())
+    );
+}
+
+#[test]
+fn n_replication_refuses_not_beside_direct_siblings_or_alone_inside_and() {
+    let not_op = rustfs_gateway_types::dto::ReplicationRuleNotOperator {
+        prefix: Some("logs/tmp/".to_owned()),
+        ..Default::default()
+    };
+    for (label, filter) in [
+        (
+            "prefix beside not",
+            ReplicationRuleFilter {
+                prefix: Some("logs/".to_owned()),
+                not: Some(not_op.clone()),
+                ..ReplicationRuleFilter::default()
+            },
+        ),
+        (
+            "tag beside not",
+            ReplicationRuleFilter {
+                tag: Some(tag("env", "prod")),
+                not: Some(not_op.clone()),
+                ..ReplicationRuleFilter::default()
+            },
+        ),
+    ] {
+        assert_eq!(replication(filter), Err(ReplicationRejection::FilterNotExclusive), "{label}");
+    }
+    assert_eq!(
+        replication(ReplicationRuleFilter {
+            and: Some(ReplicationRuleAndOperator {
+                not: Some(not_op),
+                ..ReplicationRuleAndOperator::default()
+            }),
+            ..ReplicationRuleFilter::default()
+        }),
+        Err(ReplicationRejection::AndBelowTwoConditions)
+    );
+}
+
+#[test]
 fn n_replication_refuses_an_empty_prefix_beside_a_tag() {
     let filter = ReplicationRuleFilter {
         prefix: Some(String::new()),
         tag: Some(tag("env", "prod")),
-        and: None,
+        ..ReplicationRuleFilter::default()
     };
     assert_eq!(replication(filter), Err(ReplicationRejection::FilterNotExclusive));
 }
@@ -354,8 +430,8 @@ fn n_replication_refuses_an_and_holding_only_an_empty_prefix() {
 fn n_replication_names_the_sibling_when_a_filter_breaks_both_rules() {
     let filter = ReplicationRuleFilter {
         prefix: Some("logs/".to_owned()),
-        tag: None,
         and: Some(replication_and(None, Vec::new())),
+        ..ReplicationRuleFilter::default()
     };
     assert_eq!(replication(filter), Err(ReplicationRejection::FilterNotExclusive));
 }
@@ -367,7 +443,7 @@ fn n_replication_judges_the_schema_coupling_before_the_filter() {
     let mut rule = replication_rule(ReplicationRuleFilter {
         prefix: Some("logs/".to_owned()),
         tag: Some(tag("env", "prod")),
-        and: None,
+        ..ReplicationRuleFilter::default()
     });
     rule.priority = None;
     assert_eq!(replication_of(rule), Err(ReplicationRejection::PriorityMissingWithFilter));

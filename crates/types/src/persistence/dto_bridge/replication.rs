@@ -79,6 +79,9 @@ fn to_dto_destination(value: PersistedReplicationDestination) -> crate::dto::Des
             .encryption_configuration
             .map(|configuration| crate::dto::EncryptionConfiguration {
                 replica_kms_key_id: configuration.replica_kms_key_id,
+                // The historical writer predates the 2026-11-21 model's multi-region KMS option
+                // and never persisted one, so a re-read document carries none (rustfs/gateway#1623).
+                use_source_multi_region_key: None,
             }),
         metrics: value.metrics.map(|metrics| crate::dto::Metrics {
             event_threshold: metrics.event_threshold.map(|threshold| crate::dto::ReplicationTimeValue {
@@ -99,9 +102,13 @@ fn to_dto_destination(value: PersistedReplicationDestination) -> crate::dto::Des
 fn to_dto_filter(value: PersistedReplicationFilter) -> crate::dto::ReplicationRuleFilter {
     crate::dto::ReplicationRuleFilter {
         and: value.and.map(|and| crate::dto::ReplicationRuleAndOperator {
+            // The historical writer predates the 2026-11-21 model's `<Not>` filter operator and
+            // never persisted one, so a re-read document carries none (rustfs/gateway#1623).
+            not: None,
             prefix: and.prefix,
             tags: and.tags.unwrap_or_default().into_iter().map(to_dto_tag).collect(),
         }),
+        not: None,
         prefix: value.prefix,
         tag: value.tag.map(to_dto_tag),
     }
@@ -131,17 +138,20 @@ fn to_dto_source_selection(value: PersistedSourceSelectionCriteria) -> crate::dt
 ///
 /// # Errors
 ///
-/// Returns [`PersistenceBridgeError::Codec`] when the historical writer rejects the value.
+/// Returns [`PersistenceBridgeError::Codec`] when the historical writer rejects the value, or
+/// [`PersistenceBridgeError::UnsupportedMember`] when a present DTO member (such as the
+/// 2026-11-21 `<Not>` filter operator or `<UseSourceMultiRegionKey>`) has no lossless
+/// representation in the historical persistence format.
 pub fn serialize_replication_dto(value: &crate::dto::ReplicationConfiguration) -> Result<Vec<u8>, PersistenceBridgeError> {
     serialize_replication(&PersistedReplicationConfiguration {
         role: value.role.clone(),
-        rules: value.rules.iter().map(from_dto_rule).collect(),
+        rules: value.rules.iter().map(from_dto_rule).collect::<Result<Vec<_>, _>>()?,
     })
     .map_err(Into::into)
 }
 
-fn from_dto_rule(value: &crate::dto::ReplicationRule) -> PersistedReplicationRule {
-    PersistedReplicationRule {
+fn from_dto_rule(value: &crate::dto::ReplicationRule) -> Result<PersistedReplicationRule, PersistenceBridgeError> {
+    Ok(PersistedReplicationRule {
         delete_marker_replication: value
             .delete_marker_replication
             .as_ref()
@@ -151,24 +161,38 @@ fn from_dto_rule(value: &crate::dto::ReplicationRule) -> PersistedReplicationRul
         delete_replication: value.delete_replication.as_ref().map(|wrapper| PersistedReplicationStatus {
             status: wrapper.status.as_str().to_owned(),
         }),
-        destination: from_dto_destination(&value.destination),
+        destination: from_dto_destination(&value.destination)?,
         existing_object_replication: value
             .existing_object_replication
             .as_ref()
             .map(|wrapper| PersistedReplicationStatus {
                 status: wrapper.status.as_str().to_owned(),
             }),
-        filter: value.filter.as_ref().map(from_dto_filter),
+        filter: value.filter.as_ref().map(from_dto_filter).transpose()?,
         id: value.id.clone(),
         prefix: value.prefix.clone(),
         priority: value.priority,
         source_selection_criteria: value.source_selection_criteria.as_ref().map(from_dto_source_selection),
         status: value.status.as_str().to_owned(),
-    }
+    })
 }
 
-fn from_dto_destination(value: &crate::dto::Destination) -> PersistedReplicationDestination {
-    PersistedReplicationDestination {
+fn from_dto_destination(value: &crate::dto::Destination) -> Result<PersistedReplicationDestination, PersistenceBridgeError> {
+    let encryption_configuration = value
+        .encryption_configuration
+        .as_ref()
+        .map(|configuration| {
+            if configuration.use_source_multi_region_key.is_some() {
+                return Err(PersistenceBridgeError::UnsupportedMember(
+                    "ReplicationConfiguration.Rule.Destination.EncryptionConfiguration.UseSourceMultiRegionKey",
+                ));
+            }
+            Ok(PersistedEncryptionConfiguration {
+                replica_kms_key_id: configuration.replica_kms_key_id.clone(),
+            })
+        })
+        .transpose()?;
+    Ok(PersistedReplicationDestination {
         access_control_translation: value.access_control_translation.as_ref().map(|translation| {
             PersistedAccessControlTranslation {
                 owner: translation.owner.clone(),
@@ -176,12 +200,7 @@ fn from_dto_destination(value: &crate::dto::Destination) -> PersistedReplication
         }),
         account: value.account.clone(),
         bucket: value.bucket.clone(),
-        encryption_configuration: value
-            .encryption_configuration
-            .as_ref()
-            .map(|configuration| PersistedEncryptionConfiguration {
-                replica_kms_key_id: configuration.replica_kms_key_id.clone(),
-            }),
+        encryption_configuration,
         metrics: value.metrics.as_ref().map(|metrics| PersistedReplicationMetrics {
             event_threshold: metrics
                 .event_threshold
@@ -204,18 +223,31 @@ fn from_dto_destination(value: &crate::dto::Destination) -> PersistedReplication
             .storage_class
             .as_ref()
             .map(|storage_class| storage_class.as_str().to_owned()),
-    }
+    })
 }
 
-fn from_dto_filter(value: &crate::dto::ReplicationRuleFilter) -> PersistedReplicationFilter {
-    PersistedReplicationFilter {
-        and: value.and.as_ref().map(|and| PersistedReplicationAnd {
-            prefix: and.prefix.clone(),
-            tags: (!and.tags.is_empty()).then(|| and.tags.iter().map(from_dto_tag).collect()),
-        }),
+fn from_dto_filter(value: &crate::dto::ReplicationRuleFilter) -> Result<PersistedReplicationFilter, PersistenceBridgeError> {
+    if value.not.is_some() {
+        return Err(PersistenceBridgeError::UnsupportedMember("ReplicationConfiguration.Rule.Filter.Not"));
+    }
+    let and = value
+        .and
+        .as_ref()
+        .map(|and| {
+            if and.not.is_some() {
+                return Err(PersistenceBridgeError::UnsupportedMember("ReplicationConfiguration.Rule.Filter.And.Not"));
+            }
+            Ok(PersistedReplicationAnd {
+                prefix: and.prefix.clone(),
+                tags: (!and.tags.is_empty()).then(|| and.tags.iter().map(from_dto_tag).collect()),
+            })
+        })
+        .transpose()?;
+    Ok(PersistedReplicationFilter {
+        and,
         prefix: value.prefix.clone(),
         tag: value.tag.as_ref().map(from_dto_tag),
-    }
+    })
 }
 
 fn from_dto_tag(value: &crate::dto::Tag) -> PersistedReplicationTag {
@@ -355,5 +387,58 @@ mod tests {
                 assert_eq!(actual, Some(expected), "{tags}");
             }
         }
+    }
+
+    #[test]
+    fn replication_dto_bridge_refuses_to_drop_use_source_multi_region_key() {
+        let mut parsed = parse_replication_dto(HISTORICAL).expect("the historical document is representable");
+        parsed.rules[0]
+            .destination
+            .encryption_configuration
+            .as_mut()
+            .expect("fixture carries encryption_configuration")
+            .use_source_multi_region_key = Some(crate::dto::UseSourceMultiRegionKey {
+            status: crate::dto::Status::ENABLED,
+        });
+        assert_eq!(
+            serialize_replication_dto(&parsed).expect_err("must refuse unpersisted multi-region KMS option"),
+            PersistenceBridgeError::UnsupportedMember(
+                "ReplicationConfiguration.Rule.Destination.EncryptionConfiguration.UseSourceMultiRegionKey"
+            )
+        );
+    }
+
+    #[test]
+    fn replication_dto_bridge_refuses_to_drop_filter_not_operator() {
+        let mut parsed = parse_replication_dto(HISTORICAL).expect("the historical document is representable");
+        parsed.rules[0].filter.as_mut().expect("fixture carries filter").not = Some(crate::dto::ReplicationRuleNotOperator {
+            prefix: Some("skip/".to_owned()),
+            ..Default::default()
+        });
+        assert_eq!(
+            serialize_replication_dto(&parsed).expect_err("must refuse unpersisted Filter.Not operator"),
+            PersistenceBridgeError::UnsupportedMember("ReplicationConfiguration.Rule.Filter.Not")
+        );
+    }
+
+    #[test]
+    fn replication_dto_bridge_refuses_to_drop_and_not_operator() {
+        let mut parsed = parse_replication_dto(HISTORICAL).expect("the historical document is representable");
+        parsed.rules[0]
+            .filter
+            .as_mut()
+            .and_then(|filter| filter.and.as_mut())
+            .expect("fixture carries filter.and")
+            .not = Some(crate::dto::ReplicationRuleNotOperator {
+            or: Some(crate::dto::ReplicationRuleOrOperator {
+                prefixes: vec!["tmp/".to_owned()],
+                tags: Vec::new(),
+            }),
+            ..Default::default()
+        });
+        assert_eq!(
+            serialize_replication_dto(&parsed).expect_err("must refuse unpersisted Filter.And.Not operator"),
+            PersistenceBridgeError::UnsupportedMember("ReplicationConfiguration.Rule.Filter.And.Not")
+        );
     }
 }

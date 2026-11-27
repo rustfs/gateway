@@ -64,6 +64,8 @@ pub(crate) fn create_multipart_upload(
         request_charged: enumeration(request_charged),
         checksum_algorithm: enumeration(checksum_algorithm),
         checksum_type: enumeration(checksum_type),
+        // Added in the 2026-11-21 S3 model (rustfs/gateway#1623); pinned s3s omits it.
+        version_id: None,
     })
 }
 
@@ -110,6 +112,8 @@ pub(crate) fn upload_part(output: oracle::UploadPartOutput) -> Converted<dto::Up
         ssekms_key_id,
         bucket_key_enabled,
         request_charged: enumeration(request_charged),
+        // Added in the 2026-11-21 S3 model (rustfs/gateway#1623); pinned s3s omits it.
+        version_id: None,
     })
 }
 
@@ -185,6 +189,8 @@ pub(crate) fn abort_multipart_upload(output: oracle::AbortMultipartUploadOutput)
     let oracle::AbortMultipartUploadOutput { request_charged } = output;
     Ok(dto::AbortMultipartUploadOutput {
         request_charged: enumeration(request_charged),
+        // Added in the 2026-11-21 S3 model (rustfs/gateway#1623); pinned s3s omits it.
+        version_id: None,
     })
 }
 
@@ -264,5 +270,7 @@ pub(crate) fn list_parts(output: oracle::ListPartsOutput) -> Converted<dto::List
         request_charged: enumeration(request_charged),
         checksum_algorithm: enumeration(checksum_algorithm),
         checksum_type: enumeration(checksum_type),
+        // Added in the 2026-11-21 S3 model (rustfs/gateway#1623); pinned s3s omits it.
+        version_id: None,
     })
 }

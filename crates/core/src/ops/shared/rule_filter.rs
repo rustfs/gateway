@@ -72,18 +72,22 @@ pub(super) fn lifecycle(filter: &LifecycleRuleFilter) -> Result<(), Rejection> {
     cardinality(children, conditions)
 }
 
-/// Checks a replication `<Filter>`: `Prefix`, `Tag` and `And` are its children, and inside `And`
-/// the prefix and each tag are conditions. There is no object-size member in this family.
+/// Checks a replication `<Filter>`: `Prefix`, `Tag`, `And`, and `Not` are its children, and inside
+/// `And` the prefix, each tag, and `Not` are conditions. There is no object-size member in this
+/// family.
 ///
 /// # Errors
 ///
 /// [`Rejection`] naming the first cardinality rule the filter breaks.
 pub(super) fn replication(filter: &ReplicationRuleFilter) -> Result<(), Rejection> {
-    let children = usize::from(filter.prefix.is_some()) + usize::from(filter.tag.is_some()) + usize::from(filter.and.is_some());
+    let children = usize::from(filter.prefix.is_some())
+        + usize::from(filter.tag.is_some())
+        + usize::from(filter.and.is_some())
+        + usize::from(filter.not.is_some());
     let conditions = filter
         .and
         .as_ref()
-        .map(|and| usize::from(and.prefix.is_some()) + and.tags.len());
+        .map(|and| usize::from(and.prefix.is_some()) + and.tags.len() + usize::from(and.not.is_some()));
     cardinality(children, conditions)
 }
 

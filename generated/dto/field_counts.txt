@@ -1,7 +1,7 @@
 AbacStatus 1
 AbortIncompleteMultipartUpload 1
 AbortMultipartUploadInput 6
-AbortMultipartUploadOutput 1
+AbortMultipartUploadOutput 2
 AccelerateConfiguration 1
 AccessControlPolicy 2
 AccessControlTranslation 1
@@ -37,7 +37,7 @@ CreateBucketMetadataTableConfigurationInput 5
 CreateBucketMetadataTableConfigurationOutput 0
 CreateBucketOutput 1
 CreateMultipartUploadInput 34
-CreateMultipartUploadOutput 14
+CreateMultipartUploadOutput 15
 CreateSessionInput 6
 CreateSessionOutput 5
 CsvInput 7
@@ -92,7 +92,7 @@ DeletedObject 4
 Destination 7
 DestinationResult 3
 Encryption 3
-EncryptionConfiguration 1
+EncryptionConfiguration 2
 EndEvent 0
 Error 4
 ErrorDetails 2
@@ -226,7 +226,7 @@ ListObjectsOutput 11
 ListObjectsV2Input 11
 ListObjectsV2Output 14
 ListPartsInput 10
-ListPartsOutput 16
+ListPartsOutput 17
 LoggingEnabled 4
 MetadataConfiguration 3
 MetadataConfigurationResult 4
@@ -237,7 +237,7 @@ MetadataTableEncryptionConfiguration 2
 Metrics 2
 MetricsAndOperator 3
 MetricsConfiguration 2
-MultipartUpload 8
+MultipartUpload 9
 NoncurrentVersionExpiration 2
 NoncurrentVersionTransition 3
 NotificationConfiguration 4
@@ -326,8 +326,10 @@ RenameObjectOutput 0
 ReplicaModifications 1
 ReplicationConfiguration 2
 ReplicationRule 10
-ReplicationRuleAndOperator 2
-ReplicationRuleFilter 3
+ReplicationRuleAndOperator 3
+ReplicationRuleFilter 4
+ReplicationRuleNotOperator 3
+ReplicationRuleOrOperator 2
 ReplicationTime 2
 ReplicationTimeValue 1
 RequestPaymentConfiguration 1
@@ -375,8 +377,9 @@ UpdateBucketMetadataJournalTableConfigurationOutput 0
 UpdateObjectEncryptionInput 8
 UpdateObjectEncryptionOutput 1
 UploadPartCopyInput 19
-UploadPartCopyOutput 19
+UploadPartCopyOutput 20
 UploadPartInput 14
-UploadPartOutput 8
+UploadPartOutput 9
+UseSourceMultiRegionKey 1
 VersioningConfiguration 4
 WebsiteConfiguration 4

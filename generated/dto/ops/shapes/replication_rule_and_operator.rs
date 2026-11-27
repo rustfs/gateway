@@ -33,6 +33,8 @@ pub struct ReplicationRuleAndOperator {
     pub prefix: Option<String>,
     /// Wire `Tag`, bound as BodyXml. Optional.
     pub tags: Vec<crate::ops::shapes::Tag>,
+    /// Wire `Not`, bound as BodyXml. Optional.
+    pub not: Option<crate::ops::shapes::ReplicationRuleNotOperator>,
 }
 
 impl ReplicationRuleAndOperator {

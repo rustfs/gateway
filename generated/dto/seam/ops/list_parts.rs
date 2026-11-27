@@ -122,6 +122,7 @@ pub fn output_from_s3s(output: s3s::dto::ListPartsOutput) -> Result<crate::ops::
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
+        version_id: Default::default(),
     })
 }
 
@@ -133,6 +134,9 @@ pub fn output_from_s3s(output: s3s::dto::ListPartsOutput) -> Result<crate::ops::
 /// [`ConversionError`] naming a member the s3s output cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_to_s3s(output: crate::ops::list_parts::Output) -> Result<s3s::dto::ListPartsOutput, ConversionError> {
+    if output.version_id.is_some() {
+        return Err(ConversionError { field: "version_id", reason: "a multipart upload version id, which no pinned s3s output shape carries" });
+    }
     Ok(s3s::dto::ListPartsOutput {
         abort_date: output.abort_date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("abort_date", x)?) }).transpose()?,
         abort_rule_id: output.abort_rule_id,
