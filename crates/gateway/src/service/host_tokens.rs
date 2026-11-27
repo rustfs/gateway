@@ -37,7 +37,7 @@ use crate::panic_boundary::contain_decision;
 use crate::trace::RequestTrace;
 
 /// The installed header token verifier with its type erased: the verdict of one admission, read
-/// from one request's own transport values (`HeaderTokenAdmission::verify`).
+/// from one request's own transport values via the sealed facade bridge (ADR-0056).
 pub(crate) type HeaderTokenVerify = Arc<dyn Fn(HeaderTokenAdmission, &TransportExtensions) -> Verdict + Send + Sync>;
 
 impl S3Service {
@@ -92,7 +92,15 @@ impl S3Service {
         let Some(verifier) = &self.inner.bearer_token_verifier else {
             return Verdict::reject(AuthError::AccessDenied);
         };
-        contain_decision(|| admission.verify(verifier.as_ref(), raw_path)).unwrap_or_else(|()| {
+        contain_decision(|| {
+            rustfs_gateway_sig::__facade_internal::verify_bearer(
+                rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+                admission,
+                verifier.as_ref(),
+                raw_path,
+            )
+        })
+        .unwrap_or_else(|()| {
             extension_panicked(Extension::BearerVerifier, trace.request_id(), operation);
             Verdict::reject(AuthError::AccessDenied)
         })

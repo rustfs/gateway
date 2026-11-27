@@ -203,7 +203,7 @@ pub enum IdentityOrigin {
     /// An access key id: a signature, a custom scheme or a bearer token named it.
     AccessKey,
     /// A name the host's verifier reported under a header token claim (ADR-0054). Only
-    /// [`crate::HeaderTokenAdmission::verify`] sets it.
+    /// the sealed header-token verification bridge sets it (ADR-0056).
     HostToken,
 }
 
@@ -583,16 +583,16 @@ pub enum Verdict {
     Reject(AuthError),
     /// A query bearer token was verified by the host's installed verifier (ADR-0042). No signature
     /// was compared: this is not [`Verdict::Authenticated`] and carries no [`SignatureMatch`], no
-    /// scheme and no scope. The [`crate::BearerReceipt`] has no public constructor; only
-    /// [`crate::BearerAdmission::verify`] produces one. Non-exhaustive, so no other crate can
-    /// build this variant around a receipt it holds: match it as `Verdict::Bearer { .. }`.
+    /// scheme and no scope. The [`crate::BearerReceipt`] has no public constructor; only the
+    /// sealed bearer verification bridge produces one (ADR-0056). Non-exhaustive, so no other
+    /// crate can build this variant around a receipt it holds: match it as `Verdict::Bearer { .. }`.
     #[non_exhaustive]
     Bearer(crate::bearer::BearerReceipt),
     /// The host's installed verifier reported the identity its outer layer established for a
     /// request admitted by the floor's header token claim (ADR-0054). No signature was compared:
-    /// no [`SignatureMatch`], no scheme and no scope. Only
-    /// [`crate::HeaderTokenAdmission::verify`] produces the [`crate::HeaderTokenReceipt`], and the
-    /// variant is non-exhaustive for the reason [`Verdict::Bearer`] is: match it as
+    /// no [`SignatureMatch`], no scheme and no scope. Only the sealed header-token verification
+    /// bridge produces the [`crate::HeaderTokenReceipt`] (ADR-0056), and the variant is
+    /// non-exhaustive for the reason [`Verdict::Bearer`] is: match it as
     /// `Verdict::HeaderToken { .. }`.
     #[non_exhaustive]
     HeaderToken(crate::header_token::HeaderTokenReceipt),
@@ -684,7 +684,7 @@ impl Verdict {
     }
 
     /// Builds a bearer verdict from a receipt only a verification produces. Crate-private: only
-    /// [`crate::BearerAdmission::verify`] calls it, so host code cannot wrap a receipt itself.
+    /// `BearerAdmission::verify_inner` calls it, so host code cannot wrap a receipt itself.
     #[must_use]
     pub(crate) fn bearer(receipt: crate::bearer::BearerReceipt) -> Self {
         Self::Bearer(receipt)
@@ -700,7 +700,7 @@ impl Verdict {
     }
 
     /// Builds a header-token verdict from a receipt only a verification produces. Crate-private:
-    /// only [`crate::HeaderTokenAdmission::verify`] calls it, so host code cannot wrap a receipt.
+    /// only `HeaderTokenAdmission::verify_inner` calls it, so host code cannot wrap a receipt.
     #[must_use]
     pub(crate) fn header_token(receipt: crate::header_token::HeaderTokenReceipt) -> Self {
         Self::HeaderToken(receipt)

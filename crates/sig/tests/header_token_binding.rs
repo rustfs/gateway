@@ -34,7 +34,7 @@ use rustfs_gateway_sig::{
 
 use crate::header_token::{
     Accepts, Established, HEADER, NamesWhatWasEstablished, PRINCIPAL, TOKEN, admission_of, admit, claim, server_state,
-    server_state_with, shape, standard_op, with_token,
+    server_state_with, shape, standard_op, verify_ht, with_token,
 };
 use crate::security_floor_fixtures::*;
 
@@ -165,7 +165,7 @@ fn n_a_request_that_holds_nothing_established_never_reaches_the_verifier() {
     let anyone = Accepts::default();
 
     for nothing in [server_state(None), TransportExtensions::default()] {
-        let verdict = admission_of(&floor, &headers, &standard_op()).verify(&anyone, &nothing);
+        let verdict = verify_ht(admission_of(&floor, &headers, &standard_op()), &anyone, &nothing);
         assert_eq!(verdict.rejection(), Some(AuthError::AccessDenied));
         assert!(!verdict.is_anonymous() && verdict.identity().is_none());
     }
@@ -175,7 +175,11 @@ fn n_a_request_that_holds_nothing_established_never_reaches_the_verifier() {
         "the verifier was asked about a request that carried nothing"
     );
 
-    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&anyone, &server_state(Some(Established("x"))));
+    let verdict = verify_ht(
+        admission_of(&floor, &headers, &standard_op()),
+        &anyone,
+        &server_state(Some(Established("x"))),
+    );
     assert_eq!(verdict.identity().map(Identity::access_key_id), Some(PRINCIPAL));
     assert_eq!(anyone.0.load(Ordering::SeqCst), 1);
 }
@@ -199,7 +203,7 @@ fn n_a_value_of_another_type_establishes_nothing() {
         extensions.insert(String::from("PROJECTMEMBER"));
         extensions.insert(());
     });
-    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, &others);
+    let verdict = verify_ht(admission_of(&floor, &headers, &standard_op()), &verifier, &others);
     assert_eq!(verdict.rejection(), Some(AuthError::AccessDenied));
     assert!(verdict.identity().is_none() && !verdict.is_anonymous());
     assert_eq!(verifier.0.load(Ordering::SeqCst), 0);
@@ -209,7 +213,7 @@ fn n_a_value_of_another_type_establishes_nothing() {
         extensions.insert(Identity::new("SOMEONEELSE").expect("a legal name"));
         extensions.insert(Established("PROJECTMEMBER"));
     });
-    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, &own);
+    let verdict = verify_ht(admission_of(&floor, &headers, &standard_op()), &verifier, &own);
     assert_eq!(verdict.identity().map(Identity::access_key_id), Some("PROJECTMEMBER"), "the control");
 }
 
@@ -224,7 +228,7 @@ fn one_verifier_names_for_each_request_what_that_request_carries() {
     let bob = server_state(Some(Established("BOB")));
     let nobody = server_state(None);
     let name = |state: &TransportExtensions| {
-        let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, state);
+        let verdict = verify_ht(admission_of(&floor, &headers, &standard_op()), &verifier, state);
         verdict.identity().map(|identity| identity.access_key_id().to_owned())
     };
     for _ in 0..3 {
@@ -365,8 +369,11 @@ fn a_reported_name_is_marked_and_is_not_the_access_key_of_the_same_spelling() {
     assert_eq!(access_key.origin(), IdentityOrigin::AccessKey);
 
     let floor = SecurityFloor::new().with_header_token_claim(claim());
-    let verdict = admission_of(&floor, &with_token(&[]), &standard_op())
-        .verify(&ReportsAnAccessKeySpelling, &server_state(Some(Established(ACCESS_KEY))));
+    let verdict = verify_ht(
+        admission_of(&floor, &with_token(&[]), &standard_op()),
+        &ReportsAnAccessKeySpelling,
+        &server_state(Some(Established(ACCESS_KEY))),
+    );
     let reported = verdict.identity().expect("a header-token verdict");
     assert_eq!(reported.access_key_id(), ACCESS_KEY, "the spelling is the same");
     assert_eq!(reported.origin(), IdentityOrigin::HostToken);

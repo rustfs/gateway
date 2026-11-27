@@ -62,7 +62,7 @@
 //!
 //! [`HeaderTokenAdmission`] and [`HeaderTokenReceipt`] have private fields, no `Clone`, no
 //! `Default` and no public constructor: the first comes only from the floor, the second only from
-//! [`HeaderTokenAdmission::verify`], which calls the installed verifier.
+//! the sealed facade verification bridge (ADR-0056), which calls the installed verifier.
 //!
 //! ```compile_fail,E0451
 //! use rustfs_gateway_sig::{HeaderTokenAdmission, RequestNow};
@@ -113,8 +113,7 @@
 //! }
 //! ```
 //!
-//! Host code cannot wrap a receipt into a verdict itself; only [`HeaderTokenAdmission::verify`]
-//! does:
+//! Host code cannot wrap a receipt into a verdict itself; only the sealed facade bridge does:
 //!
 //! ```compile_fail,E0624
 //! use rustfs_gateway_sig::{HeaderTokenReceipt, Verdict};
@@ -129,6 +128,22 @@
 //! use rustfs_gateway_sig::{HeaderTokenReceipt, Verdict};
 //! fn launder(receipt: HeaderTokenReceipt) -> Verdict {
 //!     Verdict::HeaderToken(receipt)
+//! }
+//! ```
+//!
+//! Nor invoke header-token verification directly on a [`HeaderTokenAdmission`] (ADR-0056):
+//!
+//! ```compile_fail,E0599
+//! use rustfs_gateway_http::TransportExtensions;
+//! use rustfs_gateway_sig::{HeaderTokenAdmission, HeaderTokenRefused, HeaderTokenVerifier, Identity, RequestNow};
+//! struct Est;
+//! struct V;
+//! impl HeaderTokenVerifier for V {
+//!     type Established = Est;
+//!     fn identity(&self, _: &Est, _: RequestNow) -> Result<Identity, HeaderTokenRefused> { Err(HeaderTokenRefused) }
+//! }
+//! fn mint(admission: HeaderTokenAdmission, state: &TransportExtensions) {
+//!     let _ = admission.verify(&V, state);
 //! }
 //! ```
 //!
@@ -293,13 +308,10 @@ impl HeaderTokenAdmission {
 
     /// Reads what the host's outer layer established in `server_state`, asks `verifier` which
     /// identity that is, and answers with the verdict: [`crate::Verdict::HeaderToken`] naming it,
-    /// or `AccessDenied` when nothing was established or the verifier refuses. This is the only
-    /// way a header-token verdict is built, and it is never anonymous.
-    ///
-    /// `server_state` is the accepted request's own transport values. A request that holds no
-    /// [`HeaderTokenVerifier::Established`] value is refused without the verifier being called.
+    /// or `AccessDenied` when nothing was established or the verifier refuses. Crate-private
+    /// (ADR-0056); reached from the facade only through the sealed internal bridge.
     #[must_use]
-    pub fn verify<V: HeaderTokenVerifier>(self, verifier: &V, server_state: &TransportExtensions) -> crate::Verdict {
+    pub(crate) fn verify_inner<V: HeaderTokenVerifier>(self, verifier: &V, server_state: &TransportExtensions) -> crate::Verdict {
         let Some(established) = server_state.get::<V::Established>() else {
             return crate::Verdict::reject(AuthError::AccessDenied);
         };

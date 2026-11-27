@@ -1458,11 +1458,11 @@ impl S3Service {
                 .map(|context| context.with_post_object_retain_until_offset_seconds(post_date_offset))
                 .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()))
                 .map(|context| match input_bearer {
-                    Some(receipt) => context.with_bearer_receipt(receipt),
-                    None => context,
-                })
-                .map(|context| match bearer_verified_claim {
-                    Some(claim) => context.without_bearer_token(claim),
+                    Some(receipt) => rustfs_gateway_core::__facade_internal::attach_signed_bearer_receipt(
+                        rustfs_gateway_core::__facade_internal::FacadeSeal::new(),
+                        context,
+                        receipt,
+                    ),
                     None => context,
                 });
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;

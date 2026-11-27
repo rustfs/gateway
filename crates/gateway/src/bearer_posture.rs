@@ -49,8 +49,11 @@ mod tests {
 
     #[test]
     fn only_declared_claims_are_reported_and_verifier_state_is_distinct() {
-        let bearer = OperationFloor::custom("example:Download", SigService::S3)
-            .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+        let bearer = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+            rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+            OperationFloor::custom("example:Download", SigService::S3),
+            QueryBearerClaim::new("token", ".zip"),
+        );
         let other = OperationFloor::builtin("PutObject", SigService::S3);
         let absent = log_bearer_posture([&bearer, &other].into_iter(), false);
         let installed = log_bearer_posture([&bearer, &other].into_iter(), true);

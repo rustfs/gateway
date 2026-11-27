@@ -1,0 +1,5 @@
+error[E0599]: no method named `bearer_alongside_signature` found for struct `SecurityFloor` in the current scope
+  --> tests/compile_fail/token_sealing_security_floor_alongside.rs:25:19
+   |
+25 |     let _ = floor.bearer_alongside_signature();
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `SecurityFloor`

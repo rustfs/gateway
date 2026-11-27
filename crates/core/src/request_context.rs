@@ -65,8 +65,7 @@ use std::sync::Arc;
 use http::{HeaderMap, Method, Version};
 use rustfs_gateway_http::{HeaderView, TransportExtensions, WireRequest};
 use rustfs_gateway_sig::{
-    BearerReceipt, Identity, QueryBearerClaim, SecretBytes, SessionToken, SigFamily, SigIdentity, SigLocation, SigService,
-    Verdict, VerifiedScope,
+    BearerReceipt, Identity, SecretBytes, SessionToken, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope,
 };
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
@@ -443,6 +442,10 @@ impl RequestContextView {
         };
         let bearer = verdict.bearer_receipt().map(BearerContext::of);
         let header_token = verdict.header_token_receipt().map(|receipt| receipt.identity().clone());
+        let raw_query = match verdict.bearer_receipt() {
+            Some(receipt) => Box::from(receipt.claim().strip_from(wire.query().as_str())),
+            None => Box::from(wire.query().as_str()),
+        };
         let mut headers = HeaderMap::new();
         for (name, value) in wire.headers().iter_raw() {
             headers.append(name.clone(), value.clone());
@@ -452,7 +455,7 @@ impl RequestContextView {
             method: wire.method().clone(),
             version: wire.version(),
             raw_path: Box::from(wire.raw_path().as_str()),
-            raw_query: Box::from(wire.query().as_str()),
+            raw_query,
             host: Box::from(wire.host().as_str()),
             target_scheme: wire.target_scheme().map(Box::from),
             target_authority: wire.target_authority().map(Box::from),
@@ -481,20 +484,22 @@ impl RequestContextView {
         self
     }
 
-    /// This context, with the host state a bearer verification established for a request whose
-    /// signature also verified (ADR-0042). The facade calls it once, with the receipt it produced
-    /// for this request; the signed principal stays [`Self::principal`].
-    #[must_use]
-    pub fn with_bearer_receipt(mut self, receipt: &BearerReceipt) -> Self {
+    /// Attaches a verified signed-path bearer receipt and strips its query token atomically
+    /// (ADR-0042, ADR-0056). Crate-private; reached from the facade only through the sealed
+    /// internal bridge. Rejects detached, anonymous, duplicate-bearer, cross-operation, and
+    /// cross-principal attachments fail-closed.
+    pub(crate) fn attach_signed_bearer_receipt_inner(mut self, receipt: &BearerReceipt) -> Self {
+        let Some(principal) = self.principal.as_ref() else {
+            return self;
+        };
+        if self.bearer.is_some()
+            || receipt.operation() != self.operation
+            || receipt.identity().access_key_id() != principal.access_key_id()
+        {
+            return self;
+        }
         self.bearer = Some(BearerContext::of(receipt));
-        self
-    }
-
-    /// This context, with every `claim` parameter removed from its query, so a handler never holds
-    /// the bearer token (ADR-0042).
-    #[must_use]
-    pub fn without_bearer_token(mut self, claim: QueryBearerClaim) -> Self {
-        self.raw_query = Box::from(claim.strip_from(&self.raw_query));
+        self.raw_query = Box::from(receipt.claim().strip_from(&self.raw_query));
         self
     }
 

@@ -90,6 +90,9 @@ mod canonical;
 mod contracts {
     include!("../../../generated/signature_contracts.rs");
 }
+#[doc(hidden)]
+#[path = "facade_internal.rs"]
+pub mod __facade_internal;
 mod clock;
 pub mod codec;
 mod derive;

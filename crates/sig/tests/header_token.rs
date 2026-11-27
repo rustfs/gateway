@@ -115,6 +115,27 @@ pub(crate) fn admission_of(floor: &SecurityFloor, headers: &HeaderMap, operation
     }
 }
 
+pub(crate) fn verify_ht<V: HeaderTokenVerifier>(
+    admission: HeaderTokenAdmission,
+    verifier: &V,
+    state: &TransportExtensions,
+) -> rustfs_gateway_sig::Verdict {
+    rustfs_gateway_sig::__facade_internal::verify_header_token(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        admission,
+        verifier,
+        state,
+    )
+}
+
+fn with_bearer_claim(floor: OperationFloor, claim: QueryBearerClaim) -> OperationFloor {
+    rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        floor,
+        claim,
+    )
+}
+
 /// What a host's outer layer leaves in the request for its verifier to name.
 #[derive(Clone)]
 pub(crate) struct Established(pub(crate) &'static str);
@@ -458,9 +479,9 @@ fn n_the_token_on_a_bearer_claimed_operation_is_refused_with_or_without_the_quer
     let bearer_claim = QueryBearerClaim::new("token", ".zip");
     for (floor_name, floor) in claimed_floors() {
         for operation in [
-            OperationFloor::custom("example:Download", SigService::S3).with_query_bearer_claim(bearer_claim),
+            with_bearer_claim(OperationFloor::custom("example:Download", SigService::S3), bearer_claim),
             // Not privileged, so only the claim itself can be what refuses.
-            standard_op().with_query_bearer_claim(bearer_claim),
+            with_bearer_claim(standard_op(), bearer_claim),
         ] {
             let headers = with_token(&[]);
             for query in ["token=opaque", "note=x&token=opaque", "", "note=x"] {
@@ -604,10 +625,7 @@ fn n_privileged_bearer_claimed_and_sigv4_only_operations_refuse_the_scheme() {
             "privileged and anonymous",
             OperationFloor::custom("example:Bootstrap", SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
         ),
-        (
-            "bearer-claimed",
-            standard_op().with_query_bearer_claim(QueryBearerClaim::new("token", ".zip")),
-        ),
+        ("bearer-claimed", with_bearer_claim(standard_op(), QueryBearerClaim::new("token", ".zip"))),
         (
             "credential issuance, anonymous opted in",
             OperationFloor::builtin("example:AssumeRole", SigService::Sts).allow_anonymous_after_listing_in_the_posture_report(),
@@ -663,7 +681,7 @@ fn a_verifier_that_accepts_yields_a_header_token_verdict() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let verifier = Accepts::default();
     let admission = admission_of(&floor, &with_token(&[]), &standard_op());
-    let verdict = admission.verify(&verifier, &server_state(Some(Established("anything"))));
+    let verdict = verify_ht(admission, &verifier, &server_state(Some(Established("anything"))));
     assert_eq!(verifier.0.load(Ordering::SeqCst), 1);
     let receipt = verdict.header_token_receipt().expect("a header-token verdict");
     assert_eq!(receipt.identity().access_key_id(), PRINCIPAL);
@@ -679,7 +697,7 @@ fn a_verifier_that_accepts_yields_a_header_token_verdict() {
 fn n_a_verifier_that_refuses_yields_a_rejection_and_never_anonymous() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let admission = admission_of(&floor, &with_token(&[]), &standard_op());
-    let verdict = admission.verify(&Refuses, &server_state(Some(Established("anything"))));
+    let verdict = verify_ht(admission, &Refuses, &server_state(Some(Established("anything"))));
     assert_eq!(verdict.rejection(), Some(AuthError::AccessDenied));
     assert!(verdict.header_token_receipt().is_none() && verdict.identity().is_none());
     assert!(!verdict.is_anonymous() && !verdict.is_authenticated());
@@ -692,11 +710,17 @@ fn n_an_established_value_that_cannot_be_named_is_a_rejection() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let headers = with_token(&[]);
     let verifier = NamesWhatWasEstablished::default();
-    let unusable =
-        admission_of(&floor, &headers, &standard_op()).verify(&verifier, &server_state(Some(Established("line\r\nbreak"))));
+    let unusable = verify_ht(
+        admission_of(&floor, &headers, &standard_op()),
+        &verifier,
+        &server_state(Some(Established("line\r\nbreak"))),
+    );
     assert_eq!(unusable.rejection(), Some(AuthError::AccessDenied));
-    let usable =
-        admission_of(&floor, &headers, &standard_op()).verify(&verifier, &server_state(Some(Established("PROJECTMEMBER"))));
+    let usable = verify_ht(
+        admission_of(&floor, &headers, &standard_op()),
+        &verifier,
+        &server_state(Some(Established("PROJECTMEMBER"))),
+    );
     assert_eq!(usable.identity().map(Identity::access_key_id), Some("PROJECTMEMBER"));
 }
 
@@ -723,7 +747,7 @@ fn the_verifier_reads_the_admissions_one_clock_reading() {
             panic!("expected a header-token admission");
         };
         let verifier = RecordsNow(std::sync::Mutex::new(None));
-        let _ = admission.verify(&verifier, &server_state(Some(Established("anything"))));
+        let _ = verify_ht(admission, &verifier, &server_state(Some(Established("anything"))));
         assert_eq!(*verifier.0.lock().expect("uncontended"), Some(instant));
     }
 }
@@ -740,7 +764,7 @@ fn n_no_rendering_of_an_admission_or_verdict_holds_the_token() {
         panic!("expected a header-token admission");
     };
     rendered.push(format!("{admission:?}"));
-    let verdict = admission.verify(&Accepts::default(), &server_state(Some(Established("anything"))));
+    let verdict = verify_ht(admission, &Accepts::default(), &server_state(Some(Established("anything"))));
     rendered.push(format!("{verdict:?}"));
     rendered.push(format!("{:?}", verdict.header_token_receipt().expect("a receipt")));
     let both = with_token(&[("authorization", "Bearer x")]);

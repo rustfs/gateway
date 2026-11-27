@@ -1,0 +1,5 @@
+error[E0599]: no method named `with_bearer_receipt` found for struct `RequestContextView` in the current scope
+  --> tests/compile_fail/token_sealing_context_with_bearer_receipt.rs:25:13
+   |
+25 |     context.with_bearer_receipt(receipt)
+   |             ^^^^^^^^^^^^^^^^^^^ method not found in `RequestContextView`

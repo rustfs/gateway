@@ -708,9 +708,18 @@ fn n_a_sigv4_only_operation_refuses_a_query_bearer_token() {
         SecurityFloor::new().recognize_signatures_as_legacy_rustfs(),
     ] {
         let view = WireView::new(&headers, RawQuery::new("token=t"));
-        let refused = floor.admit(view, &sigv4_only_op().with_query_bearer_claim(claim), now());
+        let sigv4_bearer = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+            rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+            sigv4_only_op(),
+            claim,
+        );
+        let refused = floor.admit(view, &sigv4_bearer, now());
         assert_eq!(refused.err(), Some(AuthError::AccessDenied), "{floor:?}");
-        let control = OperationFloor::builtin_presigned("example:SigV4Only", SigService::S3).with_query_bearer_claim(claim);
+        let control = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+            rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+            OperationFloor::builtin_presigned("example:SigV4Only", SigService::S3),
+            claim,
+        );
         assert!(matches!(floor.admit(view, &control, now()), Ok(Admission::Bearer(_))), "{floor:?}");
     }
 }

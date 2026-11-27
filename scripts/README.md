@@ -100,6 +100,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_unsafe_code_allowances.sh` | The external crc-fast unsafe boundary has a reason/removal trigger and local Rust contains no unsafe token | P1-04 |
 | `check_error_resolution_surface.sh` | ADR-0008 keeps one contextual HandlerError carrier, one ErrorResolution-to-S3Error bridge, no pre-resolution status writer, and HandlerError-only StageFilter seams | P1-04 |
 | `check_scope_rejection_surface.sh` | ADR-0009 keeps configured scope remediation typed, canonically ordered, facade-private and separate from custom authenticator verdicts | P1-04 |
+| `check_token_sealing_surface.sh` | ADR-0056 keeps bearer and header-token verdict, receipt, floor-claim, and context construction sealed behind `__facade_internal`, unexported by `rustfs-gateway`, and paired with run-time `from_own_admission` checks and trybuild fixtures | P2 |
 | `check_assembly_case_coverage.sh` | All 24 P7-01 acceptance ids map in order to a named executable test or deterministic guard | P7-01 |
 | `check_ring_boundaries.sh` | Ring 0/1 (`rustfs-gateway*`) depends on no `rustfs-*` crate and no ring-2 `rustfs-gateway-*` crate; `s3s` only via `rustfs-gateway-types`' `compat-s3s` feature, which must keep its `# DELETE BY` marker | P0 (Week-1) |
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |

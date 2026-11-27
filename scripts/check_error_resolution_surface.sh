@@ -529,6 +529,7 @@ validate_harness(
         'cases.compile_fail("tests/compile_fail/committed_*.rs");',
         'cases.compile_fail("tests/compile_fail/error_resolution_*.rs");',
         'cases.compile_fail("tests/compile_fail/registry_*.rs");',
+        'cases.compile_fail("tests/compile_fail/token_sealing_*.rs");',
         'cases.compile_fail("tests/compile_fail/upload_*.rs");',
     ],
 )
@@ -542,6 +543,7 @@ validate_harness(
         'cases.compile_fail("tests/compile_fail/c_mw_*.rs");',
         'cases.compile_fail("tests/compile_fail/error_resolution_*.rs");',
         'cases.compile_fail("tests/compile_fail/host_resolver_*.rs");',
+        'cases.compile_fail("tests/compile_fail/token_sealing_*.rs");',
         'cases.compile_fail("tests/trybuild/credential/*.rs");',
     ],
     exact_body=True,

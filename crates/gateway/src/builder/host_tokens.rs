@@ -108,7 +108,14 @@ impl ServiceBuilder {
     #[must_use]
     pub fn host_verified_header_token(mut self, claim: HeaderTokenClaim, verifier: impl HeaderTokenVerifier) -> Self {
         // The one place the verifier's type is known: the admission reads that type's slot.
-        let verify: HeaderTokenVerify = Arc::new(move |admission, server_state| admission.verify(&verifier, server_state));
+        let verify: HeaderTokenVerify = Arc::new(move |admission, server_state| {
+            rustfs_gateway_sig::__facade_internal::verify_header_token(
+                rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+                admission,
+                &verifier,
+                server_state,
+            )
+        });
         self.header_token = Some((claim, verify));
         self
     }

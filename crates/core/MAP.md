@@ -8,7 +8,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/contracts/precondition.rs` | Closed conditional and byte-range runtime policy types. | A precondition contract needs a new typed consumer input. |
 | `src/contracts/cors.rs` | Closed bucket-CORS runtime policy types and predicates. | A CORS parser, matcher or response path must consume a protected decision. |
 | `src/contracts/select_restore.rs` | Closed select, event-stream and restore runtime policy types. | A select/restore protocol decision needs a typed runtime consumer. |
-| `src/lib.rs` | Module wiring and public re-exports. | Start here for a core task. |
+| `src/lib.rs`, `src/facade_internal.rs` | Module wiring, public re-exports, and ADR-0056 `#[doc(hidden)]` facade-sealed signed-bearer context bridge (`FacadeSeal`). | Start here for a core task or token-sealing boundaries. |
 | `src/op.rs` | Operation identity, origin and authorization requirements. | Add an operation or inspect standard-name rules. |
 | `src/ops/*.rs` | Exactly one `impl Operation` per AWS operation. | Change one operation's static contract. |
 | `src/ops/delete_object_annotation.rs` | Reserves annotation deletion independently of destructive object deletion. | An annotation DELETE routes to DeleteObject or declares the wrong authorization floor. |

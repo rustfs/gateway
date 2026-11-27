@@ -27663,6 +27663,85 @@ expect_guard_pass check_guard_suite_tail_reachable.sh \
     'a default-reachable block written as the last block in the suite' \
     mut_guard_suite_tail_is_default_gated
 
+# ---------------------------------------------------------------------------
+# ADR-0056: check_token_sealing_surface.sh negative mutation cases
+# ---------------------------------------------------------------------------
+
+mut_token_sealing_public_bearer_verify_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/src/bearer.rs")
+text = path.read_text()
+old = "pub(crate) fn verify_inner("
+if old not in text:
+    raise SystemExit("verify_inner not found")
+path.write_text(text.replace(old, "pub fn verify(", 1))
+PYEOF
+}
+expect_fail check_token_sealing_surface.sh \
+    'restoring pub fn BearerAdmission::verify' mut_token_sealing_public_bearer_verify_restored
+
+mut_token_sealing_public_zip_floor_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/dialect-rustfs-admin/src/admin.rs")
+text = path.read_text()
+old = "pub(crate) const fn zip_token_floor("
+if old not in text:
+    raise SystemExit("zip_token_floor not found")
+path.write_text(text.replace(old, "pub const fn zip_token_floor(", 1))
+PYEOF
+}
+expect_fail check_token_sealing_surface.sh \
+    'restoring pub const fn admin::zip_token_floor' mut_token_sealing_public_zip_floor_restored
+
+mut_token_sealing_facade_reexports_seal() {
+    printf '\npub use rustfs_gateway_sig::__facade_internal;\n' >>crates/gateway/src/lib.rs
+}
+expect_fail check_token_sealing_surface.sh \
+    'rustfs-gateway re-exporting __facade_internal' mut_token_sealing_facade_reexports_seal
+
+mut_token_sealing_unauthorized_bridge_caller() {
+    printf '\n#[allow(dead_code)] fn sneak() { let _ = rustfs_gateway_sig::__facade_internal::FacadeSeal::new(); }\n' \
+        >>crates/gateway/src/probe.rs
+}
+expect_fail check_token_sealing_surface.sh \
+    'an unallowlisted file referencing __facade_internal' mut_token_sealing_unauthorized_bridge_caller
+
+mut_token_sealing_authenticated_guard_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/sig/src/facade_internal.rs")
+text = path.read_text()
+old = "let Verdict::Authenticated { identity: signed, .. } = signed_verdict else {"
+if old not in text:
+    raise SystemExit("Verdict::Authenticated guard not found")
+path.write_text(text.replace(old, "let Some(signed) = signed_verdict.identity() else {", 1))
+PYEOF
+}
+expect_fail check_token_sealing_surface.sh \
+    'removing Verdict::Authenticated gate in verify_bearer_alongside_signature' mut_token_sealing_authenticated_guard_dropped
+
+mut_token_sealing_runtime_wall_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/service/authenticate.rs")
+text = path.read_text()
+old = "let verdict = host_tokens::from_own_admission(verdict, bearer_admitted, header_token_admitted);"
+if old not in text:
+    raise SystemExit("from_own_admission call not found")
+path.write_text(text.replace(old, "let verdict = verdict;", 1))
+PYEOF
+}
+expect_fail check_token_sealing_surface.sh \
+    'removing runtime host_tokens::from_own_admission check' mut_token_sealing_runtime_wall_dropped
+
+mut_token_sealing_trybuild_golden_missing() {
+    rm -f crates/sig/tests/compile_fail/token_sealing_bearer_verify.stderr
+}
+expect_fail check_token_sealing_surface.sh \
+    'deleting a token_sealing trybuild golden' mut_token_sealing_trybuild_golden_missing
+
 fi
 
 guard_finish

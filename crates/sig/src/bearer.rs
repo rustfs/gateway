@@ -36,11 +36,11 @@
 //! # What cannot be forged
 //!
 //! [`BearerAdmission`] and [`BearerReceipt`] have private fields, no `Clone`, no `Default` and no
-//! public constructor: the first comes only from the floor, the second only from
-//! [`BearerAdmission::verify`] or [`BearerAdmission::verify_alongside`], which call the installed
-//! verifier on that admission's own token, operation and download. The verifier's
-//! [`BearerGrant`] is constructible — the verifier is the declared trust boundary — but a grant is
-//! not a receipt, and nothing turns one into the other without a verification.
+//! public constructor: the first comes only from the floor, the second only from the sealed facade
+//! verification bridge (ADR-0056), which calls the installed verifier on that admission's own
+//! token, operation and download. The verifier's [`BearerGrant`] is constructible — the verifier is
+//! the declared trust boundary — but a grant is not a receipt, and nothing turns one into the other
+//! without a verification.
 //!
 //! ```compile_fail,E0451
 //! use rustfs_gateway_sig::BearerReceipt;
@@ -63,7 +63,7 @@
 //! }
 //! ```
 //!
-//! Host code cannot wrap a receipt into a verdict itself; only [`BearerAdmission::verify`] does:
+//! Host code cannot wrap a receipt into a verdict itself; only the sealed facade bridge does:
 //!
 //! ```compile_fail,E0624
 //! use rustfs_gateway_sig::{BearerReceipt, Verdict};
@@ -78,6 +78,30 @@
 //! use rustfs_gateway_sig::{BearerReceipt, Verdict};
 //! fn launder(receipt: BearerReceipt) -> Verdict {
 //!     Verdict::Bearer(receipt)
+//! }
+//! ```
+//!
+//! Nor invoke bearer verification directly on a [`BearerAdmission`] (ADR-0056):
+//!
+//! ```compile_fail,E0599
+//! use rustfs_gateway_sig::{BearerAdmission, BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier};
+//! struct V;
+//! impl BearerTokenVerifier for V {
+//!     fn verify(&self, _: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> { Err(BearerRefused) }
+//! }
+//! fn mint(admission: BearerAdmission) {
+//!     let _ = admission.verify(&V, "/x/a.zip");
+//! }
+//! ```
+//!
+//! ```compile_fail,E0599
+//! use rustfs_gateway_sig::{BearerAdmission, BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier, Identity};
+//! struct V;
+//! impl BearerTokenVerifier for V {
+//!     fn verify(&self, _: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> { Err(BearerRefused) }
+//! }
+//! fn mint(admission: BearerAdmission, signed: &Identity) {
+//!     let _ = admission.verify_alongside(&V, "/x/a.zip", signed);
 //! }
 //! ```
 //!
@@ -193,8 +217,8 @@ impl QueryBearerClaim {
 /// A request the floor admitted by an operation's [`QueryBearerClaim`], not yet verified.
 ///
 /// There is no public constructor: [`crate::SecurityFloor::admit`] builds one for a request that
-/// presented no AWS credential surface, and [`crate::SecurityFloor::bearer_alongside_signature`]
-/// for a signed request on the same operation.
+/// presented no AWS credential surface, and the sealed alongside-signature bridge builds one
+/// internally after signature verification (ADR-0056).
 pub struct BearerAdmission {
     operation: &'static str,
     claim: QueryBearerClaim,
@@ -225,15 +249,10 @@ impl BearerAdmission {
     }
 
     /// Verifies a request that presented only the bearer token, and answers with its verdict:
-    /// [`crate::Verdict::Bearer`] or a rejection. This is the only way a bearer verdict is built.
-    ///
-    /// `raw_path` must end with the claim's suffix after a non-empty resource, the verifier must
-    /// accept the token, and the kernel then compares the verifier's [`BearerGrant`] itself: the
-    /// grant's resource must equal the request's own bound resource byte for byte, and the grant
-    /// must not have expired (`expires_at <= now` refuses) against this admission's one clock
-    /// reading. Every refusal is [`AuthError::AccessDenied`].
+    /// [`crate::Verdict::Bearer`] or a rejection. Crate-private (ADR-0056); reached from the facade
+    /// only through the sealed internal bridge.
     #[must_use]
-    pub fn verify(self, verifier: &dyn BearerTokenVerifier, raw_path: &str) -> crate::Verdict {
+    pub(crate) fn verify_inner(self, verifier: &dyn BearerTokenVerifier, raw_path: &str) -> crate::Verdict {
         match self.receipt(verifier, raw_path) {
             Ok(receipt) => crate::Verdict::bearer(receipt),
             Err(error) => crate::Verdict::reject(error),
@@ -257,19 +276,16 @@ impl BearerAdmission {
         Ok(BearerReceipt {
             identity: grant.identity,
             operation: self.operation,
+            claim: self.claim,
             resource: Box::from(resource),
             state: grant.state,
         })
     }
 
     /// Verifies the token of a request whose signature already authenticated `signed`, and
-    /// requires the token to have been issued to that same principal.
-    ///
-    /// # Errors
-    ///
-    /// Everything [`Self::verify`] refuses, and [`AuthError::AccessDenied`] when the token names
-    /// another principal than the signature.
-    pub fn verify_alongside(
+    /// requires the token to have been issued to that same principal. Crate-private (ADR-0056);
+    /// reached from the facade only through the atomic `Verdict::Authenticated`-gated bridge.
+    pub(crate) fn verify_alongside_inner(
         self,
         verifier: &dyn BearerTokenVerifier,
         raw_path: &str,
@@ -453,6 +469,7 @@ pub trait BearerTokenVerifier: Send + Sync + 'static {
 pub struct BearerReceipt {
     identity: Identity,
     operation: &'static str,
+    claim: QueryBearerClaim,
     resource: Box<str>,
     state: VerifiedBearerState,
 }
@@ -468,6 +485,13 @@ impl BearerReceipt {
     #[must_use]
     pub const fn operation(&self) -> &'static str {
         self.operation
+    }
+
+    /// The claim whose query parameter carried the verified token (parameter name and suffix only;
+    /// never the token).
+    #[must_use]
+    pub const fn claim(&self) -> QueryBearerClaim {
+        self.claim
     }
 
     /// The resource the request was bound to.
@@ -576,7 +600,8 @@ mod tests {
     }
 
     fn verdict_at(now: i64, path: &str, host: &Reports) -> crate::Verdict {
-        BearerAdmission::new("op", CLAIM, Zeroizing::new("t".to_owned()), RequestNow::from_unix_seconds(now)).verify(host, path)
+        BearerAdmission::new("op", CLAIM, Zeroizing::new("t".to_owned()), RequestNow::from_unix_seconds(now))
+            .verify_inner(host, path)
     }
 
     #[test]
@@ -605,7 +630,7 @@ mod tests {
 
     #[test]
     fn n_legacy_recognition_never_admits_a_token_beside_an_aws_credential_surface() {
-        let operation = crate::OperationFloor::custom("op", crate::SigService::S3).with_query_bearer_claim(CLAIM);
+        let operation = crate::OperationFloor::custom("op", crate::SigService::S3).with_query_bearer_claim_inner(CLAIM);
         let headers = HeaderMap::new();
         for floor in [
             crate::SecurityFloor::new(),

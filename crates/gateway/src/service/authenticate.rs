@@ -421,27 +421,24 @@ impl S3Service {
         // ADR-0042: with the host verifier installed, a signed request on a bearer-claimed operation
         // must also carry a token the verifier accepts for this download and for the signed
         // principal. The signature verdict stays as it is; the receipt only carries host state.
-        let signed_bearer = match (bearer_verified_claim, &self.inner.bearer_token_verifier, verdict.identity()) {
-            (Some(_), Some(verifier), Some(signed)) if verdict.is_authenticated() => {
-                let verified = self
-                    .inner
-                    .floor
-                    .bearer_alongside_signature(&view, operation_floor, now)
-                    .and_then(|admission| {
-                        admission.map_or(Err(AuthError::AccessDenied), |admission| {
-                            crate::panic_boundary::contain_decision(|| {
-                                admission.verify_alongside(verifier.as_ref(), wire.raw_path().as_str(), signed)
-                            })
-                            .unwrap_or_else(|()| {
-                                crate::logging::extension_panicked(
-                                    Extension::BearerVerifier,
-                                    outcome.trace.request_id(),
-                                    operation,
-                                );
-                                Err(AuthError::AccessDenied)
-                            })
-                        })
-                    });
+        let signed_bearer = match (bearer_verified_claim, &self.inner.bearer_token_verifier) {
+            (Some(_), Some(verifier)) if verdict.is_authenticated() => {
+                let verified = crate::panic_boundary::contain_decision(|| {
+                    rustfs_gateway_sig::__facade_internal::verify_bearer_alongside_signature(
+                        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+                        &self.inner.floor,
+                        &view,
+                        operation_floor,
+                        now,
+                        &verdict,
+                        verifier.as_ref(),
+                        wire.raw_path().as_str(),
+                    )
+                })
+                .unwrap_or_else(|()| {
+                    crate::logging::extension_panicked(Extension::BearerVerifier, outcome.trace.request_id(), operation);
+                    Err(AuthError::AccessDenied)
+                });
                 match verified {
                     Ok(receipt) => Some(receipt),
                     Err(error) => {

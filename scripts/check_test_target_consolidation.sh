@@ -571,6 +571,10 @@ core_registry_sources = {path.stem for path in core_compile_dir.glob("registry_*
 core_registry_goldens = {path.stem for path in core_compile_dir.glob("registry_*.stderr")}
 if core_registry_sources != core_registry_goldens:
     fail("core registry trybuild sources and goldens must remain paired")
+core_token_sealing_sources = {path.stem for path in core_compile_dir.glob("token_sealing_*.rs")}
+core_token_sealing_goldens = {path.stem for path in core_compile_dir.glob("token_sealing_*.stderr")}
+if core_token_sealing_sources != core_token_sealing_goldens:
+    fail("core token-sealing trybuild sources and goldens must remain paired")
 core_calls = [
     'cases.compile_fail("tests/compile_fail/authz_*.rs");',
     'cases.pass("tests/compile_pass/authz_authorized.rs");',
@@ -586,6 +590,8 @@ if core_error_sources:
     core_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
 if core_registry_sources:
     core_calls.append('cases.compile_fail("tests/compile_fail/registry_*.rs");')
+if core_token_sealing_sources:
+    core_calls.append('cases.compile_fail("tests/compile_fail/token_sealing_*.rs");')
 if core_upload_sources:
     core_calls.append('cases.compile_fail("tests/compile_fail/upload_*.rs");')
 expected_core_compile_code = "".join(
@@ -643,6 +649,10 @@ middleware_sources = {path.stem for path in gateway_compile_dir.glob("c_mw_*.rs"
 middleware_goldens = {path.stem for path in gateway_compile_dir.glob("c_mw_*.stderr")}
 if not middleware_sources or middleware_sources != middleware_goldens:
     fail("gateway middleware trybuild sources and goldens must exist and remain paired")
+token_sealing_sources = {path.stem for path in gateway_compile_dir.glob("token_sealing_*.rs")}
+token_sealing_goldens = {path.stem for path in gateway_compile_dir.glob("token_sealing_*.stderr")}
+if not token_sealing_sources or token_sealing_sources != token_sealing_goldens:
+    fail("gateway token-sealing trybuild sources and goldens must exist and remain paired")
 gateway_calls = ['cases.compile_fail("tests/compile_fail/azc_*.rs");']
 gateway_calls.append('cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/compile_fail/c_gov_*.rs");')
@@ -650,6 +660,7 @@ gateway_calls.append('cases.compile_fail("tests/compile_fail/c_mw_*.rs");')
 if error_sources:
     gateway_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/compile_fail/host_resolver_*.rs");')
+gateway_calls.append('cases.compile_fail("tests/compile_fail/token_sealing_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/trybuild/credential/*.rs");')
 expected_gateway_code = "".join(
     (

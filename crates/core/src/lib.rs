@@ -98,6 +98,9 @@
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
+#[doc(hidden)]
+#[path = "facade_internal.rs"]
+pub mod __facade_internal;
 pub mod authz;
 pub mod cancellation;
 pub mod codec;

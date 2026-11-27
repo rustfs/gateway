@@ -1,0 +1,11 @@
+error[E0603]: function `zip_token_floor` is private
+  --> tests/compile_fail/token_sealing_dialect_zip_floor_private.rs:22:57
+   |
+22 |     let _ = rustfs_gateway_dialect_rustfs_admin::admin::zip_token_floor("a:B");
+   |                                                         ^^^^^^^^^^^^^^^ private function
+   |
+note: the function `zip_token_floor` is defined here
+  --> $WORKSPACE/crates/dialect-rustfs-admin/src/admin.rs
+   |
+   | pub(crate) const fn zip_token_floor(name: &'static str) -> OperationFloor {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -377,15 +377,23 @@ async fn a_custom_verifier_cannot_reuse_another_bearer_admission() {
 
     let headers = http::HeaderMap::new();
     let view = WireView::new(&headers, RawQuery::new("token=fixture"));
-    let operation = OperationFloor::custom("example:PriorDownload", SigService::S3)
-        .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+    let operation = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        OperationFloor::custom("example:PriorDownload", SigService::S3),
+        QueryBearerClaim::new("token", ".zip"),
+    );
     let admission = rustfs_gateway::SecurityFloor::new()
         .admit(view, &operation, RequestNow::from_unix_seconds(1))
         .expect("fixture admission");
     let Admission::Bearer(admission) = admission else {
         panic!("the fixture must exercise bearer admission");
     };
-    let receipt = admission.verify(&BearerFixture, "/downloads/first.zip");
+    let receipt = rustfs_gateway_sig::__facade_internal::verify_bearer(
+        rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+        admission,
+        &BearerFixture,
+        "/downloads/first.zip",
+    );
     assert!(receipt.bearer_receipt().is_some(), "the fixture must hold a verified bearer verdict");
     let calls = Arc::new(AtomicUsize::new(0));
     let reached = Arc::new(AtomicUsize::new(0));
@@ -447,15 +455,23 @@ async fn concurrent_custom_requests_cannot_reuse_bearer_admissions() {
         .map(|_| {
             let headers = http::HeaderMap::new();
             let view = WireView::new(&headers, RawQuery::new("token=fixture"));
-            let operation = OperationFloor::custom("example:PriorDownload", SigService::S3)
-                .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+            let operation = rustfs_gateway_sig::__facade_internal::with_query_bearer_claim(
+                rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+                OperationFloor::custom("example:PriorDownload", SigService::S3),
+                QueryBearerClaim::new("token", ".zip"),
+            );
             let Admission::Bearer(admission) = rustfs_gateway::SecurityFloor::new()
                 .admit(view, &operation, RequestNow::from_unix_seconds(1))
                 .expect("fixture admission")
             else {
                 panic!("the fixture must exercise bearer admission")
             };
-            let verdict = admission.verify(&BearerFixture, "/downloads/first.zip");
+            let verdict = rustfs_gateway_sig::__facade_internal::verify_bearer(
+                rustfs_gateway_sig::__facade_internal::FacadeSeal::new(),
+                admission,
+                &BearerFixture,
+                "/downloads/first.zip",
+            );
             assert!(verdict.bearer_receipt().is_some(), "the fixture must hold a verified bearer verdict");
             verdict
         })

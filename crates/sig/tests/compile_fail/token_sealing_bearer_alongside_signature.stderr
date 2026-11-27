@@ -1,0 +1,5 @@
+error[E0599]: no method named `bearer_alongside_signature` found for struct `SecurityFloor` in the current scope
+  --> tests/compile_fail/token_sealing_bearer_alongside_signature.rs:27:34
+   |
+27 |     let _ = SecurityFloor::new().bearer_alongside_signature(&view, &op, RequestNow::from_unix_seconds(1));
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `SecurityFloor`

@@ -262,7 +262,7 @@ impl OperationFloor {
     /// * a SigV2 request, header or presigned, under every [`crate::SigV2Policy`];
     /// * a request admitted by a registered custom scheme
     ///   ([`crate::SecurityFloor::with_custom_schemes`]);
-    /// * a query bearer token ([`OperationFloor::with_query_bearer_claim`]). Registering an
+    /// * a query bearer token ([`OperationFloor::query_bearer_claim`]). Registering an
     ///   operation whose floor combines the two is refused at build time by the registry, and the
     ///   floor refuses the token at request time as well.
     ///
@@ -287,7 +287,7 @@ impl OperationFloor {
     ///
     /// The narrower sibling of that requirement: it changes nothing else. SigV4 is admitted as the
     /// allow-list says; a request that presented no AWS credential — anonymous, a query bearer token
-    /// ([`OperationFloor::with_query_bearer_claim`]) or a registered custom scheme — is decided
+    /// ([`OperationFloor::query_bearer_claim`]) or a registered custom scheme — is decided
     /// exactly as without it. It is for an operation that must stay reachable without a signature
     /// but whose parameters SigV2 would not cover: SigV2 signs neither the body nor most of the
     /// query, so a SigV2 signature does not bind what such an operation acts on
@@ -363,10 +363,10 @@ impl OperationFloor {
 
     /// Admits a request that presents no AWS credential surface by `claim`'s query bearer token,
     /// which only the facade's explicitly installed [`crate::BearerTokenVerifier`] can turn into a
-    /// verdict (ADR-0042). Without that verifier every such request is refused; nothing here makes
-    /// the operation anonymous, and a signed request keeps its signature path.
+    /// verdict (ADR-0042). Crate-private (ADR-0056); reached from allowlisted workspace dialects
+    /// only through the sealed internal bridge.
     #[must_use]
-    pub const fn with_query_bearer_claim(mut self, claim: QueryBearerClaim) -> Self {
+    pub(crate) const fn with_query_bearer_claim_inner(mut self, claim: QueryBearerClaim) -> Self {
         self.bearer = Some(claim);
         self
     }
