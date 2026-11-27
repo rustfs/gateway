@@ -138,7 +138,7 @@ fn part_plans(upload: &Value, decoder: &InProcess) -> Result<Vec<PartPlan>, SutE
 
 impl super::super::Conn {
     pub(super) fn put_fixture_part(
-        &self,
+        &mut self,
         upload_target: &str,
         region: &super::region::FixtureRegion,
         part: &PartPlan,

@@ -19,7 +19,7 @@
 //! interpreting TLS records, or judging observations. Upstream: `super::Connection`; downstream:
 //! `crate::conn`.
 
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::time::Duration;
 
 use super::{Connection, RawResponse, ReadFailure, carries_a_body, find_head_end, parse_response_head};
@@ -61,6 +61,30 @@ impl Connection {
             .set_read_timeout(None)
             .map_err(|error| SutError::Environment(format!("cannot restore the response socket timeout: {error}")))?;
         observed
+    }
+
+    /// Non-blocking check for whether an idle cleartext socket is still open with no unread bytes.
+    ///
+    /// Used by external fixture control reuse so a persistent HTTP/1.1 connection can be validated
+    /// without paying the 250 ms post-exchange observation window.
+    pub(crate) fn probe_reusable_cleartext(&self) -> bool {
+        let socket = self.stream.tcp();
+        if socket.set_nonblocking(true).is_err() {
+            return false;
+        }
+        let mut probe = [0_u8; 1];
+        let reusable = matches!(socket.peek(&mut probe), Err(error) if error.kind() == ErrorKind::WouldBlock);
+        if socket.set_nonblocking(false).is_err() {
+            return false;
+        }
+        reusable
+    }
+
+    /// Writes control bytes while preserving the underlying I/O error kind so a stale keep-alive
+    /// write failure can be distinguished from other transport errors.
+    pub(crate) fn write_control(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.stream.write_all(bytes)?;
+        self.stream.flush()
     }
 
     /// Reads one HTTP/1.1 response: head, then its fixed or chunked body.
