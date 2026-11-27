@@ -83,6 +83,9 @@ sut_start() {
         observer) printf '{"status":200,"answered_by":"upstream"}\n{"status":502,"answered_by":"observer"}\n' >"$MINT_OBSERVER_PROBE" ;;
         esac
     fi
+    if [[ -n "${FAKE_SUT_LOG:-}" ]]; then
+        printf '%s\n' "$FAKE_SUT_LOG" >"$GATEWAY_SUT_LOG"
+    fi
 }
 sut_stop() { :; }
 sut_wait_ready() { return 0; }
@@ -108,6 +111,8 @@ sut_server_header() { printf '%s\n' "${FAKE_SERVER_HEADER-RustFS}"; }
             report = json.loads((root / "out/report.json").read_text()) if (root / "out/report.json").exists() else None
             self.assertEqual((root / "ci/mint/baseline.txt").read_bytes(), baseline, "the reviewed baseline changed")
             self.launched = (state / "sut-command").read_text() if (state / "sut-command").exists() else None
+            self.sut_log_text = (root / "work/compat-sut.log").read_text() if (root / "work/compat-sut.log").exists() else None
+            self.summary_text = (root / "out/summary.md").read_text() if (root / "out/summary.md").exists() else None
             return result, calls, report
 
     def assert_success(self, args, local):
@@ -244,6 +249,35 @@ sut_server_header() { printf '%s\n' "${FAKE_SERVER_HEADER-RustFS}"; }
         self.assertIn("cannot pull the pinned image", result.stderr)
         self.assertFalse(any(c[0] == "create" for c in calls))
         self.assertIsNone(report)
+
+    def test_sut_log_is_redacted_and_summarized_when_present(self):
+        secret = "sut-log-secret-must-be-redacted-1083"
+        sut_log = "\n".join([
+            f"WARN compat_sut: leaked={secret}",
+            "ERROR compat_sut: filesystem backend returned storage_error event=compat_sut_fs_storage_error file=crates/fs/src/put_object.rs line=88",
+            "ERROR compat_sut: server returned 5xx event=compat_sut_server_error method=PUT operation=PutObject status=500 code=InternalError deadline=none request_id=req-1083",
+        ])
+        result, _, report = self.probe(
+            ["--local-image", LOCAL],
+            extra_env={"MINT_SECRET_KEY": secret, "FAKE_SUT_LOG": sut_log},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            report["server_errors"],
+            ["fs_storage_error crates/fs/src/put_object.rs:88", "PUT PutObject 500/InternalError"],
+        )
+        self.assertIn("### Server 5xx diagnostics", self.summary_text)
+        self.assertNotIn(secret, self.sut_log_text)
+        self.assertIn("[REDACTED]", self.sut_log_text)
+        self.assertNotIn(secret, self.summary_text)
+        self.assertNotIn("req-1083", self.summary_text)
+
+    def test_n_absent_sut_log_leaves_server_errors_empty_without_failing(self):
+        result, _, report = self.probe(["--local-image", LOCAL])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIsNone(self.sut_log_text)
+        self.assertEqual(report["server_errors"], [])
+        self.assertNotIn("### Server 5xx diagnostics", self.summary_text)
 
 
 if __name__ == "__main__":

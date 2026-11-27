@@ -407,7 +407,11 @@ if ((${#MINT_TLS_LIST[@]} > 0)); then
 fi
 
 # --- the evidence ------------------------------------------------------------------------
-python3 "${ROOT_DIR}/ci/mint/report.py" redact --secret-env MINT_SECRET_KEY "$MINT_LOG" "${MINT_CONSOLES[@]}" ||
+REDACT_TARGETS=("$MINT_LOG" "${MINT_CONSOLES[@]}")
+if [[ -f "$GATEWAY_SUT_LOG" ]]; then
+    REDACT_TARGETS+=("$GATEWAY_SUT_LOG")
+fi
+python3 "${ROOT_DIR}/ci/mint/report.py" redact --secret-env MINT_SECRET_KEY "${REDACT_TARGETS[@]}" ||
     sut_die "redaction failed; refusing to judge evidence that may still carry signing material"
 
 # A service that died part-way makes every later SDK fail with connection refused, which
@@ -444,6 +448,9 @@ REPORT_ARGS=(
     --markdown "${OUT_DIR}/summary.md"
     --json "${OUT_DIR}/report.json"
 )
+if [[ -f "$GATEWAY_SUT_LOG" ]]; then
+    REPORT_ARGS+=(--sut-log "$GATEWAY_SUT_LOG")
+fi
 if [[ "$MODE" == "record" ]]; then
     REPORT_ARGS+=(--record "${OUT_DIR}/baseline.proposed.txt")
 fi

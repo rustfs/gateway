@@ -95,6 +95,8 @@ mod paging_limits;
 mod post_object;
 #[path = "crud/range_reads.rs"]
 mod range_reads;
+#[path = "crud/storage_error_observer.rs"]
+mod storage_error_observer;
 #[path = "crud/tag_order.rs"]
 mod tag_order;
 #[path = "crud/upload_part_copy.rs"]
