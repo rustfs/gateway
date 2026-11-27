@@ -117,6 +117,10 @@ mod governor_runtime;
 mod governor_streaming;
 #[path = "handler_panic.rs"]
 mod handler_panic;
+#[path = "hardening_auth_and_owner.rs"]
+mod hardening_auth_and_owner;
+#[path = "hardening_post_object.rs"]
+mod hardening_post_object;
 #[path = "header_lookup_allocations.rs"]
 mod header_lookup_allocations;
 #[path = "header_token.rs"]

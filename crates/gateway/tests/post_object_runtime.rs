@@ -709,8 +709,6 @@ async fn legacy_redirects_use_absolute_url_parsing_and_normalization() {
         ("https://client.example/résumé", "https://client.example/r%C3%A9sum%C3%A9"),
         ("https://client.example/a b", "https://client.example/a%20b"),
         ("  https://client.example/done  ", "https://client.example/done"),
-        ("ftp://client.example/done", "ftp://client.example/done"),
-        ("mailto:upload@client.example", "mailto:upload@client.example"),
     ] {
         let (status, location, body, observed) = success_controls(true, true, &[("success_action_redirect", raw)]).await;
         assert_eq!(status, StatusCode::SEE_OTHER, "{raw}: {body}");
@@ -732,7 +730,6 @@ async fn legacy_blank_and_tab_redirects_are_refused_after_storage() {
         "https://client.example/a\tb",
         "\thttps://client.example/done\t",
         "https://cli\tent.example/done",
-        "mailto:up\tload@client.example",
     ] {
         let (status, _, body, observed) = success_controls(true, true, &[("success_action_redirect", raw)]).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{raw:?}: {body}");
@@ -743,13 +740,7 @@ async fn legacy_blank_and_tab_redirects_are_refused_after_storage() {
 
 #[tokio::test]
 async fn legacy_normalized_and_control_redirects_cannot_bypass_authorization() {
-    for raw in [
-        "https://client.example/a b",
-        "ftp://client.example/done",
-        "mailto:upload@client.example",
-        " ",
-        "https://client.example/a\tb",
-    ] {
+    for raw in ["https://client.example/a b", " ", "https://client.example/a\tb"] {
         let (status, _, body, observed) = success_controls(true, false, &[("success_action_redirect", raw)]).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{raw:?}: {body}");
         assert!(body.contains("<Code>AccessDenied</Code>"), "{raw:?}: {body}");

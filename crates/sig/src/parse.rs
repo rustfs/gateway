@@ -145,7 +145,7 @@ impl AmzDate {
         }
         let two = |hi: u8, lo: u8| (hi - b'0') * 10 + (lo - b'0');
         let (hour, minute, second) = (two(time[0], time[1]), two(time[2], time[3]), two(time[4], time[5]));
-        if hour > 23 || minute > 59 || second > 60 {
+        if hour > 23 || minute > 59 || second > 59 {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
         Ok(Self { text: bytes, day })

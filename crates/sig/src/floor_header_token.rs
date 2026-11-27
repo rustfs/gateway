@@ -111,7 +111,7 @@ impl SecurityFloor {
         let other_credential = detect_credentials(view).any()
             || detect_aws_credential_marker(view).is_some()
             || names_a_presigned_parameter(view)
-            || self.custom_schemes.matching(view).is_some()
+            || self.custom_schemes.any_matches(view)
             || view.form_fields().is_some();
         // A refused alias decides the request whatever else it carries: the host's outer layer
         // may have established an identity from it that the gateway cannot see.

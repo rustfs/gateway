@@ -48,6 +48,11 @@ impl<'a> super::Authentication<'a> {
         self.post_form.filename = filename;
         self
     }
+
+    pub(crate) const fn with_verbose_signature_errors(mut self, enabled: bool) -> Self {
+        self.verbose_signature_errors = enabled;
+        self
+    }
 }
 
 /// The signature material the client presented, from whichever surface carried it.

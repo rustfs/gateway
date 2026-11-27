@@ -367,7 +367,7 @@ pub struct InputAuthzRequest<'a> {
 
 impl<'a> InputAuthzRequest<'a> {
     pub(crate) fn new(route: &'a AuthzRequest<'a>, resources: &'a [AuthzRequest<'a>]) -> Self {
-        let visibility = (route.operation == "GetObject").then_some(AuthzRequest {
+        let visibility = matches!(route.operation, "GetObject" | "HeadObject").then_some(AuthzRequest {
             action: "s3:ListBucket",
             resource: ResourceShape::Bucket,
             copy_source_identity: None,

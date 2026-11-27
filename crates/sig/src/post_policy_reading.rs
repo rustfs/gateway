@@ -26,10 +26,14 @@ use super::PostPolicyError;
 /// `x-amz-server-side-encryption*` and `x-ignore-*` families (`is_field_exempt_from_policy`).
 const LEGACY_EXEMPT_FIELDS: [&str; 6] = ["x-amz-signature", "signature", "awsaccesskeyid", "file", "submit", "policy"];
 
-/// Keeps the generic, operator-only, and native readings separate.
+/// The form fields SigV4 POST policy checks exempt from appearing in `conditions`, per AWS S3.
+const SIGV4_EXEMPT_FIELDS: [&str; 3] = ["x-amz-signature", "policy", "file"];
+
+/// Keeps the generic, SigV4, operator-only, and native readings separate.
 #[derive(Clone, Copy)]
 pub(super) enum PolicyReading {
     Strict,
+    StrictSigV4,
     CaseInsensitiveOperators,
     LegacyRustfs,
     /// [`Self::LegacyRustfs`] for the routed SigV2 form, except that the expiration's date and
@@ -41,19 +45,21 @@ pub(super) enum PolicyReading {
 
 impl PolicyReading {
     pub(super) const fn folds_operators(self) -> bool {
-        !matches!(self, Self::Strict)
+        !matches!(self, Self::Strict | Self::StrictSigV4)
     }
 
     /// Whether a form field needs no policy condition: legacy RustFS's own set
     /// ([`LEGACY_EXEMPT_FIELDS`] and the `x-amz-server-side-encryption*` fields, so a signed form
-    /// may choose its KMS key or customer key without naming it, as there), else the gateway's
-    /// ([`super::EXEMPT_FIELDS`]); every `x-ignore-*` field in both.
+    /// may choose its KMS key or customer key without naming it, as there), SigV4's minimal exempt
+    /// set ([`SIGV4_EXEMPT_FIELDS`]), or the SigV2 gateway set ([`super::EXEMPT_FIELDS`]); every
+    /// `x-ignore-*` field in all.
     pub(super) fn exempts(self, name: &str) -> bool {
         name.starts_with("x-ignore-")
             || match self {
                 Self::LegacyRustfs | Self::LegacyRustfsSigV2Form => {
                     LEGACY_EXEMPT_FIELDS.contains(&name) || name.starts_with("x-amz-server-side-encryption")
                 }
+                Self::StrictSigV4 => SIGV4_EXEMPT_FIELDS.contains(&name),
                 Self::Strict | Self::CaseInsensitiveOperators => super::EXEMPT_FIELDS.contains(&name),
             }
     }
@@ -65,7 +71,7 @@ impl PolicyReading {
     pub(super) const fn defer_unlisted_field(self) -> Result<(), PostPolicyError> {
         match self {
             Self::LegacyRustfs | Self::LegacyRustfsSigV2Form => Ok(()),
-            Self::Strict | Self::CaseInsensitiveOperators => Err(PostPolicyError::ConditionFailed),
+            Self::Strict | Self::StrictSigV4 | Self::CaseInsensitiveOperators => Err(PostPolicyError::ConditionFailed),
         }
     }
 
@@ -83,7 +89,7 @@ impl PolicyReading {
                 Some(b'T' | b't') => parse_legacy(value),
                 _ => Err(PostPolicyError::Malformed),
             },
-            Self::Strict | Self::CaseInsensitiveOperators => {
+            Self::Strict | Self::StrictSigV4 | Self::CaseInsensitiveOperators => {
                 crate::clock::unix_seconds(&super::parse_expiration(value)?).ok_or(PostPolicyError::Malformed)
             }
         }
@@ -128,9 +134,16 @@ fn parse_legacy(value: &str) -> Result<i64, PostPolicyError> {
     }
     // Native ignores exactly one ASCII separator byte; date/time fields remain validated.
     // Fractions are truncated under the existing whole-second request-clock contract.
-    let normalized = format!("{}T{}Z", &local[..10], &local[11..19]);
+    // `AmzDate` rejects leap second `60`, so validate the date/hour/minute at `:59` and add one
+    // second before checking the month boundary.
+    let (normalized, leap_offset) = if second == 60 {
+        (format!("{}T{}:59Z", &local[..10], &local[11..16]), 1)
+    } else {
+        (format!("{}T{}Z", &local[..10], &local[11..19]), 0)
+    };
     let date = super::parse_expiration(&normalized)?;
     let utc = crate::clock::unix_seconds(&date)
+        .and_then(|seconds| seconds.checked_add(leap_offset))
         .and_then(|seconds| seconds.checked_sub(offset))
         .ok_or(PostPolicyError::Malformed)?;
     if second == 60 {

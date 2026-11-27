@@ -184,27 +184,9 @@ fn parse_content_sha256(headers: &HeaderMap) -> Result<Option<ContentSha256>, Au
     Ok(Some(ContentSha256::HexDigest(hash)))
 }
 
-/// Parses a 64-character lowercase hex string into a 32-byte SHA-256 digest.
+/// Parses a 64-character lowercase hex string into a 32-byte SHA-256 digest (T10).
 fn parse_hex_sha256(hex: &str) -> Result<[u8; 32], ()> {
-    if hex.len() != 64 {
-        return Err(());
-    }
-    let bytes = hex.as_bytes();
-    let mut digest = [0u8; 32];
-    for (i, chunk) in bytes.chunks_exact(2).enumerate() {
-        digest[i] = (hex_nibble(chunk[0])? << 4) | hex_nibble(chunk[1])?;
-    }
-    Ok(digest)
-}
-
-/// Converts a single hex character to its 4-bit value.
-fn hex_nibble(byte: u8) -> Result<u8, ()> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(()),
-    }
+    crate::codec::decode_hex_lower::<32>(hex).map_err(|_| ())
 }
 
 #[cfg(test)]
@@ -339,5 +321,22 @@ mod tests {
         let signed = make_signed("host", &headers_for_parse);
         let result = PresignedRequest::enforce(&headers, &signed);
         assert!(result.is_err());
+    }
+
+    /// Negative — T10: uppercase hex in `x-amz-content-sha256` is rejected so two spellings never
+    /// decode to one digest.
+    #[test]
+    fn n_p3_uppercase_hex_hash_is_rejected() {
+        let uppercase = "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855";
+        let mixed = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85F";
+        for hex in [uppercase, mixed] {
+            let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-content-sha256", hex)]);
+            let signed = make_signed("host;x-amz-content-sha256", &headers);
+            assert_eq!(
+                PresignedRequest::enforce(&headers, &signed).err(),
+                Some(AuthError::SignatureDoesNotMatch),
+                "uppercase hex must be rejected: {hex}"
+            );
+        }
     }
 }

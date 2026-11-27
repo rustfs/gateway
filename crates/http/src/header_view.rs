@@ -87,6 +87,7 @@ pub const SINGLE_VALUED_HEADERS: &[&str] = &[
     "content-length",
     "content-md5",
     "content-type",
+    "date",
     "transfer-encoding",
     "x-amz-checksum-type",
     "x-amz-content-sha256",

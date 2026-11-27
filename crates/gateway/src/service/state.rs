@@ -18,6 +18,7 @@
 //! Upstream: `ServiceBuilder`. Downstream: `S3Service` and its host.
 
 use super::*;
+use crate::gate::BodyDigestObligation;
 
 impl core::fmt::Debug for S3Service {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -136,6 +137,20 @@ impl<B: http_body::Body> RoutedBody<B> {
         match self {
             Self::PostObject(prelude) => prelude.file_name(),
             Self::Ordinary(_) => None,
+        }
+    }
+}
+
+impl<B> RoutedBody<B>
+where
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    pub(super) fn sts_body_reader(&self) -> Option<&dyn crate::gate::StsBodyReader> {
+        match self {
+            Self::Ordinary(sealed) => Some(sealed),
+            Self::PostObject(_) => None,
         }
     }
 }

@@ -161,24 +161,27 @@ impl SigV4Authenticator {
 
         // Decided here, answered at the bottom — the same ordering the SigV4 path uses, and for
         // the same reason: a session rule answered early is an expired token distinguishable from
-        // a wrong secret by the clock alone.
-        //
+        // a wrong secret by the clock alone. An unknown key is admitted against a placeholder
+        // session and the result discarded so both paths perform the same session check.
+        let token = match sealed.mode() {
+            SigV2Mode::PostPolicy => view.form_value("x-amz-security-token").map(str::as_bytes),
+            SigV2Mode::HeaderAuth => view
+                .headers()
+                .get(X_AMZ_SECURITY_TOKEN_HEADER)
+                .map(http::HeaderValue::as_bytes),
+            // SigV2's canonical resource does not cover the session-token query field, so
+            // accepting one would bind a temporary credential to unsigned material.
+            SigV2Mode::PresignedUrl => None,
+            _ => None,
+        };
         let refusal = match &resolved {
-            Ok(CredentialLookup::Found(credentials)) => {
-                let token = match sealed.mode() {
-                    SigV2Mode::PostPolicy => view.form_value("x-amz-security-token").map(str::as_bytes),
-                    SigV2Mode::HeaderAuth => view
-                        .headers()
-                        .get(X_AMZ_SECURITY_TOKEN_HEADER)
-                        .map(http::HeaderValue::as_bytes),
-                    // SigV2's canonical resource does not cover the session-token query field, so
-                    // accepting one would bind a temporary credential to unsigned material.
-                    SigV2Mode::PresignedUrl => None,
-                    _ => None,
-                };
-                credentials.admit(token, sealed.now()).err()
+            Ok(CredentialLookup::Found(credentials)) => credentials.admit(token, sealed.now()).err(),
+            Ok(CredentialLookup::NotFound) | Err(_) => {
+                if let Some(placeholder) = super::session_answer::placeholder_session() {
+                    let _ = placeholder.admit(token, sealed.now());
+                }
+                None
             }
-            Ok(CredentialLookup::NotFound) | Err(_) => None,
         };
 
         let proof: Option<SignatureMatch> = match sealed.mode() {

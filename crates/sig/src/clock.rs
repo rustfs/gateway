@@ -402,6 +402,9 @@ pub(crate) fn unix_seconds(date: &AmzDate) -> Option<i64> {
     };
     let (year, month, day) = (digits(0..4)?, digits(4..6)?, digits(6..8)?);
     let (hour, minute, second) = (digits(9..11)?, digits(11..13)?, digits(13..15)?);
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
     let days = days_from_civil(year, month, day)?;
     days.checked_mul(86_400)?
         .checked_add(hour.checked_mul(3_600)?)?

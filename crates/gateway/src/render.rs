@@ -36,6 +36,8 @@ use crate::{close::ConnectionIntent, ext::Denial, trace::RequestTrace};
 
 #[path = "render_json.rs"]
 pub(crate) mod json;
+#[path = "render_redact.rs"]
+mod redact;
 
 /// Optional refusal headers, details, and redacted signature diagnostics behind one pointer.
 #[derive(Clone, Default)]
@@ -244,6 +246,7 @@ pub(crate) fn from_auth_with_detail(
     error: AuthError,
     detail: Option<&SignatureMismatchDetail>,
     verbose: bool,
+    bearer_param: Option<&str>,
     response: ResponseKind,
     body_owed: bool,
 ) -> S3Error {
@@ -262,50 +265,11 @@ pub(crate) fn from_auth_with_detail(
         headers: Vec::new(),
         details: Vec::new(),
         signature: Some(SignatureDetails {
-            canonical_request: redact_sensitive_canonical_values(canonical_request),
+            canonical_request: redact::redact_sensitive_canonical_values(canonical_request, bearer_param),
             string_to_sign: string_to_sign.to_owned(),
         }),
     }));
     rendered
-}
-
-fn redact_sensitive_canonical_values(canonical_request: &str) -> String {
-    canonical_request
-        .lines()
-        .enumerate()
-        .map(|(line_number, line)| {
-            if line_number == 2 {
-                return line
-                    .split('&')
-                    .map(|parameter| match parameter.split_once('=') {
-                        Some((name, _))
-                            if matches!(
-                                name.to_ascii_lowercase().as_str(),
-                                "x-amz-credential" | "x-amz-security-token" | "x-amz-s3session-token" | "x-amz-signature"
-                            ) =>
-                        {
-                            format!("{name}=__REDACTED__")
-                        }
-                        _ => parameter.to_owned(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join("&");
-            }
-            let Some((name, _)) = line.split_once(':') else {
-                return line.to_owned();
-            };
-            let sensitive = matches!(name, "x-amz-security-token" | "x-amz-s3session-token")
-                || (name.starts_with("x-amz-server-side-encryption-")
-                    && (name.contains("customer-key") || name.ends_with("aws-kms-key-id")))
-                || (name.starts_with("x-amz-copy-source-server-side-encryption-") && name.contains("customer-key"));
-            if sensitive {
-                format!("{name}:__REDACTED__")
-            } else {
-                line.to_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 pub(crate) fn from_auth_context(error: AuthError, context: ErrorContext, response: ResponseKind, body_owed: bool) -> S3Error {
@@ -515,7 +479,7 @@ mod tests {
     #[test]
     fn verbose_details_redact_presigned_credentials() {
         let canonical = "GET\n/key\nX-Amz-Credential=AKID%2Fscope&X-Amz-Security-Token=session-secret&prefix=visible\nhost:example.com\n\nhost\nUNSIGNED-PAYLOAD";
-        let redacted = redact_sensitive_canonical_values(canonical);
+        let redacted = redact::redact_sensitive_canonical_values(canonical, None);
         assert!(redacted.contains("X-Amz-Credential=__REDACTED__"), "{redacted}");
         assert!(redacted.contains("X-Amz-Security-Token=__REDACTED__"), "{redacted}");
         assert!(redacted.contains("prefix=visible"), "{redacted}");

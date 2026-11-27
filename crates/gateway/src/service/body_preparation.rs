@@ -12,29 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The body reader offered to authentication and the body resolved after its verdict.
+//! The body resolved after authentication's verdict.
 //!
-//! Responsible for: offering the STS reader only for an ordinary body, and retaining or resolving
-//! the body after metadata admission. NOT responsible for: signature verification or body reads.
-//! Upstream: `super::S3Service::run`. Downstream: the authenticator and `crate::post_object`.
+//! Responsible for: retaining an ordinary sealed body or resolving a `PostObject` prelude after
+//! metadata admission. NOT responsible for: signature verification or body reads.
+//! Upstream: `super::S3Service::run`. Downstream: `crate::post_object`.
 
 use super::{AcceptedBody, RoutedBody, S3Service};
-use crate::gate::StsBodyReader;
 use crate::render::S3Error;
-
-impl<B> RoutedBody<B>
-where
-    B: http_body::Body + Send + 'static,
-    B::Data: Send,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    pub(super) fn sts_body_reader(&self) -> Option<&dyn StsBodyReader> {
-        match self {
-            Self::Ordinary(body) => Some(body),
-            Self::PostObject(_) => None,
-        }
-    }
-}
 
 impl S3Service {
     pub(super) fn resolve_routed_body<B>(

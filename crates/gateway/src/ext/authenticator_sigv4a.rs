@@ -231,7 +231,9 @@ impl SigV4Authenticator {
         let mut mismatch_detail: Option<SignatureMismatchDetail> = None;
         for candidate in spec.candidates()? {
             let string_to_sign = candidate.string_to_sign_v4a(&date, presented.scope());
-            mismatch_detail = Some(SignatureMismatchDetail::new(&candidate, &string_to_sign));
+            if request.verbose_signature_errors {
+                mismatch_detail = Some(SignatureMismatchDetail::new(&candidate, &string_to_sign));
+            }
             if let Ok(proof) = verify_sigv4a_signature(&verifying_key, &verified, &string_to_sign, presented.signature()) {
                 matched = matched.or(Some(proof));
             }

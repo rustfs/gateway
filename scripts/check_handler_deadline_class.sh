@@ -507,14 +507,16 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # and crates/gateway/tests/service_routes.rs each declare Standard on their custom operation spec.
 # explicit=55: the S3 Vectors isolation fixture in crates/gateway/tests/service_routes/fixture.rs
 # declares Standard on its custom operation spec alongside the existing service-routing fixtures.
-if central_builders != 122 or explicit_builders != 55:
+# explicit=56: the bearer-download hardening fixture in
+# crates/gateway/tests/hardening_auth_and_owner.rs declares Standard on its custom operation spec.
+if central_builders != 122 or explicit_builders != 56:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=122 explicit=55"
+        f"central={central_builders} explicit={explicit_builders}, expected central=122 explicit=56"
     )
 
 print(
-    "check_handler_deadline_class: 182 repository builder sites are inventoried "
-    "(177 classified: 122 central standard, 55 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 183 repository builder sites are inventoried "
+    "(178 classified: 122 central standard, 56 explicit; 5 authority tests)"
 )
 PY
