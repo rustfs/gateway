@@ -663,22 +663,17 @@ impl FsBackend {
             .map_err(|_| storage_error())?;
         let mut file = tokio::fs::File::from_std(std_file);
         file.write_all(record.as_bytes()).await.map_err(|_| storage_error())?;
+        // `sync_all` awaits Tokio's in-flight write-behind task before fsyncing.
         file.sync_all().await.map_err(|_| storage_error())?;
         drop(file);
         // The initiation's tags travel beside the record, in the form a version stores them,
         // and are published with the completed object (rustfs/gateway#1000).
         if !attributes.tags.is_empty() {
-            let std_tags = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(temporary.join(TAGS_FILE))
-                .map_err(|_| storage_error())?;
-            let mut tags_file = tokio::fs::File::from_std(std_tags);
-            tags_file
-                .write_all(super::tagging::serialize_tags(&attributes.tags).as_ref())
-                .await
-                .map_err(|_| storage_error())?;
-            drop(tags_file);
+            super::staging::create_and_write_file(
+                &temporary.join(TAGS_FILE),
+                super::tagging::serialize_tags(&attributes.tags).as_ref(),
+            )
+            .await?;
         }
         #[cfg(test)]
         super::staging::test_hooks::maybe_pause("create_upload").await;

@@ -33,9 +33,10 @@ use std::task::{Context, Waker};
 
 use rustfs_gateway::dto::{
     CompleteMultipartUpload, CompleteMultipartUploadInput, CompletedMultipartUpload, CompletedPart, CreateBucket,
-    CreateBucketInput, CreateMultipartUpload, CreateMultipartUploadInput, DeleteBucket, DeleteBucketInput,
+    CreateBucketInput, CreateMultipartUpload, CreateMultipartUploadInput, DeleteBucket, DeleteBucketInput, PutObject,
+    PutObjectInput,
 };
-use rustfs_gateway::{BucketName, ErrorCode, Handler, ObjectKey, Req, UploadIdClaim};
+use rustfs_gateway::{BucketName, ByteStream, ErrorCode, Handler, ObjectKey, Req, UploadIdClaim};
 
 use super::records::ObjectAttributes;
 use super::staging::test_hooks::pause_at;
@@ -591,4 +592,130 @@ async fn n_crash_left_upload_staging_dirs_recover_while_symlink_and_unknown_fail
     }
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Negative — Tokio's `tokio::fs::File::write_all` returns before its final background write
+/// finishes unless flushed. On the very poll that `publish_version` or `create_upload_locked`
+/// renames its staging directory into `v-*` or `u-*`, every staged file (`body`, `tags`, `record`)
+/// must already be completely flushed on disk — never 0-byte or truncated.
+#[test]
+fn n_published_version_and_upload_tags_flush_before_rename() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .expect("build single-blocking-thread runtime");
+
+    runtime.block_on(async {
+        let root = scratch_root("flush-before-rename");
+        let backend = FsBackend::open(&root).expect("open backend");
+        create_bucket(&backend, "flush-bkt").await;
+
+        let versions_dir = backend.versions_path("flush-bkt");
+        // Exceeds Tokio's 2 MiB File::poll_write chunk ceiling so BODY_FILE spans multiple
+        // background writes before TAGS_FILE, RECORD_FILE, and rename.
+        let multi_chunk: Vec<u8> = (0..(3 * 1024 * 1024))
+            .map(|idx| u8::try_from(idx % 251).expect("below 251"))
+            .collect();
+        let big_input = PutObjectInput {
+            bucket: BucketName::new("flush-bkt").expect("bucket"),
+            key: ObjectKey::new("big-3mib").expect("key"),
+            tagging: Some("size=3mib".to_owned()),
+            body: Some(ByteStream::from_bytes(bytes::Bytes::from(multi_chunk.clone()))),
+            ..PutObjectInput::default()
+        };
+
+        let mut put_fut = Box::pin(Handler::<PutObject>::call(&backend, Req::new(big_input, sse_proof())));
+        let mut observed_commit = false;
+        let put_result = std::future::poll_fn(|cx| {
+            let poll = Pin::as_mut(&mut put_fut).poll(cx);
+            if !observed_commit && let Some(name) = entries_with_prefix(&versions_dir, "v-").into_iter().next() {
+                observed_commit = true;
+                let dir = versions_dir.join(name);
+                let body = std::fs::read(dir.join("body")).expect("committed body readable");
+                assert_eq!(body.len(), multi_chunk.len(), "v-* renamed before multi-chunk body flushed");
+                let tags = std::fs::read_to_string(dir.join("tags")).expect("committed tags readable");
+                assert!(tags.contains("size"), "v-* renamed before version tags flushed: {tags:?}");
+                let record = std::fs::read_to_string(dir.join("record")).expect("committed record readable");
+                assert!(!record.is_empty(), "v-* renamed before version record flushed (0-byte record on disk)");
+            }
+            poll
+        })
+        .await;
+        assert!(observed_commit, "PutObject must commit a v-* directory");
+        put_result.expect("multi-chunk PutObject must succeed");
+
+        // Same atomic-visibility check for tagged CreateMultipartUpload: the instant `u-*` is
+        // renamed into place, its `tags` file must already be flushed on disk.
+        let uploads_dir = backend.uploads_path("flush-bkt");
+        let upload_input = CreateMultipartUploadInput {
+            bucket: BucketName::new("flush-bkt").expect("bucket"),
+            key: ObjectKey::new("flushed-mpu").expect("key"),
+            tagging: Some("mpu=flushed".to_owned()),
+            ..CreateMultipartUploadInput::default()
+        };
+        let mut mpu_fut = Box::pin(Handler::<CreateMultipartUpload>::call(&backend, Req::new(upload_input, sse_proof())));
+        let mut observed_upload = false;
+        let mpu_result = std::future::poll_fn(|cx| {
+            let poll = Pin::as_mut(&mut mpu_fut).poll(cx);
+            if !observed_upload && let Some(name) = entries_with_prefix(&uploads_dir, "u-").into_iter().next() {
+                observed_upload = true;
+                let tags = std::fs::read_to_string(uploads_dir.join(name).join("tags")).expect("committed upload tags readable");
+                assert!(tags.contains("mpu"), "u-* renamed before upload tags flushed: {tags:?}");
+            }
+            poll
+        })
+        .await;
+        assert!(observed_upload, "CreateMultipartUpload must commit a u-* directory");
+        mpu_result.expect("CreateMultipartUpload with tags must succeed");
+
+        let _ = std::fs::remove_dir_all(root);
+    });
+}
+
+/// Negative — deterministic proof that `staging::create_and_write_file` stays `Poll::Pending`
+/// until Tokio's background write actually completes on disk, preventing `rename` from exposing
+/// a 0-byte or truncated file when the blocking pool is saturated.
+#[test]
+fn n_staging_create_and_write_file_waits_for_blocking_flush() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .expect("build single-blocking-thread runtime");
+
+    runtime.block_on(async {
+        let root = scratch_root("staging-flush-pending");
+        let path = root.join("record");
+        let payload = b"committed-version-record-bytes";
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = started_tx.send(());
+            let _ = release_rx.recv();
+        });
+        started_rx.recv().expect("blocker entered sole blocking thread");
+
+        let mut fut = Box::pin(super::staging::create_and_write_file(&path, payload));
+        let mut cx = Context::from_waker(Waker::noop());
+        let first_poll = Pin::as_mut(&mut fut).poll(&mut cx);
+        assert!(
+            first_poll.is_pending(),
+            "create_and_write_file must stay Poll::Pending until Tokio flushes the blocking write (saw {first_poll:?}, disk len={})",
+            std::fs::read(&path).map(|b| b.len()).unwrap_or(0)
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("synchronously created file exists").len(),
+            0,
+            "sole blocking thread is still blocked so write cannot have landed yet"
+        );
+
+        let _ = release_tx.send(());
+        blocker.await.expect("blocker joins");
+        fut.await.expect("create_and_write_file finishes once blocking thread is free");
+        assert_eq!(std::fs::read(&path).expect("flushed bytes readable"), payload);
+
+        let _ = std::fs::remove_dir_all(root);
+    });
 }

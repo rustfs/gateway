@@ -56,6 +56,25 @@ fn remove_safe_file(path: &Path) {
     }
 }
 
+/// Creates a new regular staging file synchronously and writes `bytes` to completion, flushing
+/// Tokio's write-behind buffer before returning so a subsequent `rename` or read never observes
+/// an in-flight, empty, or truncated write.
+pub(super) async fn create_and_write_file(path: &Path, bytes: &[u8]) -> Result<(), HandlerError> {
+    let std_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|_| storage_error())?;
+    let mut file = tokio::fs::File::from_std(std_file);
+    tokio::io::AsyncWriteExt::write_all(&mut file, bytes)
+        .await
+        .map_err(|_| storage_error())?;
+    tokio::io::AsyncWriteExt::flush(&mut file)
+        .await
+        .map_err(|_| storage_error())?;
+    Ok(())
+}
+
 /// Removes a staging directory on drop unless disarmed after publication or explicit removal.
 pub(super) struct TempDirGuard {
     path: Option<PathBuf>,

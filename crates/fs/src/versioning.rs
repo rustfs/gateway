@@ -472,17 +472,9 @@ impl FsBackend {
         };
         let (tag, size) = match (body, object_metadata) {
             (Some(bytes), Some((tag, size))) => {
-                // Open the staging file synchronously before awaiting so no blocking thread can
-                // race with `TempDirGuard::drop` creating a new entry inside `temporary`.
-                let std_file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(temporary.join(BODY_FILE))
-                    .map_err(|_| storage_error())?;
-                let mut file = tokio::fs::File::from_std(std_file);
-                tokio::io::AsyncWriteExt::write_all(&mut file, bytes)
-                    .await
-                    .map_err(|_| storage_error())?;
+                // Open synchronously and flush to completion before renaming so neither cancellation
+                // cleanup nor an immediate post-rename read can observe an in-flight write.
+                super::staging::create_and_write_file(&temporary.join(BODY_FILE), bytes).await?;
                 (tag, size)
             }
             _ => (String::new(), 0),
@@ -490,15 +482,7 @@ impl FsBackend {
         // Written into the temporary directory, so the tags a write carried become visible in
         // the same rename as the version itself — never a version first and its tags later.
         if !attributes.tags.is_empty() {
-            let std_file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(temporary.join(TAGS_FILE))
-                .map_err(|_| storage_error())?;
-            let mut file = tokio::fs::File::from_std(std_file);
-            tokio::io::AsyncWriteExt::write_all(&mut file, serialize_tags(&attributes.tags).as_ref())
-                .await
-                .map_err(|_| storage_error())?;
+            super::staging::create_and_write_file(&temporary.join(TAGS_FILE), serialize_tags(&attributes.tags).as_ref()).await?;
         }
         let record = encode_version_record(&VersionRecord {
             path: destination.clone(),
@@ -526,16 +510,7 @@ impl FsBackend {
             tests::block_version_record_write(&temporary);
             super::staging::test_hooks::maybe_pause("publish_version").await;
         }
-        let std_record = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(temporary.join(RECORD_FILE))
-            .map_err(|_| storage_error())?;
-        let mut record_file = tokio::fs::File::from_std(std_record);
-        tokio::io::AsyncWriteExt::write_all(&mut record_file, record.as_bytes())
-            .await
-            .map_err(|_| storage_error())?;
-        drop(record_file);
+        super::staging::create_and_write_file(&temporary.join(RECORD_FILE), record.as_bytes()).await?;
         std::fs::rename(&temporary, &destination).map_err(|_| storage_error())?;
         temp_guard.disarm();
         self.read_version_record(destination).await

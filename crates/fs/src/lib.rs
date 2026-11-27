@@ -416,6 +416,7 @@ impl FsBackend {
         let mut temp_guard = staging::TempFileGuard::adopt(temporary.clone());
         let mut file = tokio::fs::File::from_std(std_file);
         file.write_all(bytes).await.map_err(|_| storage_error())?;
+        file.flush().await.map_err(|_| storage_error())?;
         file.sync_all().await.map_err(|_| storage_error())?;
         drop(file);
         #[cfg(test)]
