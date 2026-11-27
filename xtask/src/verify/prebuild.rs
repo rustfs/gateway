@@ -242,6 +242,34 @@ mod tests {
     }
 
     #[test]
+    fn n_deferred_trybuild_and_timing_filters_never_leak_into_core_or_sig_prebuild() {
+        assert_eq!(
+            prebuild_commands(&crate_step_batches("rustfs-gateway-core"), crate_case("rustfs-gateway-core")),
+            vec![
+                owned(&["test", "-p", "rustfs-gateway-conformance", "--lib", "--no-run"]),
+                owned(&[
+                    "test",
+                    "-p",
+                    "rustfs-gateway-core",
+                    "--lib",
+                    "--test",
+                    "integration",
+                    "--no-run"
+                ]),
+                owned(&["clippy", "-p", "rustfs-gateway-core", "--all-targets", "--", "-D", "warnings"]),
+            ]
+        );
+        assert_eq!(
+            prebuild_commands(&crate_step_batches("rustfs-gateway-sig"), crate_case("rustfs-gateway-sig")),
+            vec![
+                owned(&["test", "-p", "rustfs-gateway-conformance", "--lib", "--no-run"]),
+                owned(&["test", "-p", "rustfs-gateway-sig", "--no-run"]),
+                owned(&["clippy", "-p", "rustfs-gateway-sig", "--all-targets", "--", "-D", "warnings"]),
+            ]
+        );
+    }
+
+    #[test]
     fn conformance_prebuild_keeps_the_library_and_allocation_harness_in_both_steps() {
         assert_eq!(
             prebuild_commands(&crate_step_batches("rustfs-gateway-conformance"), None),

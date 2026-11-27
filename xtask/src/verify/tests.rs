@@ -19,6 +19,8 @@
 use super::budget::builds_inside_budget;
 use super::*;
 
+mod trybuild_scope;
+
 #[test]
 fn the_facade_accepts_its_current_and_legacy_crate_names() {
     assert_eq!(package_name("rustfs-gateway"), "rustfs-gateway");
@@ -142,11 +144,19 @@ fn conformance_fast_scope_keeps_allocation_contracts_and_leaves_corpus_in_the_wo
 fn sig_fast_scope_keeps_statistical_timing_contracts_in_the_workspace_gate() {
     let batches = crate_step_batches("rustfs-gateway-sig");
     let timing = include_str!("../../../crates/sig/tests/timing.rs");
+    let compile_fail = include_str!("../../../crates/sig/tests/compile_fail.rs");
     let statistical_tests = [
         "c_sig_0552_sigv2_difference_position_does_not_change_the_latency",
         "c_sig_0111_an_unknown_key_costs_the_same_as_a_bad_signature",
         "a_match_and_a_mismatch_cost_the_same",
         "c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latency",
+    ];
+    let compile_fail_tests = [
+        "p2_01_compile_time_boundaries_are_not_openable",
+        "p2_02_compile_time_boundaries_are_not_openable",
+        "p2_03_compile_time_boundaries_are_not_openable",
+        "p2_04_compile_time_boundaries_are_not_openable",
+        "p2_06_compile_time_boundaries_are_not_openable",
     ];
 
     assert_eq!(batches.len(), 1);
@@ -154,6 +164,12 @@ fn sig_fast_scope_keeps_statistical_timing_contracts_in_the_workspace_gate() {
     let test_step = &batches[0][0];
     for test in statistical_tests {
         assert!(timing.contains(&format!("fn {test}")), "the workspace timing contract must remain active");
+    }
+    for test in compile_fail_tests {
+        assert!(
+            compile_fail.contains(&format!("fn {test}")),
+            "the workspace compile-fail contract must remain active"
+        );
     }
     assert_eq!(
         test_step,
@@ -170,6 +186,16 @@ fn sig_fast_scope_keeps_statistical_timing_contracts_in_the_workspace_gate() {
             "timing::a_match_and_a_mismatch_cost_the_same",
             "--skip",
             "timing::c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latency",
+            "--skip",
+            "compile_fail::p2_01_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_02_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_03_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_04_compile_time_boundaries_are_not_openable",
+            "--skip",
+            "compile_fail::p2_06_compile_time_boundaries_are_not_openable",
             "--exact",
         ]
         .into_iter()
@@ -187,6 +213,15 @@ fn core_fast_scope_runs_both_runtime_targets_concurrently() {
 
     assert_eq!(batches.len(), 1);
     assert_eq!(steps.len(), 2);
+    assert!(
+        include_str!("../../../crates/core/tests/compile_fail.rs").contains("fn compile_time_contracts_are_not_openable()"),
+        "the workspace compile-fail contract must remain active"
+    );
+    assert!(
+        include_str!("../../../crates/core/tests/operation_spec_semver.rs")
+            .contains("fn c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary()"),
+        "the workspace operation-spec semver contract must remain active"
+    );
     assert_eq!(
         steps[0],
         [
@@ -199,6 +234,8 @@ fn core_fast_scope_runs_both_runtime_targets_concurrently() {
             "--",
             "--skip",
             "compile_fail::compile_time_contracts_are_not_openable",
+            "--skip",
+            "operation_spec_semver::c_dto_n008_operation_spec_requires_its_builder_across_a_crate_boundary",
         ]
         .into_iter()
         .map(str::to_owned)
