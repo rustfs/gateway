@@ -684,7 +684,11 @@ impl FsBackend {
     }
 
     pub(super) fn read_upload_record(&self, bucket: &str, upload_id: &str) -> Option<UploadRecord> {
-        self.decode_upload_record(&self.upload_path(bucket, upload_id)).ok()
+        let upload = self.upload_path(bucket, upload_id);
+        if matches!(std::fs::symlink_metadata(&upload), Err(error) if error.kind() == std::io::ErrorKind::NotFound) {
+            return None;
+        }
+        self.decode_upload_record(&upload).ok()
     }
 
     pub(super) async fn active_upload_records(&self, bucket: &str) -> Result<Vec<UploadRecord>, HandlerError> {

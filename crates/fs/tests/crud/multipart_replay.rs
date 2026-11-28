@@ -113,3 +113,71 @@ async fn n_an_overwritten_or_unknown_completion_is_no_such_upload() {
     let earlier = complete(&service, "replay", "key", &upload_id, &[(1, later_part.as_str())]).await;
     assert_eq!(code(&earlier).as_deref(), Some("NoSuchUpload"), "{}", text(&earlier));
 }
+
+/// Negative — an unawaited `CompleteMultipartUpload` racing with rapid `PutObject` overwrites and
+/// `GetObject` reads on the same key in a never-versioned bucket (the `aws-sdk-java-v2` Mint
+/// `uploadMultiPartAsync_test` -> `uploadObjectVersions_test` pattern) must never answer `500` or
+/// leave an orphaned `v-*/completion` directory behind (rustfs/gateway#1083).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn n_unawaited_multipart_completion_racing_put_and_get_never_returns_500() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    let service = Arc::new(service);
+    create_bucket(&service, "shared").await;
+    let part_payload = Bytes::from(vec![b'M'; 64 * 1024]);
+    let versions_dir = root.0.join(format!("b-{}", hex::encode("shared"))).join("versions");
+
+    for iter in 0..6 {
+        let upload_id = initiate(&service, "shared", "testobject").await;
+        let part_response = exchange(
+            &service,
+            signed(
+                http::Method::PUT,
+                &format!("/shared/testobject?partNumber=1&uploadId={upload_id}"),
+                part_payload.clone(),
+            ),
+        )
+        .await;
+        assert_eq!(part_response.status(), 200, "iter {iter}: {}", text(&part_response));
+        let part_etag = header(&part_response, "etag")
+            .expect("part etag")
+            .to_str()
+            .expect("ascii etag")
+            .to_owned();
+
+        let completion_service = Arc::clone(&service);
+        let completion_body = completion(&[(1, part_etag.as_str())]);
+        let completion_target = format!("/shared/testobject?uploadId={upload_id}");
+        let completion_task = tokio::spawn(async move {
+            exchange(&completion_service, signed(http::Method::POST, &completion_target, completion_body)).await
+        });
+
+        for attempt in 0..4 {
+            let body = Bytes::from(format!("overwrite-{iter}-{attempt}"));
+            let put = exchange(&service, signed(http::Method::PUT, "/shared/testobject", body)).await;
+            assert_eq!(put.status(), 200, "iter {iter} put {attempt}: {}", text(&put));
+        }
+        let get = exchange(&service, signed(http::Method::GET, "/shared/testobject", Bytes::new())).await;
+        assert_eq!(get.status(), 200, "iter {iter} get: {}", text(&get));
+
+        let completed = completion_task.await.expect("completion task must not panic");
+        assert_eq!(completed.status(), 200, "iter {iter} complete: {}", text(&completed));
+
+        let entries: Vec<std::path::PathBuf> = std::fs::read_dir(&versions_dir)
+            .expect("read versions dir")
+            .map(|entry| entry.expect("entry").path())
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "iter {iter}: expected a single healthy null version directory, found {entries:?}"
+        );
+        assert!(entries[0].join("record").is_file(), "iter {iter}: version directory missing record file");
+    }
+
+    let final_put = exchange(&service, signed(http::Method::PUT, "/shared/testobject", Bytes::from_static(b"final-ok"))).await;
+    assert_eq!(final_put.status(), 200, "{}", text(&final_put));
+    let final_get = exchange(&service, signed(http::Method::GET, "/shared/testobject", Bytes::new())).await;
+    assert_eq!(final_get.status(), 200, "{}", text(&final_get));
+    assert_eq!(final_get.body().as_ref(), b"final-ok");
+}
