@@ -467,3 +467,158 @@ async fn n_failed_protection_record_write_publishes_nothing() {
     assert_eq!(records[0].version_id, "v1");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Negative — `CompleteMultipartUpload` must stage its `completion` receipt inside the version
+/// directory before atomic publication and hold `version_lock` across tombstone removal so a
+/// concurrent `PutObject` overwriting the same key can never race a post-lock receipt write into
+/// `ENOTEMPTY` / `500 InternalError` or leave an orphaned `v-*/completion` directory
+/// (rustfs/gateway#1083).
+#[tokio::test]
+async fn n_complete_multipart_stages_receipt_and_blocks_put_until_tombstone_removed() {
+    use std::future::Future as _;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Waker};
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use rustfs_gateway::{ByteStream, ObjectKey, UploadIdClaim};
+
+    let (root, backend) = backend_with_bucket("mpu-1083-lock-receipt");
+    let bucket = BucketName::new("racing").expect("bucket");
+    let key = ObjectKey::new("testobject").expect("key");
+
+    // Seed an existing null version so CompleteMultipartUpload replaces it and PutObject then
+    // supersedes the multipart-published null version.
+    backend
+        .publish_object(
+            "racing",
+            "testobject",
+            b"prior",
+            &etag(b"prior").expect("tag"),
+            &ObjectAttributes::default(),
+        )
+        .await
+        .expect("seed prior null");
+
+    let part_body = b"multipart-payload";
+    let upload_id = backend
+        .create_upload_locked(&bucket, &key, None, &ObjectAttributes::default())
+        .await
+        .expect("create upload");
+    backend
+        .store_part("racing", &upload_id, 1, part_body)
+        .await
+        .expect("store part");
+    let complete_input = dto::CompleteMultipartUploadInput {
+        bucket: bucket.clone(),
+        key: key.clone(),
+        upload_id: UploadIdClaim::from_wire(upload_id),
+        multipart_upload: dto::CompletedMultipartUpload {
+            parts: vec![dto::CompletedPart {
+                e_tag: Some(etag(part_body).expect("part etag")),
+                part_number: 1,
+                ..dto::CompletedPart::default()
+            }],
+        },
+        ..dto::CompleteMultipartUploadInput::default()
+    };
+
+    let entered = Arc::new(AtomicBool::new(false));
+    let mut complete_fut = Box::pin(super::super::staging::test_hooks::pause_at(
+        "complete_remove",
+        Arc::clone(&entered),
+        Handler::<dto::CompleteMultipartUpload>::call(backend.as_ref(), Req::new(complete_input, sse_proof())),
+    ));
+    for _ in 0..4096 {
+        let mut cx = Context::from_waker(Waker::noop());
+        if Pin::as_mut(&mut complete_fut).poll(&mut cx).is_ready() || entered.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    assert!(entered.load(Ordering::SeqCst), "completion did not reach post-publish tombstone removal");
+
+    // Invariant 1: the completion receipt is already present inside the published version
+    // directory before tombstone cleanup or lock release — never written post-lock.
+    let published_dirs: Vec<std::path::PathBuf> = std::fs::read_dir(backend.versions_path("racing"))
+        .expect("read versions")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    assert_eq!(published_dirs.len(), 1, "expected exactly one published null version: {published_dirs:?}");
+    let published_dir = published_dirs[0].clone();
+    assert!(
+        published_dir.join("completion").is_file(),
+        "completion receipt must be staged before atomic rename and lock release"
+    );
+    assert!(published_dir.join(RECORD_FILE).is_file());
+    assert!(published_dir.join(BODY_FILE).is_file());
+
+    // Invariant 2: a concurrent PutObject on the same key must wait while CompleteMultipartUpload
+    // still holds version_lock across tombstone cleanup.
+    let put_backend = Arc::clone(&backend);
+    let put_bucket = bucket.clone();
+    let put_key = key.clone();
+    let put_task = tokio::spawn(async move {
+        let input = dto::PutObjectInput {
+            bucket: put_bucket,
+            key: put_key,
+            body: Some(ByteStream::from_bytes(Bytes::from_static(b"overwrite-1"))),
+            ..dto::PutObjectInput::default()
+        };
+        Handler::<dto::PutObject>::call(put_backend.as_ref(), Req::new(input, sse_proof())).await
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !put_task.is_finished(),
+        "PutObject must wait while CompleteMultipartUpload still holds version_lock during tombstone cleanup"
+    );
+
+    // Dropping the paused completion cleans the tombstone and releases version_lock; the queued
+    // PutObject must then succeed with 200 and retire the superseded multipart version cleanly.
+    drop(complete_fut);
+    let put_response = put_task
+        .await
+        .expect("PutObject task must not panic")
+        .expect("PutObject after completion must succeed without 500");
+    assert_eq!(put_response.status(), 200);
+    assert!(
+        !published_dir.exists(),
+        "superseded multipart version directory must be completely removed with no orphan completion file"
+    );
+    let leftover_tombstones: Vec<String> = std::fs::read_dir(backend.uploads_path("racing"))
+        .expect("read uploads")
+        .filter_map(|entry| {
+            let name = entry.expect("entry").file_name().to_string_lossy().into_owned();
+            name.starts_with(".complete-").then_some(name)
+        })
+        .collect();
+    assert!(leftover_tombstones.is_empty(), "tombstone leaked: {leftover_tombstones:?}");
+
+    // Follow-up PutObject and GetObject must observe a single healthy version record.
+    let follow_up = dto::PutObjectInput {
+        bucket,
+        key,
+        body: Some(ByteStream::from_bytes(Bytes::from_static(b"overwrite-2"))),
+        ..dto::PutObjectInput::default()
+    };
+    let follow_up_resp = Handler::<dto::PutObject>::call(backend.as_ref(), Req::new(follow_up, sse_proof()))
+        .await
+        .expect("follow-up PutObject must succeed");
+    assert_eq!(follow_up_resp.status(), 200);
+    let records = backend
+        .version_records("racing")
+        .await
+        .expect("version records remain healthy");
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        backend
+            .representation("racing", "testobject", None)
+            .await
+            .expect("read")
+            .bytes,
+        b"overwrite-2"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

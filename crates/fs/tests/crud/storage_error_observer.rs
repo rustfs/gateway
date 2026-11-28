@@ -29,10 +29,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::dto::{
-    CreateBucket, CreateBucketInput, DeleteBucket, DeleteBucketInput, DeleteObject, DeleteObjectInput, GetObject, GetObjectInput,
-    HeadBucket, HeadBucketInput, PutObject, PutObjectInput,
+    AbortMultipartUpload, AbortMultipartUploadInput, CreateBucket, CreateBucketInput, DeleteBucket, DeleteBucketInput,
+    DeleteObject, DeleteObjectInput, GetObject, GetObjectInput, HeadBucket, HeadBucketInput, PutObject, PutObjectInput,
 };
-use rustfs_gateway::{BucketName, ByteStream, ErrorCode, Handler, ObjectKey, Req};
+use rustfs_gateway::{BucketName, ByteStream, ErrorCode, Handler, ObjectKey, Req, UploadIdClaim};
 use rustfs_gateway_fs::{FsBackend, set_storage_error_observer};
 
 const CHILD_ENV: &str = "RUSTFS_FS_STORAGE_ERROR_OBSERVER_CHILD";
@@ -172,6 +172,24 @@ async fn isolated_child_probe() {
     )
     .await
     .expect("healthy delete");
+    // Negative: an expected 404 NoSuchUpload lookup (e.g. AbortMultipartUpload on an unknown
+    // upload ID) must not fire the storage_error observer (observed as uploads.rs:568 noise in
+    // Mint run 46083521885).
+    let missing_upload = Handler::<AbortMultipartUpload>::call(
+        &backend,
+        Req::new(
+            AbortMultipartUploadInput {
+                bucket: bucket.clone(),
+                key: key.clone(),
+                upload_id: UploadIdClaim::from_wire("unknown-upload-id".to_owned()),
+                ..AbortMultipartUploadInput::default()
+            },
+            sse_proof(),
+        ),
+    )
+    .await
+    .expect_err("unknown upload id must return NoSuchUpload");
+    assert_eq!(*missing_upload.code(), ErrorCode::NO_SUCH_UPLOAD);
     Handler::<DeleteBucket>::call(
         &backend,
         Req::new(
